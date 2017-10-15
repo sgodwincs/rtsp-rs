@@ -144,6 +144,12 @@ macro_rules! status_codes {
 #[derive(Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct ExtensionStatusCode(u16);
 
+impl From<ExtensionStatusCode> for u16 {
+    fn from(value: ExtensionStatusCode) -> u16 {
+        value.0
+    }
+}
+
 impl StatusCode {
     /// Returns the class that this status code falls under.
     /// 
