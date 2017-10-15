@@ -1,0 +1,6 @@
+[package]
+authors = ["Scott Godwin <sgodwincs@gmail.com>"]
+name = "rtsp"
+version = "0.1.0"
+
+[dependencies]
