@@ -4,3 +4,4 @@ name = "rtsp"
 version = "0.1.0"
 
 [dependencies]
+ascii = "0.8.6"
