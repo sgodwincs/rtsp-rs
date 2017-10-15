@@ -166,6 +166,76 @@ impl StatusCode {
             _ => panic!("status code with invalid class")
         }
     }
+
+    /// Returns whether the status code is of the informational class (between [100, 199]).
+    /// 
+    /// # Examples
+    /// 
+    /// ```
+    /// use rtsp::StatusCode;
+    /// 
+    /// assert!(StatusCode::Continue.is_informational());
+    /// assert!(!StatusCode::OK.is_informational());
+    /// ```
+    pub fn is_informational(&self) -> bool {
+        self.class() == StatusCodeClass::Informational
+    }
+
+    /// Returns whether the status code is of the success class (between [200, 299]).
+    /// 
+    /// # Examples
+    /// 
+    /// ```
+    /// use rtsp::StatusCode;
+    /// 
+    /// assert!(StatusCode::OK.is_success());
+    /// assert!(!StatusCode::NotFound.is_success());
+    /// ```
+    pub fn is_success(&self) -> bool {
+        self.class() == StatusCodeClass::Success
+    }
+
+    /// Returns whether the status code is of the redirection class (between [300, 399]).
+    /// 
+    /// # Examples
+    /// 
+    /// ```
+    /// use rtsp::StatusCode;
+    /// 
+    /// assert!(StatusCode::Found.is_redirection());
+    /// assert!(!StatusCode::BadRequest.is_redirection());
+    /// ```
+    pub fn is_redirection(&self) -> bool {
+        self.class() == StatusCodeClass::Redirection
+    }
+    
+    /// Returns whether the status code is of the client error class (between [400, 499]).
+    /// 
+    /// # Examples
+    /// 
+    /// ```
+    /// use rtsp::StatusCode;
+    /// 
+    /// assert!(StatusCode::NotFound.is_client_error());
+    /// assert!(!StatusCode::InternalServerError.is_client_error());
+    /// ```
+    pub fn is_client_error(&self) -> bool {
+        self.class() == StatusCodeClass::ClientError
+    }
+
+    /// Returns whether the status code is of the server error class (between [100, 199]).
+    /// 
+    /// # Examples
+    /// 
+    /// ```
+    /// use rtsp::StatusCode;
+    /// 
+    /// assert!(StatusCode::InternalServerError.is_server_error());
+    /// assert!(!StatusCode::OK.is_server_error());
+    /// ```
+    pub fn is_server_error(&self) -> bool {
+        self.class() == StatusCodeClass::ServerError
+    }
 }
 
 impl fmt::Debug for StatusCode {
