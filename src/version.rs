@@ -44,12 +44,14 @@ impl Default for Version {
 
 impl fmt::Debug for Version {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use Version::*;
+
         write!(
             f,
             "{}",
             match *self {
-                Version::RTSP10 => "RTSP/1.0",
-                Version::RTSP20 => "RTSP/2.0",
+                RTSP10 => "RTSP/1.0",
+                RTSP20 => "RTSP/2.0",
             }
         )
     }
