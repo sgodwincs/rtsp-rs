@@ -44,7 +44,7 @@ impl Default for Version {
 
 impl fmt::Debug for Version {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use Version::*;
+        use self::Version::*;
 
         write!(
             f,
