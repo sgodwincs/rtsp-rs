@@ -118,9 +118,32 @@ pub enum Method {
 #[derive(Clone, Eq, Hash, PartialEq)]
 pub struct ExtensionMethod(AsciiString);
 
+impl ExtensionMethod {
+    /// Returns a `&str` representation of the extension method. The returned string is uppercase
+    /// even if the extension method originally was a non-uppercase method.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #![feature(try_from)]
+    /// #
+    /// # use std::convert::TryFrom;
+    /// #
+    /// use rtsp::Method;
+    ///
+    /// match Method::try_from("extension").unwrap() {
+    ///     Method::Extension(extension) => assert_eq!(extension.as_str(), "EXTENSION"),
+    ///     _ => panic!("expected extension method")
+    /// }
+    /// ```
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
 impl Method {
     /// Returns a `&str` representation of the RTSP method. The returned string is uppercase even
-    /// if the method original a non-uppercase extension method.
+    /// if the method originally was a non-uppercase extension method.
     ///
     /// # Examples
     ///
@@ -148,7 +171,7 @@ impl Method {
             SetParameter => "SET_PARAMETER",
             Setup => "SETUP",
             Teardown => "TEARDOWN",
-            Extension(ref name) => name.0.as_str(),
+            Extension(ref name) => name.as_str(),
         }
     }
 
