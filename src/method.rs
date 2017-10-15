@@ -109,7 +109,7 @@ pub enum Method {
     Teardown,
 
     /// An extension method that is not one of the standardized methods. This is encoded using
-    /// ASCII-US.
+    /// ASCII-US and is always uppercase.
     Extension(ExtensionMethod),
 }
 
