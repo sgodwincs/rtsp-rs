@@ -64,11 +64,6 @@ macro_rules! status_codes {
             Extension(ExtensionStatusCode)
         }
 
-        /// A wrapper type used to avoid users creating extension status codes that are actually
-        /// standardized status codes.
-        #[derive(Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd)]
-        pub struct ExtensionStatusCode(u16);
-
         impl StatusCode {
             /// Get the standardised "reason-phrase" for this status code.
             ///
@@ -143,6 +138,11 @@ macro_rules! status_codes {
         }
     }
 }
+
+/// A wrapper type used to avoid users creating extension status codes that are actually
+/// standardized status codes.
+#[derive(Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct ExtensionStatusCode(u16);
 
 impl StatusCode {
     /// Returns the class that this status code falls under.
