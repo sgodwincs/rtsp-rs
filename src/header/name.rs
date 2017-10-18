@@ -255,6 +255,16 @@ impl fmt::Display for HeaderName {
     }
 }
 
+/// Provides a fallible conversion from a byte slice to a `HeaderName`. Note that you cannot do the
+/// following:
+///
+/// ```compile_fail
+/// let allow = HeaderName::try_from(b"Allow").unwrap();
+/// ```
+///
+/// This is because `b"Allow"` is of type `&[u8; 5]` and so it must be converted to `&[u8]` in order
+/// to perform the conversion. Another `TryFrom` implementation from `&[u8, N: usize]` will be
+/// provided once constant generics land on nightly.
 impl<'a> TryFrom<&'a [u8]> for HeaderName {
     type Error = InvalidHeaderName;
 

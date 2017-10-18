@@ -341,7 +341,7 @@ impl fmt::Display for Method {
 /// following:
 ///
 /// ```compile_fail
-/// let ok = Method::try_from(b"PLAY").unwrap();
+/// let play = Method::try_from(b"PLAY").unwrap();
 /// ```
 ///
 /// This is because `b"PLAY"` is of type `&[u8; 4]` and so it must be converted to `&[u8]` in order
