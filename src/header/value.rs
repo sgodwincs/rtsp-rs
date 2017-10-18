@@ -1,0 +1,249 @@
+//! RTSP Header Value
+
+use std::ascii::AsciiExt;
+use std::convert::TryFrom;
+use std::error::Error;
+use std::{fmt, str};
+
+/// An RTSP header value that is UTF-8 encoded.
+#[derive(Clone, Eq, Hash, PartialEq)]
+pub struct HeaderValue(String);
+
+impl HeaderValue {
+    /// Converts a `HeaderValue` to a byte slice.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #![feature(try_from)]
+    /// #
+    /// # use std::convert::TryFrom;
+    /// #
+    /// use rtsp::HeaderValue;
+    ///
+    /// let header_value = HeaderValue::try_from("value").unwrap();
+    /// assert_eq!(header_value.as_bytes(), b"value")
+    /// ```
+    pub fn as_bytes(&self) -> &[u8] {
+        self.0.as_bytes()
+    }
+
+    /// Returns a `&str` representation of the header value.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #![feature(try_from)]
+    /// #
+    /// # use std::convert::TryFrom;
+    /// #
+    /// use rtsp::HeaderValue;
+    ///
+    /// let header_value = HeaderValue::try_from("value").unwrap();
+    /// assert_eq!(header_value.as_str(), "value")
+    /// ```
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+
+    /// Returns whether or not the length of the header value is 0.
+    ///
+    /// This length is in bytes.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #![feature(try_from)]
+    /// #
+    /// # use std::convert::TryFrom;
+    /// #
+    /// use rtsp::HeaderValue;
+    ///
+    /// let header_value = HeaderValue::try_from("value").unwrap();
+    /// assert_eq!(header_value.is_empty(), false);
+    /// ```
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Returns the length of `self`.
+    ///
+    /// This length is in bytes.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #![feature(try_from)]
+    /// #
+    /// # use std::convert::TryFrom;
+    /// #
+    /// use rtsp::HeaderValue;
+    ///
+    /// let header_value = HeaderValue::try_from("value").unwrap();
+    /// assert_eq!(header_value.len(), 5);
+    /// ```
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+}
+
+impl fmt::Debug for HeaderValue {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl fmt::Display for HeaderValue {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl<'a> TryFrom<&'a str> for HeaderValue {
+    type Error = InvalidHeaderValue;
+
+    /// Converts a `&str` to an RTSP header value. The header value is encoded using UTF-8 with some
+    /// slight restrictions. Only visible characters from the ASCII character set are allowed and
+    /// line breaks `\r\n` must be followed by either a space or tab.
+    ///
+    /// All case sensitivity is perserved.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #![feature(try_from)]
+    /// #
+    /// # use std::convert::TryFrom;
+    /// #
+    /// use rtsp::HeaderValue;
+    ///
+    /// assert_eq!(HeaderValue::try_from("test").unwrap().as_str(), "test");
+    /// assert_eq!(HeaderValue::try_from("test\r\n ").unwrap().as_str(), "test\r\n ");
+    ///
+    /// assert!(HeaderValue::try_from("test \u{000}").is_err());
+    /// assert!(HeaderValue::try_from("test\r\n").is_err());
+    /// ```
+    fn try_from(value: &'a str) -> Result<Self, Self::Error> {
+        #[derive(Clone, Debug, Eq, Hash, PartialEq)]
+        enum ExpectState {
+            Any,
+            LF,
+            SpaceOrTab,
+        }
+
+        let mut expect_state = ExpectState::Any;
+
+        for c in value.chars() {
+            match expect_state {
+                ExpectState::Any => if c.is_ascii() {
+                    if c == '\r' {
+                        expect_state = ExpectState::LF;
+                    } else if (c < ' ' || c > '~') && c != '\t' {
+                        return Err(InvalidHeaderValue);
+                    }
+                },
+                ExpectState::LF => match c {
+                    '\n' => expect_state = ExpectState::SpaceOrTab,
+                    _ => return Err(InvalidHeaderValue),
+                },
+                ExpectState::SpaceOrTab => match c {
+                    ' ' | '\t' => expect_state = ExpectState::Any,
+                    _ => return Err(InvalidHeaderValue),
+                },
+            }
+        }
+
+        if expect_state != ExpectState::Any {
+            Err(InvalidHeaderValue)
+        } else {
+            Ok(HeaderValue(value.to_string()))
+        }
+    }
+}
+
+/// Provides a fallible conversion from a byte slice to a `HeaderValue`. Note that you cannot do the
+/// following:
+///
+/// ```compile_fail
+/// let header_value = HeaderValue::try_from(b"value").unwrap();
+/// ```
+///
+/// This is because `b"value"` is of type `&[u8; 5]` and so it must be converted to `&[u8]` in order
+/// to perform the conversion. Another `TryFrom` implementation from `&[u8, N: usize]` will be
+/// provided once constant generics land on nightly.
+impl<'a> TryFrom<&'a [u8]> for HeaderValue {
+    type Error = InvalidHeaderValue;
+
+    /// Converts a `&[u8]` to an RTSP header value. The header value is encoded using UTF-8 with
+    /// some slight restrictions. Only visible characters from the ASCII character set are allowed
+    /// and line breaks `\r\n` must be followed by either a space or tab.
+    ///
+    /// All case sensitivity is perserved.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #![feature(try_from)]
+    /// #
+    /// # use std::convert::TryFrom;
+    /// #
+    /// use rtsp::HeaderValue;
+    ///
+    /// assert_eq!(HeaderValue::try_from(&b"test"[..]).unwrap().as_str(), "test");
+    /// assert_eq!(HeaderValue::try_from(&b"test\r\n "[..]).unwrap().as_str(), "test\r\n ");
+    ///
+    /// assert!(HeaderValue::try_from(&"test \u{000}"[..]).is_err());
+    /// assert!(HeaderValue::try_from(&b"test\r\n"[..]).is_err());
+    /// ```
+    fn try_from(value: &'a [u8]) -> Result<Self, Self::Error> {
+        str::from_utf8(value)
+            .map_err(|_| InvalidHeaderValue)
+            .and_then(HeaderValue::try_from)
+    }
+}
+
+/// A possible error value when converting to a `HeaderValue` from a `&[u8]` or `&str`.
+///
+/// This error indicates the header value was not valid UTF-8, had invalid line breaks, or contained
+/// unallowed ASCII characters (only characters from 0x21 to 0x7E including spaces and tabs).
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct InvalidHeaderValue;
+
+impl fmt::Display for InvalidHeaderValue {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.description())
+    }
+}
+
+impl Error for InvalidHeaderValue {
+    fn description(&self) -> &str {
+        "invalid RTSP header value"
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_try_from_str() {
+        assert_eq!(
+            HeaderValue::try_from("test"),
+            Ok(HeaderValue("test".to_string()))
+        );
+
+        assert_eq!(
+            HeaderValue::try_from("test 1 2\t\t3"),
+            Ok(HeaderValue("test 1 2\t\t3".to_string()))
+        );
+
+        assert_eq!(
+            HeaderValue::try_from("test\r\n 1 2\t\t3"),
+            Ok(HeaderValue("test\r\n 1 2\t\t3".to_string()))
+        );
+
+        assert!(HeaderValue::try_from("test\n1 2\t\t3").is_err());
+        assert!(HeaderValue::try_from("test\r\n1 2\t\t3").is_err());
+        assert!(HeaderValue::try_from("test\n\r 1 2\t\t3").is_err());
+    }
+}

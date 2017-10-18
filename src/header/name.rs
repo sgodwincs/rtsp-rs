@@ -40,6 +40,8 @@ macro_rules! standard_headers {
             ($variant:ident, $name:expr);
         )+
     ) => {
+        /// An RTSP header name. All standardized header names are supported with an ASCII encoded
+        /// extension that is always lowercase.
         #[derive(Clone, Eq, Hash, PartialEq)]
         pub enum HeaderName {
         $(
