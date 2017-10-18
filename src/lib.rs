@@ -9,10 +9,12 @@ macro_rules! byte_map {
     ])
 }
 
+pub mod header;
 pub mod method;
 pub mod status;
 pub mod version;
 
+pub use header::HeaderName;
 pub use method::Method;
 pub use status::{StatusCode, StatusCodeClass};
 pub use version::Version;
