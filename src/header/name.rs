@@ -282,8 +282,8 @@ impl<'a> TryFrom<&'a [u8]> for HeaderName {
     /// let extension = HeaderName::try_from(&b"Ext"[..]).unwrap();
     /// assert_eq!(extension.as_str(), "ext");
     ///
-    /// //let error = Method::try_from(&b"$Ext"[..]);
-    /// //assert!(error.is_err());
+    /// let error = HeaderName::try_from(&b""[..]);
+    /// assert!(error.is_err());
     /// ```
     fn try_from(value: &'a [u8]) -> Result<Self, Self::Error> {
         use self::HeaderName::*;
