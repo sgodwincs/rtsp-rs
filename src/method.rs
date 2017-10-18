@@ -118,6 +118,62 @@ pub enum Method {
 #[derive(Clone, Eq, Hash, PartialEq)]
 pub struct ExtensionMethod(AsciiString);
 
+impl fmt::Debug for ExtensionMethod {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl fmt::Display for ExtensionMethod {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+/// Performs equality checking of a `ExtensionMethod` with a `str`. This check is case insensitive.
+///
+/// # Examples
+///
+/// ```
+/// # #![feature(try_from)]
+/// #
+/// # use std::convert::TryFrom;
+/// #
+/// use rtsp::Method;
+///
+/// match Method::try_from("extension").unwrap() {
+///     Method::Extension(extension) => assert_eq!(extension, *"eXtEnSiOn"),
+///     _ => panic!("expected extension method")
+/// }
+/// ```
+impl PartialEq<str> for ExtensionMethod {
+    fn eq(&self, other: &str) -> bool {
+        self.0 == other.to_ascii_uppercase()
+    }
+}
+
+/// Performs equality checking of a `ExtensionMethod` with a `&str`. This check is case insensitive.
+///
+/// # Examples
+///
+/// ```
+/// # #![feature(try_from)]
+/// #
+/// # use std::convert::TryFrom;
+/// #
+/// use rtsp::Method;
+///
+/// match Method::try_from("extension").unwrap() {
+///     Method::Extension(extension) => assert_eq!(extension, "eXtEnSiOn"),
+///     _ => panic!("expected extension method")
+/// }
+/// ```
+impl<'a> PartialEq<&'a str> for ExtensionMethod {
+    fn eq(&self, other: &&'a str) -> bool {
+        self.0 == (*other).to_ascii_uppercase()
+    }
+}
+
 impl ExtensionMethod {
     /// Returns a `&str` representation of the extension method. The returned string is uppercase
     /// even if the extension method originally was a non-uppercase method.
@@ -231,15 +287,41 @@ impl AsRef<str> for Method {
     }
 }
 
+/// Performs equality checking of a `Method` with a `str`. This check is case insensitive.
+///
+/// # Examples
+///
+/// ```
+/// # #![feature(try_from)]
+/// #
+/// # use std::convert::TryFrom;
+/// #
+/// use rtsp::Method;
+///
+/// assert_eq!(Method::try_from("eXtEnSiOn").unwrap(), *"exTENSION");
+/// ```
 impl PartialEq<str> for Method {
     fn eq(&self, other: &str) -> bool {
-        self.as_ref() == other
+        self.as_ref() == other.to_ascii_uppercase()
     }
 }
 
+/// Performs equality checking of a `Method` with a `&str`. This check is case insensitive.
+///
+/// # Examples
+///
+/// ```
+/// # #![feature(try_from)]
+/// #
+/// # use std::convert::TryFrom;
+/// #
+/// use rtsp::Method;
+///
+/// assert_eq!(Method::try_from("extension").unwrap(), "extension");
+/// ```
 impl<'a> PartialEq<&'a str> for Method {
     fn eq(&self, other: &&'a str) -> bool {
-        self.as_ref() == *other
+        self.as_ref() == (*other).to_ascii_uppercase()
     }
 }
 
