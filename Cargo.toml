@@ -5,3 +5,4 @@ version = "0.1.0"
 
 [dependencies]
 ascii = "0.8.6"
+fnv = "1.0.5"

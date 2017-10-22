@@ -40,8 +40,10 @@ macro_rules! standard_headers {
             ($variant:ident, $name:expr);
         )+
     ) => {
-        /// An RTSP header name. All standardized header names are supported with an ASCII encoded
-        /// extension that is always lowercase.
+        /// An RTSP header name.
+        /// 
+        /// All standardized header names are supported with an ASCII encoded extension that is
+        /// always lowercase.
         #[derive(Clone, Eq, Hash, PartialEq)]
         pub enum HeaderName {
         $(
@@ -74,92 +76,6 @@ macro_rules! standard_headers {
             assert_eq!(header_name.as_str(), $name);
         )+
         }
-    }
-}
-
-/// A wrapper type used to avoid users creating extension header names that are actually
-/// standardized header names.
-#[derive(Clone, Eq, Hash, PartialEq)]
-pub struct ExtensionHeaderName(AsciiString);
-
-impl fmt::Debug for ExtensionHeaderName {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl fmt::Display for ExtensionHeaderName {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-/// Performs equality checking of a `ExtensionHeaderName` with a `str`. This check is case
-/// insensitive.
-///
-/// # Examples
-///
-/// ```
-/// # #![feature(try_from)]
-/// #
-/// # use std::convert::TryFrom;
-/// #
-/// use rtsp::HeaderName;
-///
-/// match HeaderName::try_from("extension").unwrap() {
-///     HeaderName::Extension(extension) => assert_eq!(extension, *"eXtEnSiOn"),
-///     _ => panic!("expected extension header name")
-/// }
-/// ```
-impl PartialEq<str> for ExtensionHeaderName {
-    fn eq(&self, other: &str) -> bool {
-        self.0 == other.to_ascii_lowercase()
-    }
-}
-
-/// Performs equality checking of a `ExtensionHeaderName` with a `&str`. This check is case
-/// insensitive.
-///
-/// # Examples
-///
-/// ```
-/// # #![feature(try_from)]
-/// #
-/// # use std::convert::TryFrom;
-/// #
-/// use rtsp::HeaderName;
-///
-/// match HeaderName::try_from("extension").unwrap() {
-///     HeaderName::Extension(extension) => assert_eq!(extension, "eXtEnSiOn"),
-///     _ => panic!("expected extension header name")
-/// }
-/// ```
-impl<'a> PartialEq<&'a str> for ExtensionHeaderName {
-    fn eq(&self, other: &&'a str) -> bool {
-        self.0 == (*other).to_ascii_lowercase()
-    }
-}
-
-impl ExtensionHeaderName {
-    /// Returns a `&str` representation of the extension header name. The returned string is
-    /// lowercase even if the extension header name originally was a non-lowercase header name.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # #![feature(try_from)]
-    /// #
-    /// # use std::convert::TryFrom;
-    /// #
-    /// use rtsp::HeaderName;
-    ///
-    /// match HeaderName::try_from("extension").unwrap() {
-    ///     HeaderName::Extension(extension) => assert_eq!(extension.as_str(), "extension"),
-    ///     _ => panic!("expected extension header name")
-    /// }
-    /// ```
-    pub fn as_str(&self) -> &str {
-        self.0.as_str()
     }
 }
 
@@ -199,11 +115,48 @@ impl HeaderName {
 
         true
     }
+
+    /// Only used for `HeaderMap`.
+    pub(super) fn from_static<F, U>(header: &'static str, f: F) -> U
+    where
+        F: FnOnce(HeaderName) -> U,
+    {
+        let header =
+            HeaderName::try_from(header.as_bytes()).expect("static str is invalid header name");
+        f(header)
+    }
+
+    /// Only used for `HeaderMap`.
+    pub(super) fn from_bytes<F, U>(header: &[u8], f: F) -> Result<U, InvalidHeaderName>
+    where
+        F: FnOnce(HeaderName) -> U,
+    {
+        let header = HeaderName::try_from(header)?;
+        Ok(f(header))
+    }
+}
+
+impl AsRef<[u8]> for HeaderName {
+    fn as_ref(&self) -> &[u8] {
+        self.as_str().as_bytes()
+    }
 }
 
 impl AsRef<str> for HeaderName {
     fn as_ref(&self) -> &str {
         self.as_str()
+    }
+}
+
+impl fmt::Debug for HeaderName {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+impl fmt::Display for HeaderName {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.as_str())
     }
 }
 
@@ -222,7 +175,13 @@ impl AsRef<str> for HeaderName {
 /// ```
 impl PartialEq<str> for HeaderName {
     fn eq(&self, other: &str) -> bool {
-        self.as_ref() == other.to_ascii_lowercase()
+        self.as_str() == other.to_ascii_lowercase()
+    }
+}
+
+impl PartialEq<HeaderName> for str {
+    fn eq(&self, other: &HeaderName) -> bool {
+        self.to_ascii_lowercase() == other.as_str()
     }
 }
 
@@ -241,19 +200,43 @@ impl PartialEq<str> for HeaderName {
 /// ```
 impl<'a> PartialEq<&'a str> for HeaderName {
     fn eq(&self, other: &&'a str) -> bool {
-        self.as_ref() == (*other).to_ascii_lowercase()
+        self.as_str() == (*other).to_ascii_lowercase()
     }
 }
 
-impl fmt::Debug for HeaderName {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.as_ref())
+impl<'a> PartialEq<HeaderName> for &'a str {
+    fn eq(&self, other: &HeaderName) -> bool {
+        self.to_ascii_lowercase() == other.as_str()
     }
 }
 
-impl fmt::Display for HeaderName {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.as_ref())
+impl PartialEq<String> for HeaderName {
+    fn eq(&self, other: &String) -> bool {
+        self.as_str() == other.as_str()
+    }
+}
+
+impl PartialEq<HeaderName> for String {
+    fn eq(&self, other: &HeaderName) -> bool {
+        self.as_str() == other.as_str()
+    }
+}
+
+impl<'a> PartialEq<&'a HeaderName> for HeaderName {
+    fn eq(&self, other: &&'a HeaderName) -> bool {
+        *self == **other
+    }
+}
+
+impl<'a> PartialEq<HeaderName> for &'a HeaderName {
+    fn eq(&self, other: &HeaderName) -> bool {
+        *other == *self
+    }
+}
+
+impl<'a> From<&'a HeaderName> for HeaderName {
+    fn from(src: &'a HeaderName) -> HeaderName {
+        src.clone()
     }
 }
 
@@ -299,6 +282,10 @@ impl<'a> TryFrom<&'a [u8]> for HeaderName {
     /// ```
     fn try_from(value: &'a [u8]) -> Result<Self, Self::Error> {
         use self::HeaderName::*;
+
+        if value.len() > super::MAX_HEADER_NAME_LENGTH {
+            return Err(InvalidHeaderName);
+        }
 
         let value = value.to_ascii_lowercase();
 
@@ -428,6 +415,92 @@ impl<'a> TryFrom<&'a str> for HeaderName {
 
     fn try_from(value: &'a str) -> Result<Self, Self::Error> {
         HeaderName::try_from(value.as_bytes())
+    }
+}
+
+/// A wrapper type used to avoid users creating extension header names that are actually
+/// standardized header names.
+#[derive(Clone, Eq, Hash, PartialEq)]
+pub struct ExtensionHeaderName(AsciiString);
+
+impl fmt::Debug for ExtensionHeaderName {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl fmt::Display for ExtensionHeaderName {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+/// Performs equality checking of a `ExtensionHeaderName` with a `str`. This check is case
+/// insensitive.
+///
+/// # Examples
+///
+/// ```
+/// # #![feature(try_from)]
+/// #
+/// # use std::convert::TryFrom;
+/// #
+/// use rtsp::HeaderName;
+///
+/// match HeaderName::try_from("extension").unwrap() {
+///     HeaderName::Extension(extension) => assert_eq!(extension, *"eXtEnSiOn"),
+///     _ => panic!("expected extension header name")
+/// }
+/// ```
+impl PartialEq<str> for ExtensionHeaderName {
+    fn eq(&self, other: &str) -> bool {
+        self.0 == other.to_ascii_lowercase()
+    }
+}
+
+/// Performs equality checking of a `ExtensionHeaderName` with a `&str`. This check is case
+/// insensitive.
+///
+/// # Examples
+///
+/// ```
+/// # #![feature(try_from)]
+/// #
+/// # use std::convert::TryFrom;
+/// #
+/// use rtsp::HeaderName;
+///
+/// match HeaderName::try_from("extension").unwrap() {
+///     HeaderName::Extension(extension) => assert_eq!(extension, "eXtEnSiOn"),
+///     _ => panic!("expected extension header name")
+/// }
+/// ```
+impl<'a> PartialEq<&'a str> for ExtensionHeaderName {
+    fn eq(&self, other: &&'a str) -> bool {
+        self.0 == (*other).to_ascii_lowercase()
+    }
+}
+
+impl ExtensionHeaderName {
+    /// Returns a `&str` representation of the extension header name. The returned string is
+    /// lowercase even if the extension header name originally was a non-lowercase header name.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #![feature(try_from)]
+    /// #
+    /// # use std::convert::TryFrom;
+    /// #
+    /// use rtsp::HeaderName;
+    ///
+    /// match HeaderName::try_from("extension").unwrap() {
+    ///     HeaderName::Extension(extension) => assert_eq!(extension.as_str(), "extension"),
+    ///     _ => panic!("expected extension header name")
+    /// }
+    /// ```
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
     }
 }
 

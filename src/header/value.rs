@@ -3,10 +3,10 @@
 use std::ascii::AsciiExt;
 use std::convert::TryFrom;
 use std::error::Error;
-use std::{fmt, str};
+use std::{cmp, fmt, str};
 
 /// An RTSP header value that is UTF-8 encoded.
-#[derive(Clone, Eq, Hash, PartialEq)]
+#[derive(Clone, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct HeaderValue(String);
 
 impl HeaderValue {
@@ -87,6 +87,18 @@ impl HeaderValue {
     }
 }
 
+impl AsRef<[u8]> for HeaderValue {
+    fn as_ref(&self) -> &[u8] {
+        self.as_bytes()
+    }
+}
+
+impl AsRef<str> for HeaderValue {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
 impl fmt::Debug for HeaderValue {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self.0)
@@ -96,6 +108,120 @@ impl fmt::Debug for HeaderValue {
 impl fmt::Display for HeaderValue {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self.0)
+    }
+}
+
+impl PartialEq<[u8]> for HeaderValue {
+    fn eq(&self, other: &[u8]) -> bool {
+        self.0.as_bytes() == other
+    }
+}
+
+impl PartialEq<HeaderValue> for [u8] {
+    fn eq(&self, other: &HeaderValue) -> bool {
+        *other == *self
+    }
+}
+
+impl PartialEq<str> for HeaderValue {
+    fn eq(&self, other: &str) -> bool {
+        self.0 == other
+    }
+}
+
+impl PartialEq<HeaderValue> for str {
+    fn eq(&self, other: &HeaderValue) -> bool {
+        *other == *self
+    }
+}
+
+impl<'a> PartialEq<HeaderValue> for &'a str {
+    fn eq(&self, other: &HeaderValue) -> bool {
+        *other == *self
+    }
+}
+
+impl PartialEq<String> for HeaderValue {
+    fn eq(&self, other: &String) -> bool {
+        self.0 == *other
+    }
+}
+
+impl PartialEq<HeaderValue> for String {
+    fn eq(&self, other: &HeaderValue) -> bool {
+        *other == *self
+    }
+}
+
+impl<'a> PartialEq<HeaderValue> for &'a HeaderValue {
+    fn eq(&self, other: &HeaderValue) -> bool {
+        **self == *other
+    }
+}
+
+impl<'a, T: ?Sized> PartialEq<&'a T> for HeaderValue
+where
+    HeaderValue: PartialEq<T>,
+{
+    fn eq(&self, other: &&'a T) -> bool {
+        *self == **other
+    }
+}
+
+impl PartialOrd<[u8]> for HeaderValue {
+    fn partial_cmp(&self, other: &[u8]) -> Option<cmp::Ordering> {
+        self.as_bytes().partial_cmp(other)
+    }
+}
+
+impl PartialOrd<HeaderValue> for [u8] {
+    fn partial_cmp(&self, other: &HeaderValue) -> Option<cmp::Ordering> {
+        self.partial_cmp(other.as_bytes())
+    }
+}
+
+impl PartialOrd<str> for HeaderValue {
+    fn partial_cmp(&self, other: &str) -> Option<cmp::Ordering> {
+        self.as_str().partial_cmp(other)
+    }
+}
+
+impl PartialOrd<HeaderValue> for str {
+    fn partial_cmp(&self, other: &HeaderValue) -> Option<cmp::Ordering> {
+        self.partial_cmp(other.as_str())
+    }
+}
+
+impl<'a> PartialOrd<HeaderValue> for &'a str {
+    fn partial_cmp(&self, other: &HeaderValue) -> Option<cmp::Ordering> {
+        (*self).partial_cmp(other.as_str())
+    }
+}
+
+impl PartialOrd<String> for HeaderValue {
+    fn partial_cmp(&self, other: &String) -> Option<cmp::Ordering> {
+        self.partial_cmp(other.as_bytes())
+    }
+}
+
+impl PartialOrd<HeaderValue> for String {
+    fn partial_cmp(&self, other: &HeaderValue) -> Option<cmp::Ordering> {
+        self.as_bytes().partial_cmp(other.as_bytes())
+    }
+}
+
+impl<'a> PartialOrd<HeaderValue> for &'a HeaderValue {
+    fn partial_cmp(&self, other: &HeaderValue) -> Option<cmp::Ordering> {
+        (**self).partial_cmp(other)
+    }
+}
+
+impl<'a, T: ?Sized> PartialOrd<&'a T> for HeaderValue
+where
+    HeaderValue: PartialOrd<T>,
+{
+    fn partial_cmp(&self, other: &&'a T) -> Option<cmp::Ordering> {
+        self.partial_cmp(*other)
     }
 }
 
