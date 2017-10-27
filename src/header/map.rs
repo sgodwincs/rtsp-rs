@@ -2,7 +2,9 @@
 //!
 //! Note, this is pretty much directly copied from
 //! [http](https://github.com/hyperium/http/blob/master/src/header/map.rs) with some slight
-//! changes. Original source is MIT licensed.
+//! changes. Original source is MIT licensed. I would prefer that this would be moved into a
+//! separate crate since the Rust ecosystem does not currently have a multimap that maintains
+//! insertion order, but this will suffice for now.
 
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hash, Hasher};
