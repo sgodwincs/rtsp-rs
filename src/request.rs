@@ -1,15 +1,22 @@
+//! RTSP Request Types
+//!
+//! This module contains structs related to RTSP requests, notably the `Request` type itself as well
+//! as a builder to create requests. Typically, you will import the `rtsp::Request` type rather than
+//! reaching into this module itself.
+
 use std::convert::TryFrom;
 use std::fmt;
 use url::Url;
 
-use header::{HeaderMap, HeaderName, HeaderValue, InvalidHeaderName, InvalidHeaderValue};
-use method::{InvalidMethod, Method};
+use header::{HeaderMap, HeaderName, HeaderValue};
+use method::Method;
 use version::Version;
 
 /// Represents an RTSP request.
 ///
 /// An RTSP request consists of a header and a, potentially empty, body. The body component is
 /// generic, enabling arbitrary types to represent the RTSP body.
+#[derive(Clone, Eq, PartialEq)]
 pub struct Request<T> {
     /// The body component of the request. This is generic to support arbitrary content types.
     body: T,
