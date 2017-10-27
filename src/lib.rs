@@ -14,11 +14,13 @@ macro_rules! byte_map {
 pub mod header;
 pub mod method;
 pub mod request;
+pub mod response;
 pub mod status;
 pub mod version;
 
 pub use header::{HeaderMap, HeaderName, HeaderValue};
 pub use method::Method;
 pub use request::Request;
+pub use response::Response;
 pub use status::{StatusCode, StatusCodeClass};
 pub use version::Version;
