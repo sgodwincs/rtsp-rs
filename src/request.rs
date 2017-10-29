@@ -125,8 +125,10 @@ impl<T: fmt::Debug> fmt::Debug for Request<T> {
 /// This type can be used to construct a `Request` through a builder-like pattern.
 #[derive(Clone, Debug)]
 pub struct Builder {
+    /// A stored error used when making a `Request`.
     error: Option<BuilderError>,
 
+    /// A multimap of header names to values that maintains insertion order.
     headers: HeaderMap<HeaderValue>,
 
     /// The RTSP method to be applied to the resource. This can be any standardized RTSP method or
@@ -229,11 +231,15 @@ impl Builder {
     /// Set the RTSP method for this request.
     ///
     /// This function will configure the RTSP method of the `Request` that will be returned from
-    /// `build`. If the given method is not a valid method, an error will be saved and retured when
-    /// the `build` function is invoked.
+    /// `build`.
     ///
     /// This does not have a default value and, as a result, it must be specified before `build` is
     /// called.
+    ///
+    /// # Errors
+    ///
+    /// If the given method is not a valid method, an error will be saved and retured when the
+    /// `build` function is invoked.
     ///
     /// # Examples
     ///
@@ -261,12 +267,15 @@ impl Builder {
     /// Set the RTSP URI for this request.
     ///
     /// This function will configure the RTSP URI of the `Request` that will be returned from
-    /// `build`. A value of `None` specifies that the URI should be set to `"*"`. A given URI must
-    /// have an authority part specified or an error will be saved and returned when the `build`
-    /// function is invoked.
+    /// `build`. A value of `None` specifies that the URI should be set to `"*"`.
     ///
     /// This does not have a default value and, as a result, it must be specified before `build` is
     /// called.
+    ///
+    /// # Errors
+    ///
+    /// A given URI must have an authority part specified or an error will be saved and returned
+    /// when the `build` function is invoked.
     ///
     /// # Examples
     ///
