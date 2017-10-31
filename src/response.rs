@@ -4,7 +4,6 @@
 //! well as a builder to create responses. Typically, you will import the `rtsp::Response` type
 //! rather than reaching into this module itself.
 
-use std::borrow::Cow;
 use std::convert::TryFrom;
 
 use header::{HeaderMap, HeaderName, HeaderValue};
@@ -189,7 +188,7 @@ impl Builder {
     /// ```
     /// use rtsp::*;
     ///
-    /// let response = Response::builder()=
+    /// let response = Response::builder()
     ///     .version(Version::RTSP10)
     ///     .build(())
     ///     .unwrap();
