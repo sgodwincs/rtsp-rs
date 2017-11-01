@@ -41,6 +41,31 @@ impl Response<()> {
     }
 }
 
+impl<T> Response<T> {
+    pub fn body(&self) -> &T {
+        &self.body
+    }
+
+    pub fn headers(&self) -> &HeaderMap<HeaderValue> {
+        &self.headers
+    }
+
+    pub fn reason(&self) -> &str {
+        match self.custom_reason_phrase {
+            Some(ref reason) => reason.as_str(),
+            None => self.status_code.canonical_reason().unwrap(),
+        }
+    }
+
+    pub fn status_code(&self) -> &StatusCode {
+        &self.status_code
+    }
+
+    pub fn version(&self) -> Version {
+        self.version
+    }
+}
+
 /// An RTSP response builder
 ///
 /// This type can be used to construct a `Response` through a builder-like pattern.
