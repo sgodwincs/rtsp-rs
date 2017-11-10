@@ -5,5 +5,10 @@ version = "0.1.0"
 
 [dependencies]
 ascii = "0.8.6"
+bytes = "0.4.5"
 fnv = "1.0.5"
+futures = "0.1.17"
+tokio-io = "0.1.3"
+tokio-proto = "0.1.1"
+tokio-service = "0.1.0"
 url = "1.5.1"
