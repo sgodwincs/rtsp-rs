@@ -100,7 +100,7 @@ impl Builder {
     ///
     /// let response = Builder::new();
     /// ```
-    pub fn new() -> Builder {
+    pub fn new() -> Self {
         Builder::default()
     }
 
@@ -148,7 +148,7 @@ impl Builder {
     ///     .build(())
     ///     .unwrap();
     /// ```
-    pub fn header<K, V>(mut self, key: K, value: V) -> Builder
+    pub fn header<K, V>(mut self, key: K, value: V) -> Self
     where
         HeaderName: TryFrom<K>,
         HeaderValue: TryFrom<V>,
@@ -189,7 +189,7 @@ impl Builder {
     ///     .build(())
     ///     .unwrap();
     /// ```
-    pub fn status_code<T>(mut self, status_code: T) -> Builder
+    pub fn status_code<T>(mut self, status_code: T) -> Self
     where
         StatusCode: TryFrom<T>,
     {
@@ -218,7 +218,7 @@ impl Builder {
     ///     .build(())
     ///     .unwrap();
     /// ```
-    pub fn version(mut self, version: Version) -> Builder {
+    pub fn version(mut self, version: Version) -> Self {
         self.version = version;
         self
     }
@@ -226,7 +226,7 @@ impl Builder {
 
 impl Default for Builder {
     #[inline]
-    fn default() -> Builder {
+    fn default() -> Self {
         Builder {
             custom_reason_phrase: None,
             error: None,

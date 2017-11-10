@@ -157,7 +157,7 @@ impl Builder {
     ///
     /// let request = Builder::new();
     /// ```
-    pub fn new() -> Builder {
+    pub fn new() -> Self {
         Builder::default()
     }
 
@@ -210,7 +210,7 @@ impl Builder {
     ///     .build(())
     ///     .unwrap();
     /// ```
-    pub fn header<K, V>(mut self, key: K, value: V) -> Builder
+    pub fn header<K, V>(mut self, key: K, value: V) -> Self
     where
         HeaderName: TryFrom<K>,
         HeaderValue: TryFrom<V>,
@@ -252,7 +252,7 @@ impl Builder {
     ///     .build(())
     ///     .unwrap();
     /// ```
-    pub fn method<T>(mut self, method: T) -> Builder
+    pub fn method<T>(mut self, method: T) -> Self
     where
         Method: TryFrom<T>,
     {
@@ -288,7 +288,7 @@ impl Builder {
     ///     .build(())
     ///     .unwrap();
     /// ```
-    pub fn uri(mut self, uri: Option<Url>) -> Builder {
+    pub fn uri(mut self, uri: Option<Url>) -> Self {
         match uri {
             Some(uri) => if !uri.has_authority() {
                 self.error = Some(BuilderError::InvalidURI);
@@ -320,7 +320,7 @@ impl Builder {
     ///     .build(())
     ///     .unwrap();
     /// ```
-    pub fn version(mut self, version: Version) -> Builder {
+    pub fn version(mut self, version: Version) -> Self {
         self.version = version;
         self
     }
@@ -328,7 +328,7 @@ impl Builder {
 
 impl Default for Builder {
     #[inline]
-    fn default() -> Builder {
+    fn default() -> Self {
         Builder {
             error: None,
             headers: HeaderMap::new(),

@@ -257,7 +257,7 @@ impl fmt::Display for StatusCode {
 }
 
 impl Default for StatusCode {
-    fn default() -> StatusCode {
+    fn default() -> Self {
         StatusCode::OK
     }
 }
