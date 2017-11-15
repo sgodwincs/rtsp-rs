@@ -23,7 +23,7 @@ use std::convert::{AsRef, TryFrom};
 use std::error::Error;
 use std::fmt;
 
-use is_token;
+use syntax::is_token;
 
 /// An RTSP request method.
 ///

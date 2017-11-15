@@ -6,7 +6,7 @@ use std::convert::TryFrom;
 use std::error::Error;
 use std::fmt;
 
-use is_token;
+use syntax::is_token;
 
 macro_rules! standard_headers {
     (
