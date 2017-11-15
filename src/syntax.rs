@@ -63,25 +63,58 @@ pub fn quoted_string(string: &str) -> Option<&str> {
 }
 
 pub fn trim_whitespace(mut string: &str) -> &str {
-    loop {
-        if string.starts_with(' ') || string.starts_with('\t') {
-            string = &string[1..];
-        } else if string.starts_with("\r\n") {
-            string = &string[2..];
-        } else {
-            break;
-        }
+    let mut old = 0;
+
+    while string.len() != old {
+        string = string.trim_right_matches("\r\n");
+        string = string.trim_right_matches(|c| c == ' ' || c == '\t');
+        old = string.len();
     }
 
-    loop {
-        if string.ends_with(' ') || string.ends_with('\t') {
-            string = &string[..string.len() - 1];
-        } else if string.ends_with("\r\n") {
-            string = &string[..string.len() - 2];
-        } else {
-            break;
-        }
+    old = 0;
+
+    while string.len() != old {
+        string = string.trim_left_matches("\r\n");
+        string = string.trim_left_matches(|c| c == ' ' || c == '\t');
+        old = string.len();
     }
 
     string
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_is_token() {
+        assert_eq!(true, is_token("this-is_a_~token~"));
+        assert_eq!(true, is_token("token"));
+        assert_eq!(false, is_token("not a token"));
+    }
+
+    #[test]
+    fn test_quoted_string() {
+        assert_eq!(None, quoted_string(r#""this is a test value"#));
+        assert_eq!(
+            Some("this is a test value"),
+            quoted_string(r#""this is a test value""#)
+        );
+    }
+
+    #[test]
+    fn test_trim_whitespace() {
+        assert_eq!(
+            "this is a test value",
+            trim_whitespace("this is a test value")
+        );
+        assert_eq!(
+            "this is a test value",
+            trim_whitespace("   this is a test value\t\r\n")
+        );
+        assert_eq!(
+            "this is a test value\n",
+            trim_whitespace("this is a test value\n")
+        );
+    }
 }
