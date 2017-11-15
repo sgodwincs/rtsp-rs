@@ -33,10 +33,9 @@ const TOKEN_CHAR_MAP: [bool; 256] = byte_map![
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // F
 ];
 
-pub fn is_token_char(b: u8) -> bool {
-    TOKEN_CHAR_MAP[b as usize]
-}
-
+/// A helper function used to determine whether a given byte slice is a valid token. Tokens as used
+/// in [[RFC7826](https://tools.ietf.org/html/rfc782)] are encoded using ASCII-US with a limited
+/// subset allowed for use.
 pub fn is_token<T>(token: T) -> bool
 where
     T: AsRef<[u8]>,
@@ -48,7 +47,7 @@ where
     }
 
     for &b in bytes {
-        if !is_token_char(b) {
+        if !TOKEN_CHAR_MAP[b as usize] {
             return false;
         }
     }
@@ -56,12 +55,20 @@ where
     true
 }
 
+/// A helper function used to get the inner text out of a quoted string. A quoted string must use
+/// double quotes and is encoded using UTF-8 with some exceptions regarding ASCII-US characters. Any
+/// use of `'\'` and `'"'` must be escaped with a preceding `'\'`. If the given string is not a
+/// valid quoted string, the return value will be `None`.
 pub fn quoted_string(string: &str) -> Option<&str> {
     QUOTED_STRING_RE
         .find(string)
         .map(|m| &string[m.start() + 1..m.end() - 1])
 }
 
+/// A helper function used to trim whitespace as it is used in
+/// [[RFC7826](https://tools.ietf.org/html/rfc782)]. Specifically, whitespace includes `' '`,
+/// `'\t'`, and `"\r\n"`. The trim functions defined on the `str` slice do not seem to be enough to
+/// trim the whitespace in a one liner, so this function is used.
 pub fn trim_whitespace(mut string: &str) -> &str {
     let mut old = 0;
 
