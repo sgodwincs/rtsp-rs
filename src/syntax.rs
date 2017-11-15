@@ -33,12 +33,6 @@ const TOKEN_CHAR_MAP: [bool; 256] = byte_map![
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // F
 ];
 
-pub fn quoted_string(string: &str) -> Option<&str> {
-    QUOTED_STRING_RE
-        .find(string)
-        .map(|m| &string[m.start() + 1..m.end() - 1])
-}
-
 pub fn is_token_char(b: u8) -> bool {
     TOKEN_CHAR_MAP[b as usize]
 }
@@ -60,4 +54,34 @@ where
     }
 
     true
+}
+
+pub fn quoted_string(string: &str) -> Option<&str> {
+    QUOTED_STRING_RE
+        .find(string)
+        .map(|m| &string[m.start() + 1..m.end() - 1])
+}
+
+pub fn trim_whitespace(mut string: &str) -> &str {
+    loop {
+        if string.starts_with(' ') || string.starts_with('\t') {
+            string = &string[1..];
+        } else if string.starts_with("\r\n") {
+            string = &string[2..];
+        } else {
+            break;
+        }
+    }
+
+    loop {
+        if string.ends_with(' ') || string.ends_with('\t') {
+            string = &string[..string.len() - 1];
+        } else if string.ends_with("\r\n") {
+            string = &string[..string.len() - 2];
+        } else {
+            break;
+        }
+    }
+
+    string
 }
