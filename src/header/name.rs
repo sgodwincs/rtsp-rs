@@ -6,32 +6,7 @@ use std::convert::TryFrom;
 use std::error::Error;
 use std::fmt;
 
-#[cfg_attr(rustfmt, rustfmt_skip)]
-const HEADER_NAME_CHAR_MAP: [bool; 256] = byte_map![
- // 0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 0
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 1
-    0, 1, 0, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 1, 1, 0, // 2
-    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, // 3
-    0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, // 4
-    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 1, // 5
-    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, // 6
-    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1, 0, // 7
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 8
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 9
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // A
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // B
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // C
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // D
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // E
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // F
-];
-
-/// Returns whether the given character (1 byte) is a valid header name character. Header names can
-/// only consist of characters from the ASCII-US character set.
-fn is_header_name_char(b: u8) -> bool {
-    HEADER_NAME_CHAR_MAP[b as usize]
-}
+use is_token;
 
 macro_rules! standard_headers {
     (
@@ -84,36 +59,12 @@ impl HeaderName {
     /// extension. It first checks to see if the header name is valid, and if not, it will return an
     /// error.
     fn extension(name: &[u8]) -> Result<HeaderName, InvalidHeaderName> {
-        if !HeaderName::is_valid_header_name(name) {
+        if !is_token(name) {
             return Err(InvalidHeaderName);
         }
 
         let name = unsafe { AsciiString::from_ascii_unchecked(name) };
         Ok(HeaderName::Extension(ExtensionHeaderName(name)))
-    }
-
-    /// Returns whether the given header name is valid. Based on
-    /// [[RFC7826, Section 20.1](https://tools.ietf.org/html/rfc7826#section-20.1)], a header name
-    /// follows the following rules:
-    ///
-    /// ```text
-    /// token = 1*(%x21 / %x23-27 / %x2A-2B / %x2D-2E / %x30-39
-    ///       /  %x41-5A / %x5E-7A / %x7C / %x7E)
-    ///          ; 1*<any CHAR except CTLs or tspecials>
-    /// header-name = token
-    /// ```
-    fn is_valid_header_name(name: &[u8]) -> bool {
-        if name.is_empty() {
-            return false;
-        }
-
-        for &c in name {
-            if !is_header_name_char(c) {
-                return false;
-            }
-        }
-
-        true
     }
 
     /// Only used for `HeaderMap`.

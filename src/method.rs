@@ -23,32 +23,7 @@ use std::convert::{AsRef, TryFrom};
 use std::error::Error;
 use std::fmt;
 
-#[cfg_attr(rustfmt, rustfmt_skip)]
-const METHOD_NAME_CHAR_MAP: [bool; 256] = byte_map![
- // 0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 0
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 1
-    0, 1, 0, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 1, 1, 0, // 2
-    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, // 3
-    0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, // 4
-    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 1, // 5
-    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, // 6
-    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1, 0, // 7
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 8
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 9
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // A
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // B
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // C
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // D
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // E
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // F
-];
-
-/// Returns whether the given character (1 byte) is a valid method name character. Method names can
-/// only consist of characters from the ASCII-US character set.
-fn is_method_name_char(b: u8) -> bool {
-    METHOD_NAME_CHAR_MAP[b as usize]
-}
+use is_token;
 
 /// An RTSP request method.
 ///
@@ -271,13 +246,7 @@ impl Method {
             return false;
         }
 
-        for &c in name {
-            if !is_method_name_char(c) {
-                return false;
-            }
-        }
-
-        true
+        is_token(name)
     }
 }
 
