@@ -148,7 +148,7 @@ impl Builder {
     ///     .build(())
     ///     .unwrap();
     /// ```
-    pub fn header<K, V>(mut self, key: K, value: V) -> Self
+    pub fn header<K, V>(&mut self, key: K, value: V) -> &mut Self
     where
         HeaderName: TryFrom<K>,
         HeaderValue: TryFrom<V>,
@@ -189,7 +189,7 @@ impl Builder {
     ///     .build(())
     ///     .unwrap();
     /// ```
-    pub fn status_code<T>(mut self, status_code: T) -> Self
+    pub fn status_code<T>(&mut self, status_code: T) -> &mut Self
     where
         StatusCode: TryFrom<T>,
     {
@@ -218,7 +218,7 @@ impl Builder {
     ///     .build(())
     ///     .unwrap();
     /// ```
-    pub fn version(mut self, version: Version) -> Self {
+    pub fn version(&mut self, version: Version) -> &mut Self {
         self.version = version;
         self
     }

@@ -49,70 +49,90 @@ impl Request<()> {
     where
         URI: TryFrom<T>,
     {
-        Builder::new().method(Method::Describe).uri(uri)
+        let mut b = Builder::new();
+        b.method(Method::Describe).uri(uri);
+        b
     }
 
     pub fn get_parameter<T>(uri: T) -> Builder
     where
         URI: TryFrom<T>,
     {
-        Builder::new().method(Method::GetParameter).uri(uri)
+        let mut b = Builder::new();
+        b.method(Method::GetParameter).uri(uri);
+        b
     }
 
     pub fn options<T>(uri: T) -> Builder
     where
         URI: TryFrom<T>,
     {
-        Builder::new().method(Method::Options).uri(uri)
+        let mut b = Builder::new();
+        b.method(Method::Options).uri(uri);
+        b
     }
 
     pub fn pause<T>(uri: T) -> Builder
     where
         URI: TryFrom<T>,
     {
-        Builder::new().method(Method::Pause).uri(uri)
+        let mut b = Builder::new();
+        b.method(Method::Pause).uri(uri);
+        b
     }
 
     pub fn play<T>(uri: T) -> Builder
     where
         URI: TryFrom<T>,
     {
-        Builder::new().method(Method::Play).uri(uri)
+        let mut b = Builder::new();
+        b.method(Method::Play).uri(uri);
+        b
     }
 
     pub fn play_notify<T>(uri: T) -> Builder
     where
         URI: TryFrom<T>,
     {
-        Builder::new().method(Method::PlayNotify).uri(uri)
+        let mut b = Builder::new();
+        b.method(Method::PlayNotify).uri(uri);
+        b
     }
 
     pub fn redirect<T>(uri: T) -> Builder
     where
         URI: TryFrom<T>,
     {
-        Builder::new().method(Method::Redirect).uri(uri)
+        let mut b = Builder::new();
+        b.method(Method::Redirect).uri(uri);
+        b
     }
 
     pub fn set_parameter<T>(uri: T) -> Builder
     where
         URI: TryFrom<T>,
     {
-        Builder::new().method(Method::SetParameter).uri(uri)
+        let mut b = Builder::new();
+        b.method(Method::SetParameter).uri(uri);
+        b
     }
 
     pub fn setup<T>(uri: T) -> Builder
     where
         URI: TryFrom<T>,
     {
-        Builder::new().method(Method::Setup).uri(uri)
+        let mut b = Builder::new();
+        b.method(Method::Setup).uri(uri);
+        b
     }
 
     pub fn teardown<T>(uri: T) -> Builder
     where
         URI: TryFrom<T>,
     {
-        Builder::new().method(Method::Teardown).uri(uri)
+        let mut b = Builder::new();
+        b.method(Method::Teardown).uri(uri);
+        b
     }
 }
 
@@ -240,7 +260,7 @@ impl Builder {
     ///     .build(())
     ///     .unwrap();
     /// ```
-    pub fn header<K, V>(mut self, key: K, value: V) -> Self
+    pub fn header<K, V>(&mut self, key: K, value: V) -> &mut Self
     where
         HeaderName: TryFrom<K>,
         HeaderValue: TryFrom<V>,
@@ -282,7 +302,7 @@ impl Builder {
     ///     .build(())
     ///     .unwrap();
     /// ```
-    pub fn method<T>(mut self, method: T) -> Self
+    pub fn method<T>(&mut self, method: T) -> &mut Self
     where
         Method: TryFrom<T>,
     {
@@ -318,7 +338,7 @@ impl Builder {
     ///     .build(())
     ///     .unwrap();
     /// ```
-    pub fn uri<T>(mut self, uri: T) -> Self
+    pub fn uri<T>(&mut self, uri: T) -> &mut Self
     where
         URI: TryFrom<T>,
     {
@@ -349,7 +369,7 @@ impl Builder {
     ///     .build(())
     ///     .unwrap();
     /// ```
-    pub fn version<T>(mut self, version: T) -> Self
+    pub fn version<T>(&mut self, version: T) -> &mut Self
     where
         Version: TryFrom<T>,
     {
