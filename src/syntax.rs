@@ -70,19 +70,27 @@ pub fn quoted_string(string: &str) -> Option<&str> {
 /// `'\t'`, and `"\r\n"`. The trim functions defined on the `str` slice do not seem to be enough to
 /// trim the whitespace in a one liner, so this function is used.
 pub fn trim_whitespace(mut string: &str) -> &str {
+    trim_whitespace_right(trim_whitespace_left(string))
+}
+
+pub fn trim_whitespace_left(mut string: &str) -> &str {
+    let mut old = 0;
+
+    while string.len() != old {
+        string = string.trim_left_matches("\r\n");
+        string = string.trim_left_matches(|c| c == ' ' || c == '\t');
+        old = string.len();
+    }
+
+    string
+}
+
+pub fn trim_whitespace_right(mut string: &str) -> &str {
     let mut old = 0;
 
     while string.len() != old {
         string = string.trim_right_matches("\r\n");
         string = string.trim_right_matches(|c| c == ' ' || c == '\t');
-        old = string.len();
-    }
-
-    old = 0;
-
-    while string.len() != old {
-        string = string.trim_left_matches("\r\n");
-        string = string.trim_left_matches(|c| c == ' ' || c == '\t');
         old = string.len();
     }
 
