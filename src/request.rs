@@ -156,14 +156,14 @@ impl<T: fmt::Debug> fmt::Debug for Request<T> {
 #[derive(Clone, Debug)]
 pub struct Builder {
     /// A stored error used when making a `Request`.
-    error: Option<BuilderError>,
+    pub(crate) error: Option<BuilderError>,
 
     /// A multimap of header names to values that maintains insertion order.
-    headers: HeaderMap<HeaderValue>,
+    pub(crate) headers: HeaderMap<HeaderValue>,
 
     /// The RTSP method to be applied to the resource. This can be any standardized RTSP method or
     /// an extension method.
-    method: Option<Method>,
+    pub(crate) method: Option<Method>,
 
     /// The absolute RTSP URI (including scheme, host, and port) for the target resource. IPv6
     /// literals are supported.
@@ -171,10 +171,10 @@ pub struct Builder {
     /// RTSP also supports specifying just `*` for the URI in the request line indicating that the
     /// request does not apply to a particular resource but to the server or proxy itself. This is
     /// only allowed when the request method does not necessarily apply to a resource.
-    uri: Option<URI>,
+    pub(crate) uri: Option<URI>,
 
     /// The protocol version that is being used.
-    version: Version,
+    pub(crate) version: Version,
 }
 
 impl Builder {

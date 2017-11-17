@@ -75,19 +75,19 @@ pub struct Builder {
     /// custom reason phrases and even recommends it in specific cases. If it is detected that the
     /// status code is an extension or that the reason phrase is not the canonical reason phrase for
     /// the given status code, then this will be the custom reason phrase.
-    custom_reason_phrase: Option<String>,
+    pub(crate) custom_reason_phrase: Option<String>,
 
     /// A stored error used when making a `Response`.
-    error: Option<BuilderError>,
+    pub(crate) error: Option<BuilderError>,
 
     /// A multimap of header names to values that maintains insertion order.
-    headers: HeaderMap<HeaderValue>,
+    pub(crate) headers: HeaderMap<HeaderValue>,
 
     /// The status code of the response.
-    status_code: StatusCode,
+    pub(crate) status_code: StatusCode,
 
     /// The protocol version that is being used.
-    version: Version,
+    pub(crate) version: Version,
 }
 
 impl Builder {
