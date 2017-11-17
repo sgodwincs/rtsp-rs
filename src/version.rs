@@ -157,8 +157,8 @@ impl error::Error for Error {
         use self::Error::*;
 
         match self {
-            InvalidVersion => "invalid RTSP version",
-            UnknownVersion => "unknown RTSP version",
+            &InvalidVersion => "invalid RTSP version",
+            &UnknownVersion => "unknown RTSP version",
         }
     }
 }
