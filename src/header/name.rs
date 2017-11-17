@@ -234,7 +234,7 @@ impl<'a> TryFrom<&'a [u8]> for HeaderName {
     fn try_from(value: &'a [u8]) -> Result<Self, Self::Error> {
         use self::HeaderName::*;
 
-        if value.len() > super::MAX_HEADER_NAME_LENGTH {
+        if value.is_empty() || value.len() > super::MAX_HEADER_NAME_LENGTH {
             return Err(InvalidHeaderName);
         }
 
