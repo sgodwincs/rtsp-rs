@@ -154,6 +154,11 @@ impl fmt::Display for Error {
 
 impl error::Error for Error {
     fn description(&self) -> &str {
-        "invalid RTSP version"
+        use self::Error::*;
+
+        match self {
+            InvalidVersion => "invalid RTSP version",
+            UnknownVersion => "unknown RTSP version",
+        }
     }
 }
