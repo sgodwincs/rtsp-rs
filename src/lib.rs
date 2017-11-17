@@ -25,7 +25,7 @@ pub mod status;
 pub mod uri;
 pub mod version;
 
-pub use header::{Header, HeaderMap, HeaderName, HeaderValue};
+pub use header::{HeaderMap, HeaderName, HeaderValue};
 pub use method::Method;
 pub use request::Request;
 pub use response::Response;
