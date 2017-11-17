@@ -6,10 +6,10 @@
 
 use std::convert::TryFrom;
 use std::fmt;
-use url::Url;
 
 use header::{HeaderMap, HeaderName, HeaderValue};
 use method::Method;
+use uri::URI;
 use version::Version;
 
 /// Represents an RTSP request.
@@ -34,7 +34,7 @@ pub struct Request<T> {
     /// RTSP also supports specifying just `*` for the URI in the request line indicating that the
     /// request does not apply to a particular resource but to the server or proxy itself. This is
     /// only allowed when the request method does not necessarily apply to a resource.
-    uri: Option<Url>,
+    uri: URI,
 
     /// The protocol version that is being used.
     version: Version,
@@ -45,43 +45,73 @@ impl Request<()> {
         Builder::new()
     }
 
-    pub fn describe(uri: Option<Url>) -> Builder {
+    pub fn describe<T>(uri: T) -> Builder
+    where
+        URI: TryFrom<T>,
+    {
         Builder::new().method(Method::Describe).uri(uri)
     }
 
-    pub fn get_parameter(uri: Option<Url>) -> Builder {
+    pub fn get_parameter<T>(uri: T) -> Builder
+    where
+        URI: TryFrom<T>,
+    {
         Builder::new().method(Method::GetParameter).uri(uri)
     }
 
-    pub fn options(uri: Option<Url>) -> Builder {
+    pub fn options<T>(uri: T) -> Builder
+    where
+        URI: TryFrom<T>,
+    {
         Builder::new().method(Method::Options).uri(uri)
     }
 
-    pub fn pause(uri: Option<Url>) -> Builder {
+    pub fn pause<T>(uri: T) -> Builder
+    where
+        URI: TryFrom<T>,
+    {
         Builder::new().method(Method::Pause).uri(uri)
     }
 
-    pub fn play(uri: Option<Url>) -> Builder {
+    pub fn play<T>(uri: T) -> Builder
+    where
+        URI: TryFrom<T>,
+    {
         Builder::new().method(Method::Play).uri(uri)
     }
 
-    pub fn play_notify(uri: Option<Url>) -> Builder {
+    pub fn play_notify<T>(uri: T) -> Builder
+    where
+        URI: TryFrom<T>,
+    {
         Builder::new().method(Method::PlayNotify).uri(uri)
     }
 
-    pub fn redirect(uri: Option<Url>) -> Builder {
+    pub fn redirect<T>(uri: T) -> Builder
+    where
+        URI: TryFrom<T>,
+    {
         Builder::new().method(Method::Redirect).uri(uri)
     }
 
-    pub fn set_parameter(uri: Option<Url>) -> Builder {
+    pub fn set_parameter<T>(uri: T) -> Builder
+    where
+        URI: TryFrom<T>,
+    {
         Builder::new().method(Method::SetParameter).uri(uri)
     }
 
-    pub fn setup(uri: Option<Url>) -> Builder {
+    pub fn setup<T>(uri: T) -> Builder
+    where
+        URI: TryFrom<T>,
+    {
         Builder::new().method(Method::Setup).uri(uri)
     }
 
-    pub fn teardown(uri: Option<Url>) -> Builder {
+    pub fn teardown<T>(uri: T) -> Builder
+    where
+        URI: TryFrom<T>,
+    {
         Builder::new().method(Method::Teardown).uri(uri)
     }
 }
@@ -99,7 +129,7 @@ impl<T> Request<T> {
         &self.method
     }
 
-    pub fn uri(&self) -> &Option<Url> {
+    pub fn uri(&self) -> &URI {
         &self.uri
     }
 
@@ -141,7 +171,7 @@ pub struct Builder {
     /// RTSP also supports specifying just `*` for the URI in the request line indicating that the
     /// request does not apply to a particular resource but to the server or proxy itself. This is
     /// only allowed when the request method does not necessarily apply to a resource.
-    uri: Option<Option<Url>>,
+    uri: Option<URI>,
 
     /// The protocol version that is being used.
     version: Version,
@@ -204,7 +234,7 @@ impl Builder {
     ///
     /// let request = Request::builder()
     ///     .method(Method::Play)
-    ///     .uri(Some("rtsp://server.com".parse().unwrap()))
+    ///     .uri("rtsp://server.com")
     ///     .header("CSeq", "835")
     ///     .header("Session", "ULExwZCXh2pd0xuFgkgZJW")
     ///     .build(())
@@ -248,7 +278,7 @@ impl Builder {
     ///
     /// let request = Request::builder()
     ///     .method(Method::Setup)
-    ///     .uri(Some("rtsp://server.com".parse().unwrap()))
+    ///     .uri("rtsp://server.com")
     ///     .build(())
     ///     .unwrap();
     /// ```
@@ -267,7 +297,7 @@ impl Builder {
     /// Set the RTSP URI for this request.
     ///
     /// This function will configure the RTSP URI of the `Request` that will be returned from
-    /// `build`. A value of `None` specifies that the URI should be set to `"*"`.
+    /// `build`.
     ///
     /// This does not have a default value and, as a result, it must be specified before `build` is
     /// called.
@@ -284,18 +314,17 @@ impl Builder {
     ///
     /// let request = Request::builder()
     ///     .method(Method::Setup)
-    ///     .uri(Some("rtsp://server.com".parse().unwrap()))
+    ///     .uri("rtsp://server.com")
     ///     .build(())
     ///     .unwrap();
     /// ```
-    pub fn uri(mut self, uri: Option<Url>) -> Self {
-        match uri {
-            Some(uri) => if !uri.has_authority() {
-                self.error = Some(BuilderError::InvalidURI);
-            } else {
-                self.uri = Some(Some(uri));
-            },
-            None => self.uri = None,
+    pub fn uri<T>(mut self, uri: T) -> Self
+    where
+        URI: TryFrom<T>,
+    {
+        match URI::try_from(uri) {
+            Ok(uri) => self.uri = Some(uri),
+            Err(_) => self.error = Some(BuilderError::InvalidURI),
         }
 
         self
@@ -315,16 +344,24 @@ impl Builder {
     ///
     /// let request = Request::builder()
     ///     .method(Method::Setup)
-    ///     .uri(Some("rtsp://server.com".parse().unwrap()))
+    ///     .uri("rtsp://server.com")
     ///     .version(Version::RTSP20)
     ///     .build(())
     ///     .unwrap();
     /// ```
-    pub fn version(mut self, version: Version) -> Self {
-        self.version = version;
+    pub fn version<T>(mut self, version: T) -> Self
+    where
+        Version: TryFrom<T>,
+    {
+        match Version::try_from(version) {
+            Ok(version) => self.version = version,
+            Err(_) => self.error = Some(BuilderError::InvalidVersion),
+        }
+
         self
     }
 }
+
 
 impl Default for Builder {
     #[inline]
@@ -346,6 +383,7 @@ pub enum BuilderError {
     InvalidHeaderValue,
     InvalidMethod,
     InvalidURI,
+    InvalidVersion,
     MissingMethod,
     MissingURI,
 }
