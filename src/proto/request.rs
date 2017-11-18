@@ -42,8 +42,6 @@ fn trim_header(mut header: &[u8]) -> &[u8] {
 
 impl RequestCodec {
     fn parse_body(&mut self, buffer: &mut BytesMut) -> Option<io::Result<()>> {
-        println!("length: {}", buffer.len());
-
         if *self.content_length > buffer.len() {
             None
         } else {
