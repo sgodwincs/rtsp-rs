@@ -388,7 +388,7 @@ impl fmt::Display for InvalidStatusCode {
 
 impl Error for InvalidStatusCode {
     fn description(&self) -> &str {
-        "invalid status code"
+        "invalid RTSP status code"
     }
 }
 
