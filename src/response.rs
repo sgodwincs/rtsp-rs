@@ -10,7 +10,6 @@ use std::mem::replace;
 
 use header::{HeaderMap, HeaderName, HeaderValue};
 use status::StatusCode;
-use version;
 use version::Version;
 
 /// Represents an RTSP response.
@@ -223,16 +222,11 @@ impl Builder {
     /// ```
     pub fn version<T>(&mut self, version: T) -> &mut Self
     where
-        Version: TryFrom<T, Error = version::Error>,
+        Version: TryFrom<T>,
     {
         match Version::try_from(version) {
             Ok(version) => self.version = version,
-            Err(error) => {
-                self.error = Some(match error {
-                    version::Error::InvalidVersion => BuilderError::InvalidVersion,
-                    version::Error::UnknownVersion => BuilderError::UnknownVersion,
-                })
-            }
+            Err(_) => self.error = Some(BuilderError::InvalidVersion),
         }
 
         self
