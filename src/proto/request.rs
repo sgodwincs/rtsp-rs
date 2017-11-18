@@ -1,11 +1,12 @@
 use bytes::BytesMut;
-use std::io;
+use std::{error, fmt, io};
 use std::mem::replace;
 use tokio_io::codec::{Decoder, Encoder};
 
 use header::{Entry, Header, HeaderName, HeaderValue};
 use header::types::ContentLength;
 use request::{Builder, BuilderError, Request};
+use version::Version;
 
 pub struct RequestCodec {
     body: Option<BytesMut>,
@@ -186,6 +187,13 @@ impl RequestCodec {
                             .uri(uri.as_ref())
                             .version(line.as_ref());
 
+                        if self.builder.version != Version::RTSP20 {
+                            return Some(Err(io::Error::new(
+                                io::ErrorKind::Other,
+                                "unsupported RTSP version".to_string(),
+                            )));
+                        }
+
                         return Some(Ok(()));
                     }
                 }
@@ -203,7 +211,7 @@ impl RequestCodec {
 }
 
 impl Decoder for RequestCodec {
-    type Item = Result<Request<BytesMut>, BuilderError>;
+    type Item = Result<Request<BytesMut>, InvalidRequest>;
     type Error = io::Error;
 
     fn decode(&mut self, buffer: &mut BytesMut) -> io::Result<Option<Self::Item>> {
@@ -215,7 +223,9 @@ impl Decoder for RequestCodec {
                 Header => self.parse_header(buffer),
                 RequestLine => self.parse_request_line(buffer),
                 End => {
-                    let request = self.builder.build(replace(&mut self.body, None).unwrap());
+                    let request = self.builder
+                        .build(replace(&mut self.body, None).unwrap())
+                        .map_err(|error| InvalidRequest::from(error));
                     self.builder = Builder::new();
                     self.state = RequestLine;
 
@@ -248,6 +258,58 @@ impl Default for RequestCodec {
             builder: Builder::new(),
             content_length: ContentLength::from(0),
             state: ParseState::RequestLine,
+        }
+    }
+}
+
+/// An error type for when the request was successfully parsed but contained invalid values.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum InvalidRequest {
+    InvalidHeaderName,
+    InvalidHeaderValue,
+    InvalidMethod,
+    InvalidURI,
+    InvalidVersion,
+    MissingMethod,
+    MissingURI,
+}
+
+impl fmt::Display for InvalidRequest {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use std::error::Error;
+
+        write!(f, "{}", self.description())
+    }
+}
+
+impl error::Error for InvalidRequest {
+    fn description(&self) -> &str {
+        use self::InvalidRequest::*;
+
+        match self {
+            &InvalidHeaderName => "invalid RTSP request - invalid header name",
+            &InvalidHeaderValue => "invalid RTSP request-  invalid header value",
+            &InvalidMethod => "invalid RTSP request-  invalid method",
+            &InvalidURI => "invalid RTSP request - invalid URI",
+            &InvalidVersion => "invalid RTSP request - invalid version",
+            &MissingMethod => "invalid RTSP request - missing method",
+            &MissingURI => "invalid RTSP request - missing URI",
+        }
+    }
+}
+
+impl From<BuilderError> for InvalidRequest {
+    fn from(value: BuilderError) -> InvalidRequest {
+        use self::InvalidRequest::*;
+
+        match value {
+            BuilderError::InvalidHeaderName => InvalidHeaderName,
+            BuilderError::InvalidHeaderValue => InvalidHeaderValue,
+            BuilderError::InvalidMethod => InvalidMethod,
+            BuilderError::InvalidURI => InvalidURI,
+            BuilderError::InvalidVersion => InvalidVersion,
+            BuilderError::MissingMethod => MissingMethod,
+            BuilderError::MissingURI => MissingURI,
         }
     }
 }
