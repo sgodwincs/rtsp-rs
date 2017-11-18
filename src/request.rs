@@ -146,6 +146,16 @@ impl<T> Request<T> {
         &self.headers
     }
 
+    pub fn map<B>(self, body: B) -> Request<B> {
+        Request {
+            body: body,
+            headers: self.headers,
+            method: self.method,
+            uri: self.uri,
+            version: self.version,
+        }
+    }
+
     pub fn method(&self) -> &Method {
         &self.method
     }

@@ -52,6 +52,16 @@ impl<T> Response<T> {
         &self.headers
     }
 
+    pub fn map<B>(self, body: B) -> Response<B> {
+        Response {
+            body: body,
+            custom_reason_phrase: self.custom_reason_phrase,
+            headers: self.headers,
+            status_code: self.status_code,
+            version: self.version,
+        }
+    }
+
     pub fn reason(&self) -> &str {
         match self.custom_reason_phrase {
             Some(ref reason) => reason.as_str(),
