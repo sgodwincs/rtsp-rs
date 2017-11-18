@@ -12,7 +12,7 @@ macro_rules! standard_headers {
     (
         $(
             $(#[$docs:meta])*
-            ($variant:ident, $name:expr);
+            ($variant:ident, $name:expr, $canonical_name:expr);
         )+
     ) => {
         /// An RTSP header name.
@@ -42,6 +42,17 @@ macro_rules! standard_headers {
                     Extension(ref extension) => extension.as_str()
                 }
             }
+
+            pub fn canonical_name(&self) -> &str {
+                use self::HeaderName::*;
+
+                match *self {
+                $(
+                    $variant => $canonical_name,
+                )+
+                    Extension(ref extension) => extension.canonical_name()
+                }
+            }
         }
 
         #[test]
@@ -49,6 +60,22 @@ macro_rules! standard_headers {
         $(
             let header_name = HeaderName::$variant;
             assert_eq!(header_name.as_str(), $name);
+        )+
+        }
+
+        #[test]
+        fn test_standard_header_canonical_name() {
+        $(
+            let header_name = HeaderName::$variant;
+            assert_eq!(header_name.canonical_name(), $canonical_name);
+        )+
+        }
+
+        #[test]
+        fn test_standard_header_name_equality() {
+        $(
+            let header_name = HeaderName::$variant;
+            assert_eq!(header_name.as_str(), header_name.canonical_name().to_lowercase().as_str());
         )+
         }
     }
@@ -64,7 +91,8 @@ impl HeaderName {
         }
 
         let name = unsafe { AsciiString::from_ascii_unchecked(name) };
-        Ok(HeaderName::Extension(ExtensionHeaderName(name)))
+        let name_lower = name.to_ascii_lowercase();
+        Ok(HeaderName::Extension(ExtensionHeaderName(name, name_lower)))
     }
 }
 
@@ -82,13 +110,13 @@ impl AsRef<str> for HeaderName {
 
 impl fmt::Debug for HeaderName {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.as_str())
+        write!(f, "{}", self.canonical_name())
     }
 }
 
 impl fmt::Display for HeaderName {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.as_str())
+        write!(f, "{}", self.canonical_name())
     }
 }
 
@@ -219,72 +247,72 @@ impl<'a> TryFrom<&'a [u8]> for HeaderName {
             return Err(InvalidHeaderName);
         }
 
-        let value = value.to_ascii_lowercase();
+        let value_lower = value.to_ascii_lowercase();
 
-        match value.len() {
-            3 => match value.as_slice() {
+        match value_lower.len() {
+            3 => match value_lower.as_slice() {
                 b"via" => Ok(Via),
-                _ => HeaderName::extension(value.as_slice()),
+                _ => HeaderName::extension(value),
             },
-            4 => match value.as_slice() {
+            4 => match value_lower.as_slice() {
                 b"cseq" => Ok(CSeq),
                 b"date" => Ok(Date),
                 b"from" => Ok(From),
                 b"mtag" => Ok(MTag),
-                _ => HeaderName::extension(value.as_slice()),
+                _ => HeaderName::extension(value),
             },
-            5 => match value.as_slice() {
+            5 => match value_lower.as_slice() {
                 b"allow" => Ok(Allow),
                 b"range" => Ok(Range),
                 b"scale" => Ok(Scale),
                 b"speed" => Ok(Speed),
-                _ => HeaderName::extension(value.as_slice()),
+                _ => HeaderName::extension(value),
             },
-            6 => match value.as_slice() {
+            6 => match value_lower.as_slice() {
                 b"accept" => Ok(Accept),
                 b"public" => Ok(Public),
                 b"server" => Ok(Server),
-                _ => HeaderName::extension(value.as_slice()),
+                _ => HeaderName::extension(value),
             },
-            7 => match value.as_slice() {
+            7 => match value_lower.as_slice() {
                 b"expires" => Ok(Expires),
                 b"require" => Ok(Require),
                 b"session" => Ok(Session),
-                _ => HeaderName::extension(value.as_slice()),
+                _ => HeaderName::extension(value),
             },
-            8 => match value.as_slice() {
+            8 => match value_lower.as_slice() {
                 b"if-match" => Ok(IfMatch),
                 b"location" => Ok(Location),
                 b"referrer" => Ok(Referrer),
                 b"rtp-info" => Ok(RTPInfo),
-                _ => HeaderName::extension(value.as_slice()),
+                _ => HeaderName::extension(value),
             },
-            9 => match value.as_slice() {
+            9 => match value_lower.as_slice() {
                 b"bandwidth" => Ok(Bandwidth),
                 b"blocksize" => Ok(Blocksize),
                 b"supported" => Ok(Supported),
                 b"timestamp" => Ok(Timestamp),
                 b"transport" => Ok(Transport),
-                _ => HeaderName::extension(value.as_slice()),
+                _ => HeaderName::extension(value),
             },
-            10 => match value.as_slice() {
+            10 => match value_lower.as_slice() {
                 b"connection" => Ok(Connection),
                 b"seek-style" => Ok(SeekStyle),
                 b"user-agent" => Ok(UserAgent),
-                _ => HeaderName::extension(value.as_slice()),
+                _ => HeaderName::extension(value),
             },
-            11 => match value.as_slice() {
+            11 => match value_lower.as_slice() {
                 b"media-range" => Ok(MediaRange),
                 b"retry-after" => Ok(RetryAfter),
                 b"unsupported" => Ok(Unsupported),
-                _ => HeaderName::extension(value.as_slice()),
+                _ => HeaderName::extension(value),
             },
-            12 => match value.as_slice() {
+            12 => match value_lower.as_slice() {
                 b"content-base" => Ok(ContentBase),
                 b"content-type" => Ok(ContentType),
-                _ => HeaderName::extension(value.as_slice()),
+                _ => HeaderName::extension(value),
             },
-            13 => match value.as_slice() {
+            13 => match value_lower.as_slice() {
                 b"accept-ranges" => Ok(AcceptRanges),
                 b"authorization" => Ok(Authorization),
                 b"cache-control" => Ok(CacheControl),
@@ -292,52 +320,52 @@ impl<'a> TryFrom<&'a [u8]> for HeaderName {
                 b"last-modified" => Ok(LastModified),
                 b"notify-reason" => Ok(NotifyReason),
                 b"proxy-require" => Ok(ProxyRequire),
-                _ => HeaderName::extension(value.as_slice()),
+                _ => HeaderName::extension(value),
             },
-            14 => match value.as_slice() {
+            14 => match value_lower.as_slice() {
                 b"content-length" => Ok(ContentLength),
                 b"request-status" => Ok(RequestStatus),
-                _ => HeaderName::extension(value.as_slice()),
+                _ => HeaderName::extension(value),
             },
-            15 => match value.as_slice() {
+            15 => match value_lower.as_slice() {
                 b"accept-encoding" => Ok(AcceptEncoding),
                 b"accept-language" => Ok(AcceptLanguage),
                 b"proxy-supported" => Ok(ProxySupported),
-                _ => HeaderName::extension(value.as_slice()),
+                _ => HeaderName::extension(value),
             },
-            16 => match value.as_slice() {
+            16 => match value_lower.as_slice() {
                 b"content-encoding" => Ok(ContentEncoding),
                 b"content-language" => Ok(ContentLanguage),
                 b"content-location" => Ok(ContentLocation),
                 b"media-properties" => Ok(MediaProperties),
                 b"terminate-reason" => Ok(TerminateReason),
                 b"www-authenticate" => Ok(WWWAuthenticate),
-                _ => HeaderName::extension(value.as_slice()),
+                _ => HeaderName::extension(value),
             },
-            17 => match value.as_slice() {
+            17 => match value_lower.as_slice() {
                 b"if-modified-since" => Ok(IfModifiedSince),
-                _ => HeaderName::extension(value.as_slice()),
+                _ => HeaderName::extension(value),
             },
-            18 => match value.as_slice() {
+            18 => match value_lower.as_slice() {
                 b"accept-credentials" => Ok(AcceptCredentials),
                 b"pipelined-requests" => Ok(PipelinedRequests),
                 b"proxy-authenticate" => Ok(ProxyAuthenticate),
-                _ => HeaderName::extension(value.as_slice()),
+                _ => HeaderName::extension(value),
             },
-            19 => match value.as_slice() {
+            19 => match value_lower.as_slice() {
                 b"authentication-info" => Ok(AuthenticationInfo),
                 b"proxy-authorization" => Ok(ProxyAuthorization),
-                _ => HeaderName::extension(value.as_slice()),
+                _ => HeaderName::extension(value),
             },
-            22 => match value.as_slice() {
+            22 => match value_lower.as_slice() {
                 b"connection-credentials" => Ok(ConnectionCredentials),
-                _ => HeaderName::extension(value.as_slice()),
+                _ => HeaderName::extension(value),
             },
-            25 => match value.as_slice() {
+            25 => match value_lower.as_slice() {
                 b"proxy-authentication-info" => Ok(ProxyAuthenticationInfo),
-                _ => HeaderName::extension(value.as_slice()),
+                _ => HeaderName::extension(value),
             },
-            _ => HeaderName::extension(value.as_slice()),
+            _ => HeaderName::extension(value),
         }
     }
 }
@@ -353,7 +381,7 @@ impl<'a> TryFrom<&'a str> for HeaderName {
 /// A wrapper type used to avoid users creating extension header names that are actually
 /// standardized header names.
 #[derive(Clone, Eq, Hash, PartialEq)]
-pub struct ExtensionHeaderName(AsciiString);
+pub struct ExtensionHeaderName(AsciiString, AsciiString);
 
 impl fmt::Debug for ExtensionHeaderName {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -386,7 +414,7 @@ impl fmt::Display for ExtensionHeaderName {
 /// ```
 impl PartialEq<str> for ExtensionHeaderName {
     fn eq(&self, other: &str) -> bool {
-        self.0 == other.to_ascii_lowercase()
+        self.1 == other.to_ascii_lowercase()
     }
 }
 
@@ -409,7 +437,7 @@ impl PartialEq<str> for ExtensionHeaderName {
 /// ```
 impl<'a> PartialEq<&'a str> for ExtensionHeaderName {
     fn eq(&self, other: &&'a str) -> bool {
-        self.0 == (*other).to_ascii_lowercase()
+        self.1 == (*other).to_ascii_lowercase()
     }
 }
 
@@ -426,12 +454,33 @@ impl ExtensionHeaderName {
     /// #
     /// use rtsp::HeaderName;
     ///
-    /// match HeaderName::try_from("extension").unwrap() {
+    /// match HeaderName::try_from("ExTeNsIoN").unwrap() {
     ///     HeaderName::Extension(extension) => assert_eq!(extension.as_str(), "extension"),
     ///     _ => panic!("expected extension header name")
     /// }
     /// ```
     pub fn as_str(&self) -> &str {
+        self.1.as_str()
+    }
+
+    /// Returns a `&str` representation of the extension header name. The returned string is
+    /// is of the same case as when it was created.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #![feature(try_from)]
+    /// #
+    /// # use std::convert::TryFrom;
+    /// #
+    /// use rtsp::HeaderName;
+    ///
+    /// match HeaderName::try_from("ExTeNsIoN").unwrap() {
+    ///     HeaderName::Extension(extension) => assert_eq!(extension.canonical_name(), "ExTeNsIoN"),
+    ///     _ => panic!("expected extension header name")
+    /// }
+    /// ```
+    pub fn canonical_name(&self) -> &str {
         self.0.as_str()
     }
 }
@@ -457,233 +506,233 @@ impl Error for InvalidHeaderName {
 standard_headers! {
     /// Accept
     /// [[RFC7826, Section 18.1](https://tools.ietf.org/html/rfc7826#section-18.1)]
-    (Accept, "accept");
+    (Accept, "accept", "Accept");
 
     /// Accept-Credentials
     /// [[RFC7826, Section 18.2](https://tools.ietf.org/html/rfc7826#section-18.2)]
-    (AcceptCredentials, "accept-credentials");
+    (AcceptCredentials, "accept-credentials", "Accept-Credentials");
 
     /// Accept-Encoding
     /// [[RFC7826, Section 18.3](https://tools.ietf.org/html/rfc7826#section-18.3)]
-    (AcceptEncoding, "accept-encoding");
+    (AcceptEncoding, "accept-encoding", "Accept-Encoding");
 
     /// Accept-Language
     /// [[RFC7826, Section 18.4](https://tools.ietf.org/html/rfc7826#section-18.4)]
-    (AcceptLanguage, "accept-language");
+    (AcceptLanguage, "accept-language", "Accept-Language");
 
     /// Accept-Ranges
     /// [[RFC7826, Section 18.5](https://tools.ietf.org/html/rfc7826#section-18.5)]
-    (AcceptRanges, "accept-ranges");
+    (AcceptRanges, "accept-ranges", "Accept-Ranges");
 
     /// Allow
     /// [[RFC7826, Section 18.6](https://tools.ietf.org/html/rfc7826#section-18.6)]
-    (Allow, "allow");
+    (Allow, "allow", "Allow");
 
     /// Authentication-Info
     /// [[RFC7826, Section 18.7](https://tools.ietf.org/html/rfc7826#section-18.7)]
-    (AuthenticationInfo, "authentication-info");
+    (AuthenticationInfo, "authentication-info", "Authentication-Info");
 
     /// Authorization
     /// [[RFC7826, Section 18.8](https://tools.ietf.org/html/rfc7826#section-18.8)]
-    (Authorization, "authorization");
+    (Authorization, "authorization", "Authorization");
 
     /// Bandwidth
     /// [[RFC7826, Section 18.9](https://tools.ietf.org/html/rfc7826#section-18.9)]
-    (Bandwidth, "bandwidth");
+    (Bandwidth, "bandwidth", "Bandwidth");
 
     /// Blocksize
     /// [[RFC7826, Section 18.10](https://tools.ietf.org/html/rfc7826#section-18.10)]
-    (Blocksize, "blocksize");
+    (Blocksize, "blocksize", "Blocksize");
 
     /// Cache-Control
     /// [[RFC7826, Section 18.11](https://tools.ietf.org/html/rfc7826#section-18.11)]
-    (CacheControl, "cache-control");
+    (CacheControl, "cache-control", "Cache-Control");
 
     /// Connection
     /// [[RFC7826, Section 18.12](https://tools.ietf.org/html/rfc7826#section-18.12)]
-    (Connection, "connection");
+    (Connection, "connection", "Connection");
 
     /// Connection-Credentials
     /// [[RFC7826, Section 18.13](https://tools.ietf.org/html/rfc7826#section-18.13)]
-    (ConnectionCredentials, "connection-credentials");
+    (ConnectionCredentials, "connection-credentials", "Connection-Credentials");
 
     /// Content-Base
     /// [[RFC7826, Section 18.14](https://tools.ietf.org/html/rfc7826#section-18.14)]
-    (ContentBase, "content-base");
+    (ContentBase, "content-base", "Content-Base");
 
     /// Content-Encoding
     /// [[RFC7826, Section 18.15](https://tools.ietf.org/html/rfc7826#section-18.15)]
-    (ContentEncoding, "content-encoding");
+    (ContentEncoding, "content-encoding", "Content-Encoding");
 
     /// Content-Language
     /// [[RFC7826, Section 18.16](https://tools.ietf.org/html/rfc7826#section-18.16)]
-    (ContentLanguage, "content-language");
+    (ContentLanguage, "content-language", "Content-Language");
 
     /// Content-Length
     /// [[RFC7826, Section 18.17](https://tools.ietf.org/html/rfc7826#section-18.17)]
-    (ContentLength, "content-length");
+    (ContentLength, "content-length", "Content-Length");
 
     /// Content-Location
     /// [[RFC7826, Section 18.18](https://tools.ietf.org/html/rfc7826#section-18.18)]
-    (ContentLocation, "content-location");
+    (ContentLocation, "content-location", "Content-Location");
 
     /// Content-Type
     /// [[RFC7826, Section 18.19](https://tools.ietf.org/html/rfc7826#section-18.19)]
-    (ContentType, "content-type");
+    (ContentType, "content-type", "Content-Type");
 
     /// CSeq
     /// [[RFC7826, Section 18.20](https://tools.ietf.org/html/rfc7826#section-18.20)]
-    (CSeq, "cseq");
+    (CSeq, "cseq", "CSeq");
 
     /// Date
     /// [[RFC7826, Section 18.21](https://tools.ietf.org/html/rfc7826#section-18.21)]
-    (Date, "date");
+    (Date, "date", "Date");
 
     /// Expires
     /// [[RFC7826, Section 18.22](https://tools.ietf.org/html/rfc7826#section-18.22)]
-    (Expires, "expires");
+    (Expires, "expires", "Expires");
 
     /// Date
     /// [[RFC7826, Section 18.23](https://tools.ietf.org/html/rfc7826#section-18.23)]
-    (From, "from");
+    (From, "from", "From");
 
     /// If-Match
     /// [[RFC7826, Section 18.24](https://tools.ietf.org/html/rfc7826#section-18.24)]
-    (IfMatch, "if-match");
+    (IfMatch, "if-match", "If-Match");
 
     /// If-Modified-Since
     /// [[RFC7826, Section 18.25](https://tools.ietf.org/html/rfc7826#section-18.25)]
-    (IfModifiedSince, "if-modified-since");
+    (IfModifiedSince, "if-modified-since", "If-Modified-Since");
 
     /// If-None-Match
     /// [[RFC7826, Section 18.26](https://tools.ietf.org/html/rfc7826#section-18.26)]
-    (IfNoneMatch, "if-none-match");
+    (IfNoneMatch, "if-none-match", "If-None-Match");
 
     /// Last-Modified
     /// [[RFC7826, Section 18.27](https://tools.ietf.org/html/rfc7826#section-18.27)]
-    (LastModified, "last-modified");
+    (LastModified, "last-modified", "Last-Modified");
 
     /// Location
     /// [[RFC7826, Section 18.28](https://tools.ietf.org/html/rfc7826#section-18.28)]
-    (Location, "location");
+    (Location, "location", "Location");
 
     /// Media-Properties
     /// [[RFC7826, Section 18.29](https://tools.ietf.org/html/rfc7826#section-18.29)]
-    (MediaProperties, "media-properties");
+    (MediaProperties, "media-properties", "Media-Properties");
 
     /// Media-Range
     /// [[RFC7826, Section 18.30](https://tools.ietf.org/html/rfc7826#section-18.30)]
-    (MediaRange, "media-range");
+    (MediaRange, "media-range", "Media-Range");
 
     /// MTag
     /// [[RFC7826, Section 18.31](https://tools.ietf.org/html/rfc7826#section-18.31)]
-    (MTag, "mtag");
+    (MTag, "mtag", "MTag");
 
     /// Notify-Reason
     /// [[RFC7826, Section 18.32](https://tools.ietf.org/html/rfc7826#section-18.32)]
-    (NotifyReason, "notify-reason");
+    (NotifyReason, "notify-reason", "Notify-Reason");
 
     /// Pipelined-Requests
     /// [[RFC7826, Section 18.33](https://tools.ietf.org/html/rfc7826#section-18.33)]
-    (PipelinedRequests, "pipelined-requests");
+    (PipelinedRequests, "pipelined-requests", "Pipelined-Requests");
 
     /// Proxy-Authenticate
     /// [[RFC7826, Section 18.34](https://tools.ietf.org/html/rfc7826#section-18.34)]
-    (ProxyAuthenticate, "proxy-authenticate");
+    (ProxyAuthenticate, "proxy-authenticate", "Proxy-Authenticate");
 
     /// Proxy-Authentication-Info
     /// [[RFC7826, Section 18.35](https://tools.ietf.org/html/rfc7826#section-18.35)]
-    (ProxyAuthenticationInfo, "proxy-authentication-info");
+    (ProxyAuthenticationInfo, "proxy-authentication-info", "Proxy-Authentication-Info");
 
     /// Proxy-Authorization
     /// [[RFC7826, Section 18.36](https://tools.ietf.org/html/rfc7826#section-18.36)]
-    (ProxyAuthorization, "proxy-authorization");
+    (ProxyAuthorization, "proxy-authorization", "Proxy-Authorization");
 
     /// Proxy-Require
     /// [[RFC7826, Section 18.37](https://tools.ietf.org/html/rfc7826#section-18.37)]
-    (ProxyRequire, "proxy-require");
+    (ProxyRequire, "proxy-require", "Proxy-Require");
 
     /// Proxy-Supported
     /// [[RFC7826, Section 18.38](https://tools.ietf.org/html/rfc7826#section-18.38)]
-    (ProxySupported, "proxy-supported");
+    (ProxySupported, "proxy-supported", "Proxy-Supported");
 
     /// Public
     /// [[RFC7826, Section 18.39](https://tools.ietf.org/html/rfc7826#section-18.39)]
-    (Public, "public");
+    (Public, "public", "Public");
 
     /// Range
     /// [[RFC7826, Section 18.40](https://tools.ietf.org/html/rfc7826#section-18.40)]
-    (Range, "range");
+    (Range, "range", "Range");
 
     /// Referrer
     /// [[RFC7826, Section 18.41](https://tools.ietf.org/html/rfc7826#section-18.41)]
-    (Referrer, "referrer");
+    (Referrer, "referrer", "Referrer");
 
     /// Request-Status
     /// [[RFC7826, Section 18.42](https://tools.ietf.org/html/rfc7826#section-18.42)]
-    (RequestStatus, "request-status");
+    (RequestStatus, "request-status", "Request-Status");
 
     /// Require
     /// [[RFC7826, Section 18.43](https://tools.ietf.org/html/rfc7826#section-18.43)]
-    (Require, "require");
+    (Require, "require", "Require");
 
     /// Retry-After
     /// [[RFC7826, Section 18.44](https://tools.ietf.org/html/rfc7826#section-18.44)]
-    (RetryAfter, "retry-after");
+    (RetryAfter, "retry-after", "Retry-After");
 
     /// RTP-Info
     /// [[RFC7826, Section 18.45](https://tools.ietf.org/html/rfc7826#section-18.45)]
-    (RTPInfo, "rtp-info");
+    (RTPInfo, "rtp-info", "RTP-Info");
 
     /// Scale
     /// [[RFC7826, Section 18.46](https://tools.ietf.org/html/rfc7826#section-18.46)]
-    (Scale, "scale");
+    (Scale, "scale", "Scale");
 
     /// Seek-Style
     /// [[RFC7826, Section 18.47](https://tools.ietf.org/html/rfc7826#section-18.47)]
-    (SeekStyle, "seek-style");
+    (SeekStyle, "seek-style", "Seek-Style");
 
     /// Server
     /// [[RFC7826, Section 18.48](https://tools.ietf.org/html/rfc7826#section-18.48)]
-    (Server, "server");
+    (Server, "server", "Server");
 
     /// Session
     /// [[RFC7826, Section 18.49](https://tools.ietf.org/html/rfc7826#section-18.49)]
-    (Session, "session");
+    (Session, "session", "Session");
 
     /// Speed
     /// [[RFC7826, Section 18.50](https://tools.ietf.org/html/rfc7826#section-18.50)]
-    (Speed, "speed");
+    (Speed, "speed", "Speed");
 
     /// Supported
     /// [[RFC7826, Section 18.51](https://tools.ietf.org/html/rfc7826#section-18.51)]
-    (Supported, "supported");
+    (Supported, "supported", "Supported");
 
     /// Terminate-Reason
     /// [[RFC7826, Section 18.52](https://tools.ietf.org/html/rfc7826#section-18.52)]
-    (TerminateReason, "terminate-reason");
+    (TerminateReason, "terminate-reason", "Terminate-Reason");
 
     /// Timestamp
     /// [[RFC7826, Section 18.53](https://tools.ietf.org/html/rfc7826#section-18.53)]
-    (Timestamp, "timestamp");
+    (Timestamp, "timestamp", "Timestamp");
 
     /// Transport
     /// [[RFC7826, Section 18.54](https://tools.ietf.org/html/rfc7826#section-18.54)]
-    (Transport, "transport");
+    (Transport, "transport", "Transport");
 
     /// Unsupported
     /// [[RFC7826, Section 18.55](https://tools.ietf.org/html/rfc7826#section-18.55)]
-    (Unsupported, "unsupported");
+    (Unsupported, "unsupported", "Unsupported");
 
     /// User-Agent
     /// [[RFC7826, Section 18.56](https://tools.ietf.org/html/rfc7826#section-18.56)]
-    (UserAgent, "user-agent");
+    (UserAgent, "user-agent", "User-Agent");
 
     /// Via
     /// [[RFC7826, Section 18.57](https://tools.ietf.org/html/rfc7826#section-18.57)]
-    (Via, "via");
+    (Via, "via", "Via");
 
     /// WWW-Authenticate
     /// [[RFC7826, Section 18.58](https://tools.ietf.org/html/rfc7826#section-18.58)]
-    (WWWAuthenticate, "www-authenticate");
+    (WWWAuthenticate, "www-authenticate", "WWW-Authenticate");
 }
