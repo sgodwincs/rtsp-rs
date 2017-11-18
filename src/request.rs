@@ -11,6 +11,7 @@ use std::mem::replace;
 use header::{HeaderMap, HeaderName, HeaderValue};
 use method::Method;
 use uri::URI;
+use version;
 use version::Version;
 
 /// Represents an RTSP request.
@@ -372,11 +373,16 @@ impl Builder {
     /// ```
     pub fn version<T>(&mut self, version: T) -> &mut Self
     where
-        Version: TryFrom<T>,
+        Version: TryFrom<T, Error = version::Error>,
     {
         match Version::try_from(version) {
             Ok(version) => self.version = version,
-            Err(_) => self.error = Some(BuilderError::InvalidVersion),
+            Err(error) => {
+                self.error = Some(match error {
+                    version::Error::InvalidVersion => BuilderError::InvalidVersion,
+                    version::Error::UnknownVersion => BuilderError::UnknownVersion,
+                })
+            }
         }
 
         self
@@ -407,4 +413,5 @@ pub enum BuilderError {
     InvalidVersion,
     MissingMethod,
     MissingURI,
+    UnknownVersion,
 }

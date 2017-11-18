@@ -9,6 +9,7 @@ use std::mem::replace;
 
 use header::{HeaderMap, HeaderName, HeaderValue};
 use status::StatusCode;
+use version;
 use version::Version;
 
 /// Represents an RTSP response.
@@ -219,8 +220,20 @@ impl Builder {
     ///     .build(())
     ///     .unwrap();
     /// ```
-    pub fn version(&mut self, version: Version) -> &mut Self {
-        self.version = version;
+    pub fn version<T>(&mut self, version: T) -> &mut Self
+    where
+        Version: TryFrom<T, Error = version::Error>,
+    {
+        match Version::try_from(version) {
+            Ok(version) => self.version = version,
+            Err(error) => {
+                self.error = Some(match error {
+                    version::Error::InvalidVersion => BuilderError::InvalidVersion,
+                    version::Error::UnknownVersion => BuilderError::UnknownVersion,
+                })
+            }
+        }
+
         self
     }
 }
@@ -244,5 +257,7 @@ pub enum BuilderError {
     InvalidHeaderName,
     InvalidHeaderValue,
     InvalidStatusCode,
+    InvalidVersion,
     MissingReasonPhrase,
+    UnknownVersion,
 }
