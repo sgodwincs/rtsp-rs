@@ -11,8 +11,8 @@ use std::{error, fmt, str};
 use url::Url;
 
 /// This is a wrapper type to prevent users from creating instances of `URI` with unchecked `Url`s.
-/// This make using this slightly inconvenient as another level of redirection is required to access
-/// the underlying `Url`.
+/// This unfortunately makes using `URI` slightly inconvenient as another level of redirection is
+/// required to access the underlying `Url`.
 #[derive(Clone, Eq, Hash, PartialEq)]
 pub struct URIInner(Url);
 
