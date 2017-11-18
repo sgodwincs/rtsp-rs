@@ -69,7 +69,7 @@ pub fn quoted_string(string: &str) -> Option<&str> {
 /// [[RFC7826](https://tools.ietf.org/html/rfc782)]. Specifically, whitespace includes `' '`,
 /// `'\t'`, and `"\r\n"`. The trim functions defined on the `str` slice do not seem to be enough to
 /// trim the whitespace in a one liner, so this function is used.
-pub fn trim_whitespace(mut string: &str) -> &str {
+pub fn trim_whitespace(string: &str) -> &str {
     trim_whitespace_right(trim_whitespace_left(string))
 }
 
