@@ -65,6 +65,8 @@ mod map;
 mod name;
 mod value;
 
+pub mod types;
+
 pub use self::map::{AsHeaderName, Drain, Entry, GetAll, HeaderMap, IntoHeaderName, IntoIter, Iter,
                     Keys, OccupiedEntry, VacantEntry, ValueDrain, ValueIter, ValueIterMut, Values};
 pub use self::name::{HeaderName, InvalidHeaderName};
@@ -72,7 +74,18 @@ pub use self::value::{HeaderValue, InvalidHeaderValue};
 
 /// Maximum length of a header name
 ///
-/// Generally, 64KB for a header name is WAY too much than would ever be needed in practice.
+/// Generally, 64KB for a header name is *way* too much than would ever be needed in practice.
 /// Restricting it to this size enables using `u16` values to represent offsets when dealing with
 /// header names.
 const MAX_HEADER_NAME_LENGTH: usize = 1 << 16;
+
+pub struct InvalidHeader;
+
+pub trait Header {
+    fn from_header_raw(header: &[&HeaderValue]) -> Result<Self, InvalidHeader>
+    where
+        Self: Sized;
+    fn into_header_raw(self) -> Vec<HeaderValue>
+    where
+        Self: Sized;
+}
