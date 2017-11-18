@@ -2,13 +2,20 @@
 use std::convert::TryFrom;
 use std::ops::Deref;
 
-use header::{Header, HeaderValue, InvalidHeader};
+use header::{Header, HeaderName, HeaderValue, InvalidHeader};
 use syntax::trim_whitespace_left;
 
+/// The RFC states that the content length of a request/response can be up to 19 digits long which
+/// actually would require use of u64, but since the length of the buffer during decoding is of
+/// type `usize`, this cannot be guaranteed on all platforms.
 #[derive(Clone, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct ContentLength(usize);
 
 impl Header for ContentLength {
+    fn header_name() -> HeaderName {
+        HeaderName::ContentLength
+    }
+
     fn from_header_raw(header: &[&HeaderValue]) -> Result<Self, InvalidHeader> {
         assert!(!header.is_empty());
 

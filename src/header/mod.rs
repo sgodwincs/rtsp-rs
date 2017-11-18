@@ -82,6 +82,8 @@ const MAX_HEADER_NAME_LENGTH: usize = 1 << 16;
 pub struct InvalidHeader;
 
 pub trait Header {
+    fn header_name() -> HeaderName;
+
     fn from_header_raw(header: &[&HeaderValue]) -> Result<Self, InvalidHeader>
     where
         Self: Sized;
