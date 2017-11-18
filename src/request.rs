@@ -5,7 +5,7 @@
 //! reaching into this module itself.
 
 use std::convert::TryFrom;
-use std::fmt;
+use std::{error, fmt};
 use std::mem::replace;
 
 use header::{HeaderMap, HeaderName, HeaderValue};
@@ -414,4 +414,29 @@ pub enum BuilderError {
     MissingMethod,
     MissingURI,
     UnknownVersion,
+}
+
+impl fmt::Display for BuilderError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use std::error::Error;
+
+        write!(f, "{}", self.description())
+    }
+}
+
+impl error::Error for BuilderError {
+    fn description(&self) -> &str {
+        use self::BuilderError::*;
+
+        match self {
+            &InvalidHeaderName => "invalid RTSP header name",
+            &InvalidHeaderValue => "invalid RTSP header value",
+            &InvalidMethod => "invalid RTSP method",
+            &InvalidURI => "invalid RTSP URI",
+            &InvalidVersion => "invalid RTSP version",
+            &MissingMethod => "missing RTSP method",
+            &MissingURI => "missing RTSP URI",
+            &UnknownVersion => "unknown RTSP version",
+        }
+    }
 }

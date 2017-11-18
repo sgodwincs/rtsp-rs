@@ -5,6 +5,7 @@
 //! rather than reaching into this module itself.
 
 use std::convert::TryFrom;
+use std::{error, fmt};
 use std::mem::replace;
 
 use header::{HeaderMap, HeaderName, HeaderValue};
@@ -260,4 +261,27 @@ pub enum BuilderError {
     InvalidVersion,
     MissingReasonPhrase,
     UnknownVersion,
+}
+
+impl fmt::Display for BuilderError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use std::error::Error;
+
+        write!(f, "{}", self.description())
+    }
+}
+
+impl error::Error for BuilderError {
+    fn description(&self) -> &str {
+        use self::BuilderError::*;
+
+        match self {
+            &InvalidHeaderName => "invalid RTSP header name",
+            &InvalidHeaderValue => "invalid RTSP header value",
+            &InvalidStatusCode => "invalid RTSP status code",
+            &InvalidVersion => "invalid RTSP version",
+            &MissingReasonPhrase => "missing RTSP reason phrase",
+            &UnknownVersion => "unknown RTSP version",
+        }
+    }
 }
