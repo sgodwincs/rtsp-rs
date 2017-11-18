@@ -41,6 +41,9 @@ fn trim_header(mut header: &[u8]) -> &[u8] {
 }
 
 impl RequestCodec {
+    /// This function more so just extracts the body with a length determined by the content length
+    /// than it does parse it. This decoder does not try to parse the body based on the content
+    /// type, this should be done at a higher level.
     fn parse_body(&mut self, buffer: &mut BytesMut) -> Option<io::Result<()>> {
         if *self.content_length > buffer.len() {
             None
@@ -51,6 +54,17 @@ impl RequestCodec {
         }
     }
 
+    /// A helper function to parse a header. This function will return two indices where one is
+    /// optional. The first index will be the end of the header, while the second index is an
+    /// `Option<usize>` of where the the header name and value are separated (the index of the `:`).
+    /// RTSP allows for having multiline headers as long as newlines contained within header values
+    /// start with a space or tab.
+    ///
+    /// If the newline found is empty (meaning the header section is over), then the content length
+    /// of the request will be calculated. An absence of the `Content-Length` header implicitly
+    /// implies that the content length is 0. If there is more than one content length header or
+    /// the value of the header cannot be parsed correctly, then the connection will be closed on
+    /// return of the IO error.
     fn parse_header_multiline(
         &mut self,
         buffer: &mut BytesMut,
@@ -114,6 +128,11 @@ impl RequestCodec {
         }
     }
 
+    /// Parses a header of the request. The parsed header name will be trimmed on the right for any
+    /// spaces and tabs, but the header value will remained completely untouched. This is because
+    /// the syntax of an RTSP header is ambiguous as to whether whitespace is simply whitespace
+    /// allowed after the colon or if the whitespace is significant to the header value (since
+    /// header values are allowed to have whitespace as part of their value).
     fn parse_header(&mut self, buffer: &mut BytesMut) -> Option<io::Result<()>> {
         match self.parse_header_multiline(buffer) {
             Some(Ok((i, j))) => {
@@ -135,6 +154,12 @@ impl RequestCodec {
         }
     }
 
+    /// Parses the request line of the request. Any empty newlines prior to the request line are
+    /// ignored. As long as the request line if of the form `METHOD URI VERSION\r\n` where `METHOD`,
+    /// `URI`, and `VERSION` are not necessarily valid values, the request will continue to be
+    /// parsed. This allows for handling bad requests for invalid method characters for example. If
+    /// the request line is not of that form, then there is no way to recover, so the connection
+    /// will just be closed on return of the IO error.
     fn parse_request_line(&mut self, buffer: &mut BytesMut) -> Option<io::Result<()>> {
         match consume_line(buffer) {
             Some((_, 0)) => {
@@ -159,6 +184,8 @@ impl RequestCodec {
                         return Some(Ok(()));
                     }
                 }
+
+                // Request line was not of the form `METHOD URI VERISON\r\n`.
 
                 Some(Err(io::Error::new(
                     io::ErrorKind::Other,
