@@ -171,7 +171,7 @@ impl RequestCodec {
 }
 
 impl Decoder for RequestCodec {
-    type Item = Result<Request<Option<BytesMut>>, BuilderError>;
+    type Item = Result<Request<BytesMut>, BuilderError>;
     type Error = io::Error;
 
     fn decode(&mut self, buffer: &mut BytesMut) -> io::Result<Option<Self::Item>> {
@@ -183,7 +183,7 @@ impl Decoder for RequestCodec {
                 Header => self.parse_header(buffer),
                 RequestLine => self.parse_request_line(buffer),
                 End => {
-                    let request = self.builder.build(replace(&mut self.body, None));
+                    let request = self.builder.build(replace(&mut self.body, None).unwrap());
                     self.state = RequestLine;
 
                     break Ok(Some(request));
