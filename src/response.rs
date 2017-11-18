@@ -5,6 +5,7 @@
 //! rather than reaching into this module itself.
 
 use std::convert::TryFrom;
+use std::mem::replace;
 
 use header::{HeaderMap, HeaderName, HeaderValue};
 use status::StatusCode;
@@ -109,7 +110,7 @@ impl Builder {
     /// # Errors
     ///
     /// This function may return an error if part of the response is invalid (such as a header).
-    pub fn build<T>(self, body: T) -> Result<Response<T>, BuilderError> {
+    pub fn build<T>(&mut self, body: T) -> Result<Response<T>, BuilderError> {
         if let Some(error) = self.error {
             return Err(error);
         }
@@ -122,8 +123,8 @@ impl Builder {
 
         Ok(Response {
             body,
-            custom_reason_phrase: self.custom_reason_phrase,
-            headers: self.headers,
+            custom_reason_phrase: replace(&mut self.custom_reason_phrase, None),
+            headers: replace(&mut self.headers, HeaderMap::new()),
             status_code: self.status_code,
             version: self.version,
         })

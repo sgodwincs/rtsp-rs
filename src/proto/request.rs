@@ -185,8 +185,7 @@ impl Decoder for RequestCodec {
                 Header => self.parse_header(buffer),
                 RequestLine => self.parse_request_line(buffer),
                 End => {
-                    let request = replace(&mut self.builder, Builder::new())
-                        .build(replace(&mut self.body, None));
+                    let request = self.builder.build(replace(&mut self.body, None));
                     self.state = RequestLine;
 
                     break Ok(Some(request));

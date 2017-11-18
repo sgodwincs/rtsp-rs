@@ -6,6 +6,7 @@
 
 use std::convert::TryFrom;
 use std::fmt;
+use std::mem::replace;
 
 use header::{HeaderMap, HeaderName, HeaderValue};
 use method::Method;
@@ -217,16 +218,16 @@ impl Builder {
     ///
     /// This function may return an error if part of the request has not been configured (such as
     /// the method or URI) or a configured part is invalid (such as a header).
-    pub fn build<T>(self, body: T) -> Result<Request<T>, BuilderError> {
+    pub fn build<T>(&mut self, body: T) -> Result<Request<T>, BuilderError> {
         if let Some(error) = self.error {
             return Err(error);
         }
 
-        if let Some(method) = self.method {
-            if let Some(uri) = self.uri {
+        if let Some(method) = replace(&mut self.method, None) {
+            if let Some(uri) = replace(&mut self.uri, None) {
                 Ok(Request {
                     body,
-                    headers: self.headers,
+                    headers: replace(&mut self.headers, HeaderMap::new()),
                     method,
                     uri,
                     version: self.version,
