@@ -165,7 +165,9 @@ impl RequestCodec {
     /// `URI`, and `VERSION` are not necessarily valid values, the request will continue to be
     /// parsed. This allows for handling bad requests for invalid method characters for example. If
     /// the request line is not of that form, then there is no way to recover, so the connection
-    /// will just be closed on return of the IO error.
+    /// will just be closed on return of the IO error. An IO error will also be returned if the
+    /// RTSP version given is not RTSP/2.0 since that is the only version this implementation
+    /// supports.
     fn parse_request_line(&mut self, buffer: &mut BytesMut) -> Option<io::Result<()>> {
         match consume_line(buffer) {
             Some((_, 0)) => {
