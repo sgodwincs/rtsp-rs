@@ -85,13 +85,13 @@ impl HeaderName {
     /// A helper function that creates a new `HeaderName` instance with the given header name
     /// extension. It first checks to see if the header name is valid, and if not, it will return an
     /// error.
-    fn extension(name: &[u8]) -> Result<HeaderName, InvalidHeaderName> {
+    fn extension(name: &[u8], name_lower: &[u8]) -> Result<HeaderName, InvalidHeaderName> {
         if !is_token(name) {
             return Err(InvalidHeaderName);
         }
 
         let name = unsafe { AsciiString::from_ascii_unchecked(name) };
-        let name_lower = name.to_ascii_lowercase();
+        let name_lower = unsafe { AsciiString::from_ascii_unchecked(name_lower) };
         Ok(HeaderName::Extension(ExtensionHeaderName(name, name_lower)))
     }
 }
@@ -252,40 +252,40 @@ impl<'a> TryFrom<&'a [u8]> for HeaderName {
         match value_lower.len() {
             3 => match value_lower.as_slice() {
                 b"via" => Ok(Via),
-                _ => HeaderName::extension(value),
+                _ => HeaderName::extension(value, value_lower.as_slice()),
             },
             4 => match value_lower.as_slice() {
                 b"cseq" => Ok(CSeq),
                 b"date" => Ok(Date),
                 b"from" => Ok(From),
                 b"mtag" => Ok(MTag),
-                _ => HeaderName::extension(value),
+                _ => HeaderName::extension(value, value_lower.as_slice()),
             },
             5 => match value_lower.as_slice() {
                 b"allow" => Ok(Allow),
                 b"range" => Ok(Range),
                 b"scale" => Ok(Scale),
                 b"speed" => Ok(Speed),
-                _ => HeaderName::extension(value),
+                _ => HeaderName::extension(value, value_lower.as_slice()),
             },
             6 => match value_lower.as_slice() {
                 b"accept" => Ok(Accept),
                 b"public" => Ok(Public),
                 b"server" => Ok(Server),
-                _ => HeaderName::extension(value),
+                _ => HeaderName::extension(value, value_lower.as_slice()),
             },
             7 => match value_lower.as_slice() {
                 b"expires" => Ok(Expires),
                 b"require" => Ok(Require),
                 b"session" => Ok(Session),
-                _ => HeaderName::extension(value),
+                _ => HeaderName::extension(value, value_lower.as_slice()),
             },
             8 => match value_lower.as_slice() {
                 b"if-match" => Ok(IfMatch),
                 b"location" => Ok(Location),
                 b"referrer" => Ok(Referrer),
                 b"rtp-info" => Ok(RTPInfo),
-                _ => HeaderName::extension(value),
+                _ => HeaderName::extension(value, value_lower.as_slice()),
             },
             9 => match value_lower.as_slice() {
                 b"bandwidth" => Ok(Bandwidth),
@@ -293,24 +293,24 @@ impl<'a> TryFrom<&'a [u8]> for HeaderName {
                 b"supported" => Ok(Supported),
                 b"timestamp" => Ok(Timestamp),
                 b"transport" => Ok(Transport),
-                _ => HeaderName::extension(value),
+                _ => HeaderName::extension(value, value_lower.as_slice()),
             },
             10 => match value_lower.as_slice() {
                 b"connection" => Ok(Connection),
                 b"seek-style" => Ok(SeekStyle),
                 b"user-agent" => Ok(UserAgent),
-                _ => HeaderName::extension(value),
+                _ => HeaderName::extension(value, value_lower.as_slice()),
             },
             11 => match value_lower.as_slice() {
                 b"media-range" => Ok(MediaRange),
                 b"retry-after" => Ok(RetryAfter),
                 b"unsupported" => Ok(Unsupported),
-                _ => HeaderName::extension(value),
+                _ => HeaderName::extension(value, value_lower.as_slice()),
             },
             12 => match value_lower.as_slice() {
                 b"content-base" => Ok(ContentBase),
                 b"content-type" => Ok(ContentType),
-                _ => HeaderName::extension(value),
+                _ => HeaderName::extension(value, value_lower.as_slice()),
             },
             13 => match value_lower.as_slice() {
                 b"accept-ranges" => Ok(AcceptRanges),
@@ -320,18 +320,18 @@ impl<'a> TryFrom<&'a [u8]> for HeaderName {
                 b"last-modified" => Ok(LastModified),
                 b"notify-reason" => Ok(NotifyReason),
                 b"proxy-require" => Ok(ProxyRequire),
-                _ => HeaderName::extension(value),
+                _ => HeaderName::extension(value, value_lower.as_slice()),
             },
             14 => match value_lower.as_slice() {
                 b"content-length" => Ok(ContentLength),
                 b"request-status" => Ok(RequestStatus),
-                _ => HeaderName::extension(value),
+                _ => HeaderName::extension(value, value_lower.as_slice()),
             },
             15 => match value_lower.as_slice() {
                 b"accept-encoding" => Ok(AcceptEncoding),
                 b"accept-language" => Ok(AcceptLanguage),
                 b"proxy-supported" => Ok(ProxySupported),
-                _ => HeaderName::extension(value),
+                _ => HeaderName::extension(value, value_lower.as_slice()),
             },
             16 => match value_lower.as_slice() {
                 b"content-encoding" => Ok(ContentEncoding),
@@ -340,32 +340,32 @@ impl<'a> TryFrom<&'a [u8]> for HeaderName {
                 b"media-properties" => Ok(MediaProperties),
                 b"terminate-reason" => Ok(TerminateReason),
                 b"www-authenticate" => Ok(WWWAuthenticate),
-                _ => HeaderName::extension(value),
+                _ => HeaderName::extension(value, value_lower.as_slice()),
             },
             17 => match value_lower.as_slice() {
                 b"if-modified-since" => Ok(IfModifiedSince),
-                _ => HeaderName::extension(value),
+                _ => HeaderName::extension(value, value_lower.as_slice()),
             },
             18 => match value_lower.as_slice() {
                 b"accept-credentials" => Ok(AcceptCredentials),
                 b"pipelined-requests" => Ok(PipelinedRequests),
                 b"proxy-authenticate" => Ok(ProxyAuthenticate),
-                _ => HeaderName::extension(value),
+                _ => HeaderName::extension(value, value_lower.as_slice()),
             },
             19 => match value_lower.as_slice() {
                 b"authentication-info" => Ok(AuthenticationInfo),
                 b"proxy-authorization" => Ok(ProxyAuthorization),
-                _ => HeaderName::extension(value),
+                _ => HeaderName::extension(value, value_lower.as_slice()),
             },
             22 => match value_lower.as_slice() {
                 b"connection-credentials" => Ok(ConnectionCredentials),
-                _ => HeaderName::extension(value),
+                _ => HeaderName::extension(value, value_lower.as_slice()),
             },
             25 => match value_lower.as_slice() {
                 b"proxy-authentication-info" => Ok(ProxyAuthenticationInfo),
-                _ => HeaderName::extension(value),
+                _ => HeaderName::extension(value, value_lower.as_slice()),
             },
-            _ => HeaderName::extension(value),
+            _ => HeaderName::extension(value, value_lower.as_slice()),
         }
     }
 }
