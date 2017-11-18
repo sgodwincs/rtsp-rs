@@ -18,7 +18,6 @@
 //! ```
 
 use ascii::AsciiString;
-use std::ascii::AsciiExt;
 use std::convert::{AsRef, TryFrom};
 use std::error::Error;
 use std::fmt;

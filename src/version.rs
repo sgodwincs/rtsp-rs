@@ -20,7 +20,6 @@
 //! ```
 //!
 
-use std::ascii::AsciiExt;
 use std::convert::TryFrom;
 use std::error;
 use std::fmt;

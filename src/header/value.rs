@@ -1,6 +1,5 @@
 //! RTSP Header Value
 
-use std::ascii::AsciiExt;
 use std::convert::TryFrom;
 use std::error::Error;
 use std::{cmp, fmt, str};
