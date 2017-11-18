@@ -254,7 +254,6 @@ pub enum BuilderError {
     InvalidStatusCode,
     InvalidVersion,
     MissingReasonPhrase,
-    UnknownVersion,
 }
 
 impl fmt::Display for BuilderError {
@@ -275,7 +274,6 @@ impl error::Error for BuilderError {
             &InvalidStatusCode => "invalid RTSP status code",
             &InvalidVersion => "invalid RTSP version",
             &MissingReasonPhrase => "missing RTSP reason phrase",
-            &UnknownVersion => "unknown RTSP version",
         }
     }
 }

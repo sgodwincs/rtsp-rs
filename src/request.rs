@@ -11,7 +11,6 @@ use std::mem::replace;
 use header::{HeaderMap, HeaderName, HeaderValue};
 use method::Method;
 use uri::URI;
-use version;
 use version::Version;
 
 /// Represents an RTSP request.
@@ -408,7 +407,6 @@ pub enum BuilderError {
     InvalidVersion,
     MissingMethod,
     MissingURI,
-    UnknownVersion,
 }
 
 impl fmt::Display for BuilderError {
@@ -431,7 +429,6 @@ impl error::Error for BuilderError {
             &InvalidVersion => "invalid RTSP version",
             &MissingMethod => "missing RTSP method",
             &MissingURI => "missing RTSP URI",
-            &UnknownVersion => "unknown RTSP version",
         }
     }
 }
