@@ -3194,6 +3194,8 @@ where
 
 
 mod into_header_name {
+    use std::convert::TryFrom;
+
     use super::{HeaderMap, HeaderName};
 
     /// A marker trait used to identify values that can be used as insert keys to a `HeaderMap`.
@@ -3252,12 +3254,16 @@ mod into_header_name {
         #[doc(hidden)]
         #[inline]
         fn insert<T>(self, map: &mut HeaderMap<T>, val: T) -> Option<T> {
-            HeaderName::from_static(self, move |header| map.insert2(header, val))
+            let header =
+                HeaderName::try_from(self.as_bytes()).expect("static str is invalid header name");
+            map.insert2(header, val)
         }
         #[doc(hidden)]
         #[inline]
         fn append<T>(self, map: &mut HeaderMap<T>, val: T) -> bool {
-            HeaderName::from_static(self, move |header| map.append2(header, val))
+            let header =
+                HeaderName::try_from(self.as_bytes()).expect("static str is invalid header name");
+            map.append2(header, val)
         }
     }
 
@@ -3265,6 +3271,8 @@ mod into_header_name {
 }
 
 mod as_header_name {
+    use std::convert::TryFrom;
+
     use super::{Entry, HeaderMap, HeaderName, InvalidHeaderName};
 
     /// A marker trait used to identify values that can be used as search keys to a `HeaderMap`.
@@ -3323,13 +3331,16 @@ mod as_header_name {
         #[doc(hidden)]
         #[inline]
         fn entry<T>(self, map: &mut HeaderMap<T>) -> Result<Entry<T>, InvalidHeaderName> {
-            HeaderName::from_bytes(self.as_bytes(), move |hdr| map.entry2(hdr))
+            Ok(map.entry2(HeaderName::try_from(self.as_bytes())?))
         }
 
         #[doc(hidden)]
         #[inline]
         fn find<T>(&self, map: &HeaderMap<T>) -> Option<(usize, usize)> {
-            HeaderName::from_bytes(self.as_bytes(), move |hdr| map.find(&hdr)).unwrap_or(None)
+            match HeaderName::try_from(self.as_bytes()) {
+                Ok(header) => map.find(&header),
+                Err(_) => None,
+            }
         }
     }
 

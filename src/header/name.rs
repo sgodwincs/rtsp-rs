@@ -66,25 +66,6 @@ impl HeaderName {
         let name = unsafe { AsciiString::from_ascii_unchecked(name) };
         Ok(HeaderName::Extension(ExtensionHeaderName(name)))
     }
-
-    /// Only used for `HeaderMap`.
-    pub(super) fn from_static<F, U>(header: &'static str, f: F) -> U
-    where
-        F: FnOnce(HeaderName) -> U,
-    {
-        let header =
-            HeaderName::try_from(header.as_bytes()).expect("static str is invalid header name");
-        f(header)
-    }
-
-    /// Only used for `HeaderMap`.
-    pub(super) fn from_bytes<F, U>(header: &[u8], f: F) -> Result<U, InvalidHeaderName>
-    where
-        F: FnOnce(HeaderName) -> U,
-    {
-        let header = HeaderName::try_from(header)?;
-        Ok(f(header))
-    }
 }
 
 impl AsRef<[u8]> for HeaderName {
