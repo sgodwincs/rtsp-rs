@@ -13,7 +13,7 @@ extern crate tokio_proto;
 extern crate tokio_service;
 extern crate url;
 
-// pub mod proto;
+pub mod proto;
 
 mod syntax;
 
