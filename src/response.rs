@@ -178,6 +178,32 @@ impl Builder {
         self
     }
 
+    /// Set the reason phrase for this response.
+    ///
+    /// This function will configure the RTSP reason phrase of the `Response` that will be returned
+    /// from `build`. If a reason phrase is not given or `None` is supplied here, the canonical
+    /// reason phrase for the given `StatusCode` will be used. If the status code does not have a
+    /// canonical reason phrase (it is an extension), the `build` function will return an error.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rtsp::*;
+    ///
+    /// let response = Response::builder()
+    ///     .status_code(StatusCode::OK)
+    ///     .reason(Some("Good Response"))
+    ///     .build(())
+    ///     .unwrap();
+    /// ```
+    pub fn reason<S>(&mut self, reason_phrase: Option<S>) -> &mut Self
+    where
+        S: Into<String>,
+    {
+        self.custom_reason_phrase = reason_phrase.map(|reason_phrase| reason_phrase.into());
+        self
+    }
+
     /// Set the status code for this response.
     ///
     /// This function will configure the RTSP version of the `Response` that will be returned from
