@@ -146,7 +146,7 @@ impl<T> Request<T> {
         &self.headers
     }
 
-    pub fn map<B, F>(self, f: F) -> Request<B>
+    pub fn map<B, F>(self, mut f: F) -> Request<B>
     where
         F: FnMut(T) -> B,
     {

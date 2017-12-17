@@ -52,7 +52,7 @@ impl<T> Response<T> {
         &self.headers
     }
 
-    pub fn map<B, F>(self, f: F) -> Response<B>
+    pub fn map<B, F>(self, mut f: F) -> Response<B>
     where
         F: FnMut(T) -> B,
     {
