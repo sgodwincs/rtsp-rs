@@ -52,7 +52,12 @@ impl<T> Response<T> {
         &self.headers
     }
 
-    pub fn map<B>(self, body: B) -> Response<B> {
+    pub fn map<B, F>(self, f: F) -> Response<B>
+    where
+        F: FnMut(T) -> B,
+    {
+        let body = f(self.body);
+
         Response {
             body: body,
             custom_reason_phrase: self.custom_reason_phrase,
