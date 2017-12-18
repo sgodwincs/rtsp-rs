@@ -380,7 +380,7 @@ impl<'a> TryFrom<&'a str> for HeaderName {
 
 /// A wrapper type used to avoid users creating extension header names that are actually
 /// standardized header names.
-#[derive(Clone, Eq, Hash, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct ExtensionHeaderName(AsciiString, AsciiString);
 
 impl fmt::Debug for ExtensionHeaderName {
