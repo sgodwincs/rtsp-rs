@@ -4,6 +4,7 @@ use ascii::AsciiString;
 use std::convert::TryFrom;
 use std::error::Error;
 use std::fmt;
+use std::hash::{Hash, Hasher};
 
 use syntax::is_token;
 
@@ -15,7 +16,7 @@ macro_rules! standard_headers {
         )+
     ) => {
         /// An RTSP header name.
-        /// 
+        ///
         /// All standardized header names are supported with an ASCII encoded extension that is
         /// always lowercase.
         #[derive(Clone, Eq, Hash, PartialEq)]
@@ -391,6 +392,12 @@ impl fmt::Debug for ExtensionHeaderName {
 impl fmt::Display for ExtensionHeaderName {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self.0)
+    }
+}
+
+impl Hash for ExtensionHeaderName {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.1.hash(state);
     }
 }
 
