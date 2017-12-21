@@ -59,7 +59,7 @@ where
 /// double quotes and is encoded using UTF-8 with some exceptions regarding ASCII-US characters. Any
 /// use of `'\'` and `'"'` must be escaped with a preceding `'\'`. If the given string is not a
 /// valid quoted string, the return value will be `None`.
-pub fn quoted_string(string: &str) -> Option<&str> {
+pub fn extract_quoted_string(string: &str) -> Option<&str> {
     QUOTED_STRING_RE
         .find(string)
         .map(|m| &string[m.start() + 1..m.end() - 1])
@@ -109,11 +109,11 @@ mod test {
     }
 
     #[test]
-    fn test_quoted_string() {
-        assert_eq!(None, quoted_string(r#""this is a test value"#));
+    fn test_extract_quoted_string() {
+        assert_eq!(None, extract_quoted_string(r#""this is a test value"#));
         assert_eq!(
             Some("this is a test value"),
-            quoted_string(r#""this is a test value""#)
+            extract_quoted_string(r#""this is a test value""#)
         );
     }
 
