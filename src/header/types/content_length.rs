@@ -91,8 +91,16 @@ impl TypedHeader for ContentLength {
         } else {
             trim_whitespace_left(header[0].as_str())
                 .parse::<usize>()
-                .map(|x| ContentLength(x))
                 .map_err(|_| InvalidTypedHeader)
+                .and_then(|x| {
+                    // Content length can have a maximum of 19 digits.
+                    
+                    if x > 9999999999999999999 {
+                        Err(InvalidTypedHeader)
+                    } else {
+                        Ok(ContentLength(x))
+                    }
+                })
         }
     }
 }
