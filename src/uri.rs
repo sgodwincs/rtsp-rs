@@ -30,6 +30,35 @@ pub enum URI {
     URI(URIInner),
 }
 
+impl URI {
+    /// Returns a `&str` representation of the URI. If the URI is `Any`, then the string returned
+    /// will be `*`, otherwise it will be the internal URI as a string.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #![feature(try_from)]
+    /// #
+    /// # use std::convert::TryFrom;
+    /// #
+    /// use rtsp::URI;
+    ///
+    /// let uri = URI::try_from("rtsp://example.com").unwrap();
+    /// assert_eq!(uri.as_str(), "rtsp://example.com/");
+    ///
+    /// let uri = URI::try_from("*").unwrap();
+    /// assert_eq!(uri.as_str(), "*");
+    /// ```
+    pub fn as_str(&self) -> &str {
+        use self::URI::*;
+
+        match *self {
+            Any => "*",
+            URI(ref uri) => uri.0.as_str(),
+        }
+    }
+}
+
 impl fmt::Debug for URIInner {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{:?}", self.0)
@@ -44,23 +73,13 @@ impl fmt::Display for URIInner {
 
 impl fmt::Debug for URI {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use self::URI::*;
-
-        match self {
-            &Any => write!(f, "*"),
-            &URI(ref uri) => write!(f, "{:?}", uri),
-        }
+        write!(f, "{:?}", self.as_str())
     }
 }
 
 impl fmt::Display for URI {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use self::URI::*;
-
-        match self {
-            &Any => write!(f, "*"),
-            &URI(ref uri) => write!(f, "{}", uri),
-        }
+        write!(f, "{}", self.as_str())
     }
 }
 

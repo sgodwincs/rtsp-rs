@@ -38,6 +38,30 @@ pub enum Version {
     RTSP20,
 }
 
+impl Version {
+    /// Returns a `&str` representation of the version.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #![feature(try_from)]
+    /// #
+    /// # use std::convert::TryFrom;
+    /// #
+    /// use rtsp::Version;
+    ///
+    /// assert_eq!(Version::RTSP20.as_str(), "RTSP/2.0");
+    /// ```
+    pub fn as_str(&self) -> &str {
+        use self::Version::*;
+
+        match *self {
+            RTSP10 => "RTSP/1.0",
+            RTSP20 => "RTSP/2.0",
+        }
+    }
+}
+
 impl Default for Version {
     fn default() -> Self {
         Version::RTSP20
@@ -46,22 +70,13 @@ impl Default for Version {
 
 impl fmt::Debug for Version {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use self::Version::*;
-
-        write!(
-            f,
-            "{}",
-            match *self {
-                RTSP10 => "RTSP/1.0",
-                RTSP20 => "RTSP/2.0",
-            }
-        )
+        write!(f, "{:?}", self.as_str())
     }
 }
 
 impl fmt::Display for Version {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:?}", self)
+        write!(f, "{}", self.as_str())
     }
 }
 
