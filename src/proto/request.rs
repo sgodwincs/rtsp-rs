@@ -3,7 +3,7 @@ use std::{error, fmt, io};
 use std::mem::replace;
 use tokio_io::codec::{Decoder, Encoder};
 
-use header::{Entry, Header, HeaderName, HeaderValue};
+use header::{Entry, HeaderName, HeaderValue, TypedHeader};
 use header::types::ContentLength;
 use request::{Builder, BuilderError, Request};
 use version::Version;
@@ -96,8 +96,8 @@ impl RequestCodec {
                             "found multiple \"Content-Length\" headers".to_string(),
                         )));
                     } else {
-                        match ContentLength::from_header_raw(
-                            entry.iter().collect::<Vec<&HeaderValue>>().as_slice(),
+                        match ContentLength::try_from_header_raw(
+                            &entry.iter().cloned().collect::<Vec<HeaderValue>>(),
                         ) {
                             Ok(content_length) => content_length,
                             Err(_) => {
@@ -200,7 +200,7 @@ impl RequestCodec {
                     }
                 }
 
-                // Request line was not of the form `METHOD URI VERISON\r\n`.
+                // Request line was not of the form `METHOD URI VERSION\r\n`.
 
                 Some(Err(io::Error::new(
                     io::ErrorKind::Other,
@@ -248,7 +248,7 @@ impl Encoder for RequestCodec {
     type Item = ();
     type Error = io::Error;
 
-    fn encode(&mut self, message: Self::Item, buffer: &mut BytesMut) -> io::Result<()> {
+    fn encode(&mut self, _message: Self::Item, _buffer: &mut BytesMut) -> io::Result<()> {
         Ok(())
     }
 }
