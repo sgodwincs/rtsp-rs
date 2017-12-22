@@ -1,3 +1,9 @@
+//! RTSP Method
+//!
+//! This module contains structs to allow usage of typed headers instead of their raw counterparts.
+//! The logic in this module is primarily based on the typed header usage defined by the
+//! [Hyper](https://github.com/hyperium/hyper) library with some modifications.
+
 use std::any::{Any, TypeId};
 use std::cell::{Cell, UnsafeCell};
 use std::collections::HashMap;
