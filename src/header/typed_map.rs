@@ -8,6 +8,7 @@ use std::any::{Any, TypeId};
 use std::cell::{Cell, UnsafeCell};
 use std::collections::HashMap;
 use std::error::Error;
+use std::iter::FromIterator;
 use std::{fmt, mem};
 
 use header::{HeaderName, HeaderValue};
@@ -304,6 +305,28 @@ impl TypedHeaderMap {
         self.0.contains_key(name)
     }
 
+    /// Returns an iterator over the currently set headers.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rtsp::*;
+    /// use rtsp::header::types::ContentLength;
+    ///
+    /// let mut map = TypedHeaderMap::new();
+    /// map.set(ContentLength(20));
+    ///
+    /// for view in map.iter() {
+    ///     // The following will print `Content-Length`.
+    ///     println!("{}", view.name().canonical_name());
+    /// }
+    /// ```
+    pub fn iter(&self) -> TypedHeaderItems {
+        TypedHeaderItems {
+            inner: self.0.iter(),
+        }
+    }
+
     /// Returns the number of headers currently set in the map.
     ///
     /// # Examples
@@ -409,6 +432,78 @@ impl TypedHeaderMap {
     /// ```
     pub fn set_raw(&mut self, name: HeaderName, value: Vec<HeaderValue>) {
         self.0.insert(name, TypedHeaderItem::new_raw(value));
+    }
+}
+
+/// Immutable iterator over header items.
+pub struct TypedHeaderItems<'a> {
+    inner: ::std::collections::hash_map::Iter<'a, HeaderName, TypedHeaderItem>,
+}
+
+impl<'a> Iterator for TypedHeaderItems<'a> {
+    type Item = TypedHeaderView<'a>;
+
+    fn next(&mut self) -> Option<TypedHeaderView<'a>> {
+        self.inner
+            .next()
+            .map(|(name, value)| TypedHeaderView(name, value))
+    }
+}
+
+pub struct TypedHeaderView<'a>(&'a HeaderName, &'a TypedHeaderItem);
+
+impl<'a> TypedHeaderView<'a> {
+    pub fn is<H: TypedHeader>(&self) -> bool {
+        H::header_name() == *self.0
+    }
+
+    pub fn name(&self) -> &HeaderName {
+        self.0
+    }
+
+    pub fn raw(&self) -> &'a Vec<HeaderValue> {
+        self.1.raw()
+    }
+
+    pub fn typed<H: TypedHeader>(&self) -> Result<&'a H, InvalidTypedHeader> {
+        self.1.typed::<H>()
+    }
+}
+
+impl<'a> fmt::Debug for TypedHeaderView<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        for raw in self.raw().iter() {
+            write!(f, "{}: {}\r\n", self.name().as_str(), raw.as_str())?;
+        }
+
+        Ok(())
+    }
+}
+impl<'a> fmt::Display for TypedHeaderView<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl<'a> Extend<TypedHeaderView<'a>> for TypedHeaderMap {
+    fn extend<I>(&mut self, iter: I)
+    where
+        I: IntoIterator<Item = TypedHeaderView<'a>>,
+    {
+        for header in iter {
+            self.0.insert(header.0.clone(), header.1.clone());
+        }
+    }
+}
+
+impl<'a> FromIterator<TypedHeaderView<'a>> for TypedHeaderMap {
+    fn from_iter<I>(iter: I) -> TypedHeaderMap
+    where
+        I: IntoIterator<Item = TypedHeaderView<'a>>,
+    {
+        let mut map = TypedHeaderMap::new();
+        map.extend(iter);
+        map
     }
 }
 
