@@ -142,8 +142,16 @@ impl<T> Request<T> {
         &self.body
     }
 
+    pub fn body_mut(&mut self) -> &mut T {
+        &mut self.body
+    }
+
     pub fn headers(&self) -> &HeaderMap<HeaderValue> {
         &self.headers
+    }
+
+    pub fn headers_mut(&mut self) -> &mut HeaderMap<HeaderValue> {
+        &mut self.headers
     }
 
     pub fn map<B, F>(self, mut f: F) -> Request<B>
@@ -165,12 +173,24 @@ impl<T> Request<T> {
         &self.method
     }
 
+    pub fn method_mut(&mut self) -> &mut Method {
+        &mut self.method
+    }
+
     pub fn uri(&self) -> &URI {
         &self.uri
     }
 
+    pub fn uri_mut(&mut self) -> &mut URI {
+        &mut self.uri
+    }
+
     pub fn version(&self) -> Version {
         self.version
+    }
+
+    pub fn version_mut(&mut self) -> &mut Version {
+        &mut self.version
     }
 }
 

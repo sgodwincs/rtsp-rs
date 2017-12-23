@@ -48,8 +48,16 @@ impl<T> Response<T> {
         &self.body
     }
 
+    pub fn body_mut(&mut self) -> &mut T {
+        &mut self.body
+    }
+
     pub fn headers(&self) -> &HeaderMap<HeaderValue> {
         &self.headers
+    }
+
+    pub fn headers_mut(&mut self) -> &mut HeaderMap<HeaderValue> {
+        &mut self.headers
     }
 
     pub fn map<B, F>(self, mut f: F) -> Response<B>
@@ -78,8 +86,16 @@ impl<T> Response<T> {
         &self.status_code
     }
 
+    pub fn status_code_mut(&mut self) -> &mut StatusCode {
+        &mut self.status_code
+    }
+
     pub fn version(&self) -> Version {
         self.version
+    }
+
+    pub fn version_mut(&mut self) -> &mut Version {
+        &mut self.version
     }
 }
 
@@ -190,6 +206,10 @@ impl Builder {
     /// reason phrase for the given `StatusCode` will be used. If the status code does not have a
     /// canonical reason phrase (it is an extension), the `build` function will return an error.
     ///
+    /// The given reason phrase must be non-empty and be valid UTF-8 with a subset of characters
+    /// allowed from ASCII-US. If these conditions are not met, the `build` function will return an
+    /// error.
+    ///
     /// # Examples
     ///
     /// ```
@@ -205,7 +225,23 @@ impl Builder {
     where
         S: Into<String>,
     {
-        self.custom_reason_phrase = reason_phrase.map(|reason_phrase| reason_phrase.into());
+        let custom_reason_phrase = reason_phrase.map(|reason_phrase| reason_phrase.into());
+
+        if let Some(ref custom_reason_phrase) = custom_reason_phrase {
+            if custom_reason_phrase.is_empty() {
+                self.error = Some(BuilderError::InvalidReasonPhrase);
+                return self;
+            }
+
+            for c in custom_reason_phrase.chars() {
+                if c.is_ascii() && (c < ' ' || c > '~') && c != '\t' {
+                    self.error = Some(BuilderError::InvalidReasonPhrase);
+                    return self;
+                }
+            }
+        }
+
+        self.custom_reason_phrase = custom_reason_phrase;
         self
     }
 
@@ -292,6 +328,7 @@ impl Default for Builder {
 pub enum BuilderError {
     InvalidHeaderName,
     InvalidHeaderValue,
+    InvalidReasonPhrase,
     InvalidStatusCode,
     InvalidVersion,
     MissingReasonPhrase,
@@ -312,6 +349,7 @@ impl error::Error for BuilderError {
         match self {
             &InvalidHeaderName => "invalid RTSP header name",
             &InvalidHeaderValue => "invalid RTSP header value",
+            &InvalidReasonPhrase => "invalid RTSP reason phrase",
             &InvalidStatusCode => "invalid RTSP status code",
             &InvalidVersion => "invalid RTSP version",
             &MissingReasonPhrase => "missing RTSP reason phrase",
