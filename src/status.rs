@@ -24,6 +24,8 @@ use std::convert::TryFrom;
 use std::error::Error;
 use std::fmt;
 
+use reason::ReasonPhrase;
+
 macro_rules! status_codes {
     (
         $(
@@ -31,6 +33,13 @@ macro_rules! status_codes {
             ($code:expr, $variant:ident, $phrase:expr);
         )+
     ) => {
+        lazy_static! {
+            $(
+                static ref $variant: ReasonPhrase =
+                    ReasonPhrase::try_from($phrase).expect("canonical reason should be valid");
+            )+
+        }
+
         /// An RTSP status code (as defined in RFC 7826).
         ///
         /// Although the status code is represented as a `u16`, only values between [100, 599]
@@ -80,14 +89,12 @@ macro_rules! status_codes {
             ///
             /// assert_eq!(StatusCode::OK.canonical_reason(), Some("OK"));
             /// ```
-            pub fn canonical_reason(&self) -> Option<&'static str> {
-                use self::StatusCode::*;
-
+            pub fn canonical_reason(&self) -> Option<&'static ReasonPhrase> {
                 match *self {
                 $(
-                    $variant => Some($phrase),
+                    StatusCode::$variant => Some(&$variant),
                 )+
-                    Extension(_) => None
+                    StatusCode::Extension(_) => None
                 }
             }
 
@@ -122,7 +129,7 @@ macro_rules! status_codes {
         fn test_status_code_canonical_reason() {
         $(
             let status_code = StatusCode::$variant;
-            assert_eq!(status_code.canonical_reason().unwrap(), $phrase);
+            assert_eq!(status_code.canonical_reason().unwrap().as_str(), $phrase);
         )+
         }
 

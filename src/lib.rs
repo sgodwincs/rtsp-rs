@@ -1,5 +1,6 @@
 #![feature(slice_patterns)]
 #![feature(try_from)]
+#![recursion_limit = "128"]
 
 extern crate ascii;
 extern crate bytes;

@@ -29,6 +29,14 @@ impl ReasonPhrase {
     pub fn as_str(&self) -> &str {
         self.0.as_str()
     }
+
+    /// Converts a string representation into a `ReasonPhrase` with no validation.
+    pub(crate) unsafe fn from_str_unchecked<S>(value: S) -> Self
+    where
+        S: Into<String>,
+    {
+        ReasonPhrase(value.into())
+    }
 }
 
 impl AsRef<str> for ReasonPhrase {
