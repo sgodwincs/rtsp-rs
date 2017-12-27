@@ -33,13 +33,6 @@ macro_rules! status_codes {
             ($code:expr, $variant:ident, $phrase:expr);
         )+
     ) => {
-        lazy_static! {
-            $(
-                static ref $variant: ReasonPhrase =
-                    ReasonPhrase::try_from($phrase).expect("canonical reason should be valid");
-            )+
-        }
-
         /// An RTSP status code (as defined in RFC 7826).
         ///
         /// Although the status code is represented as a `u16`, only values between [100, 599]
@@ -87,14 +80,16 @@ macro_rules! status_codes {
             /// ```
             /// use rtsp::StatusCode;
             ///
-            /// assert_eq!(StatusCode::OK.canonical_reason(), Some("OK"));
+            /// assert_eq!(StatusCode::OK.canonical_reason().unwrap().as_str(), "OK");
             /// ```
-            pub fn canonical_reason(&self) -> Option<&'static ReasonPhrase> {
+            pub fn canonical_reason(&self) -> Option<ReasonPhrase> {
+                use self::StatusCode::*;
+
                 match *self {
                 $(
-                    StatusCode::$variant => Some(&$variant),
+                    $variant => Some(unsafe { ReasonPhrase::from_str_unchecked($phrase) }),
                 )+
-                    StatusCode::Extension(_) => None
+                    Extension(_) => None
                 }
             }
 

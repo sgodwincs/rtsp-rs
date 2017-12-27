@@ -29,11 +29,9 @@ where
     /// The body component of the response. This is generic to support arbitrary content types.
     body: B,
 
-    /// Specifies a custom reason phrase for the given status code. RTSP allows agents to give
-    /// custom reason phrases and even recommends it in specific cases. If it is detected that the
-    /// status code is an extension or that the reason phrase is not the canonical reason phrase for
-    /// the given status code, then this will be the custom reason phrase.
-    custom_reason_phrase: Option<ReasonPhrase>,
+    /// Specifies a reason phrase for the given status code. RTSP allows agents to give custom
+    /// reason phrases and even recommends it in specific cases.
+    reason_phrase: ReasonPhrase,
 
     /// A header map that will either be `HeaderMap<HeaderValue>` or `TypedHeaderMap`.
     headers: H,
@@ -83,22 +81,19 @@ where
 
         Response {
             body: body,
-            custom_reason_phrase: self.custom_reason_phrase,
             headers: self.headers,
+            reason_phrase: self.reason_phrase,
             status_code: self.status_code,
             version: self.version,
         }
     }
 
-    pub fn reason(&self) -> &str {
-        match self.custom_reason_phrase {
-            Some(ref reason) => reason.as_str(),
-            None => self.status_code.canonical_reason().unwrap(),
-        }
+    pub fn reason(&self) -> &ReasonPhrase {
+        &self.reason_phrase
     }
 
-    pub fn reason_mut(&mut self) -> &mut Option<ReasonPhrase> {
-        &mut self.custom_reason_phrase
+    pub fn reason_mut(&mut self) -> &mut ReasonPhrase {
+        &mut self.reason_phrase
     }
 
     pub fn status_code(&self) -> &StatusCode {
@@ -122,8 +117,8 @@ impl<B> Response<B, HeaderMap<HeaderValue>> {
     pub fn into_typed(self) -> Response<B, TypedHeaderMap> {
         Response {
             body: self.body,
-            custom_reason_phrase: self.custom_reason_phrase,
             headers: self.headers.into(),
+            reason_phrase: self.reason_phrase,
             status_code: self.status_code,
             version: self.version,
         }
@@ -134,8 +129,8 @@ impl<B> Response<B, TypedHeaderMap> {
     pub fn into_untyped(self) -> Response<B, HeaderMap<HeaderValue>> {
         Response {
             body: self.body,
-            custom_reason_phrase: self.custom_reason_phrase,
             headers: self.headers.into(),
+            reason_phrase: self.reason_phrase,
             status_code: self.status_code,
             version: self.version,
         }
@@ -151,7 +146,7 @@ where
         f.debug_struct("Response")
             .field("version", &self.version())
             .field("status", self.status_code())
-            .field("reason", &self.reason().to_string())
+            .field("reason", self.reason())
             .field("headers", self.headers())
             .field("body", self.body())
             .finish()
@@ -204,16 +199,23 @@ where
             return Err(error);
         }
 
-        if let StatusCode::Extension(_) = self.status_code {
+        let reason_phrase = if let StatusCode::Extension(_) = self.status_code {
             if self.custom_reason_phrase.is_none() {
                 return Err(BuilderError::MissingReasonPhrase);
             }
-        }
+
+            self.custom_reason_phrase.take().unwrap()
+        } else {
+            self.status_code
+                .canonical_reason()
+                .expect("status code should be standard")
+                .clone()
+        };
 
         Ok(Response {
             body,
-            custom_reason_phrase: replace(&mut self.custom_reason_phrase, None),
             headers: replace(&mut self.headers, H::default()),
+            reason_phrase,
             status_code: self.status_code,
             version: self.version,
         })
