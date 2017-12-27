@@ -72,12 +72,12 @@ macro_rules! status_codes {
             ///
             /// The reason phrase is defined as being exclusively for human readers. You should
             /// avoid deriving any meaning from it at all costs.
-            /// 
+            ///
             /// # Examples
-            /// 
+            ///
             /// ```
             /// use rtsp::StatusCode;
-            /// 
+            ///
             /// assert_eq!(StatusCode::OK.canonical_reason(), Some("OK"));
             /// ```
             pub fn canonical_reason(&self) -> Option<&'static str> {
@@ -152,12 +152,12 @@ impl From<ExtensionStatusCode> for u16 {
 
 impl StatusCode {
     /// Returns the class that this status code falls under.
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```
     /// use rtsp::{StatusCode, StatusCodeClass};
-    /// 
+    ///
     /// assert_eq!(StatusCode::BadRequest.class(), StatusCodeClass::ClientError);
     /// ```
     pub fn class(&self) -> StatusCodeClass {
@@ -169,17 +169,17 @@ impl StatusCode {
             300...399 => Redirection,
             400...499 => ClientError,
             500...599 => ServerError,
-            _ => panic!("status code with invalid class")
+            _ => panic!("status code with invalid class"),
         }
     }
 
     /// Returns whether the status code is of the informational class (between [100, 199]).
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```
     /// use rtsp::StatusCode;
-    /// 
+    ///
     /// assert!(StatusCode::Continue.is_informational());
     /// assert!(!StatusCode::OK.is_informational());
     /// ```
@@ -188,12 +188,12 @@ impl StatusCode {
     }
 
     /// Returns whether the status code is of the success class (between [200, 299]).
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```
     /// use rtsp::StatusCode;
-    /// 
+    ///
     /// assert!(StatusCode::OK.is_success());
     /// assert!(!StatusCode::NotFound.is_success());
     /// ```
@@ -202,26 +202,26 @@ impl StatusCode {
     }
 
     /// Returns whether the status code is of the redirection class (between [300, 399]).
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```
     /// use rtsp::StatusCode;
-    /// 
+    ///
     /// assert!(StatusCode::Found.is_redirection());
     /// assert!(!StatusCode::BadRequest.is_redirection());
     /// ```
     pub fn is_redirection(&self) -> bool {
         self.class() == StatusCodeClass::Redirection
     }
-    
+
     /// Returns whether the status code is of the client error class (between [400, 499]).
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```
     /// use rtsp::StatusCode;
-    /// 
+    ///
     /// assert!(StatusCode::NotFound.is_client_error());
     /// assert!(!StatusCode::InternalServerError.is_client_error());
     /// ```
@@ -230,12 +230,12 @@ impl StatusCode {
     }
 
     /// Returns whether the status code is of the server error class (between [100, 199]).
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```
     /// use rtsp::StatusCode;
-    /// 
+    ///
     /// assert!(StatusCode::InternalServerError.is_server_error());
     /// assert!(!StatusCode::OK.is_server_error());
     /// ```
@@ -373,7 +373,7 @@ pub enum StatusCodeClass {
 
     /// A status code between [500, 599].
     /// [[RFC7826, Section 17.5]](https://tools.ietf.org/html/rfc7826#section-17.5)
-    ServerError
+    ServerError,
 }
 
 /// A generic error indicating that the status code was invalid.
