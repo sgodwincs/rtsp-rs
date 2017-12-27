@@ -9,6 +9,7 @@ use std::{error, fmt};
 use std::mem::replace;
 
 use header::{HeaderMap, HeaderName, HeaderValue};
+use reason::ReasonPhrase;
 use status::StatusCode;
 use version::Version;
 
@@ -22,7 +23,7 @@ pub struct Response<T> {
     /// custom reason phrases and even recommends it in specific cases. If it is detected that the
     /// status code is an extension or that the reason phrase is not the canonical reason phrase for
     /// the given status code, then this will be the custom reason phrase.
-    custom_reason_phrase: Option<String>,
+    custom_reason_phrase: Option<ReasonPhrase>,
 
     /// The body component of the response. This is generic to support arbitrary content types.
     body: T,
@@ -82,6 +83,10 @@ impl<T> Response<T> {
         }
     }
 
+    pub fn reason_mut(&mut self) -> &mut Option<ReasonPhrase> {
+        &mut self.custom_reason_phrase
+    }
+
     pub fn status_code(&self) -> &StatusCode {
         &self.status_code
     }
@@ -108,7 +113,7 @@ pub struct Builder {
     /// custom reason phrases and even recommends it in specific cases. If it is detected that the
     /// status code is an extension or that the reason phrase is not the canonical reason phrase for
     /// the given status code, then this will be the custom reason phrase.
-    pub(crate) custom_reason_phrase: Option<String>,
+    pub(crate) custom_reason_phrase: Option<ReasonPhrase>,
 
     /// A stored error used when making a `Response`.
     pub(crate) error: Option<BuilderError>,
@@ -221,27 +226,19 @@ impl Builder {
     ///     .build(())
     ///     .unwrap();
     /// ```
-    pub fn reason<S>(&mut self, reason_phrase: Option<S>) -> &mut Self
+    pub fn reason<T>(&mut self, reason_phrase: Option<T>) -> &mut Self
     where
-        S: Into<String>,
+        ReasonPhrase: TryFrom<T>,
     {
-        let custom_reason_phrase = reason_phrase.map(|reason_phrase| reason_phrase.into());
-
-        if let Some(ref custom_reason_phrase) = custom_reason_phrase {
-            if custom_reason_phrase.is_empty() {
-                self.error = Some(BuilderError::InvalidReasonPhrase);
-                return self;
+        if let Some(custom_reason_phrase) = reason_phrase {
+            match ReasonPhrase::try_from(custom_reason_phrase) {
+                Ok(custom_reason_phrase) => self.custom_reason_phrase = Some(custom_reason_phrase),
+                Err(_) => self.error = Some(BuilderError::InvalidReasonPhrase),
             }
-
-            for c in custom_reason_phrase.chars() {
-                if c.is_ascii() && (c < ' ' || c > '~') && c != '\t' {
-                    self.error = Some(BuilderError::InvalidReasonPhrase);
-                    return self;
-                }
-            }
+        } else {
+            self.custom_reason_phrase = None;
         }
 
-        self.custom_reason_phrase = custom_reason_phrase;
         self
     }
 
