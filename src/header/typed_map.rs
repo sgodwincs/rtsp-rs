@@ -109,7 +109,7 @@ mod sealed {
 ///
 /// Note that if two typed headers exist such that their header names are equal, they cannot both
 /// be used in this map at the same time. Doing so will cause a panic.
-#[derive(Clone)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct TypedHeaderMap(HashMap<HeaderName, TypedHeaderItem>);
 
 impl TypedHeaderMap {
@@ -435,6 +435,14 @@ impl TypedHeaderMap {
     }
 }
 
+impl fmt::Debug for TypedHeaderMap {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_map()
+            .entries(self.iter().map(|view| (view.0.as_str(), view.1.raw())))
+            .finish()
+    }
+}
+
 impl Default for TypedHeaderMap {
     fn default() -> Self {
         TypedHeaderMap::new()
@@ -709,6 +717,14 @@ impl Clone for TypedHeaderItem {
         }
     }
 }
+
+impl PartialEq for TypedHeaderItem {
+    fn eq(&self, other: &TypedHeaderItem) -> bool {
+        self.raw() == other.raw()
+    }
+}
+
+impl Eq for TypedHeaderItem {}
 
 #[cfg(test)]
 mod test {
