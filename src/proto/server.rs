@@ -6,9 +6,10 @@ use tokio_io::codec::{Decoder, Encoder};
 use header::{Entry, HeaderName, HeaderValue, TypedHeader};
 use header::types::ContentLength;
 use request::{Builder, BuilderError, Request};
+use response::Response;
 use version::Version;
 
-pub struct RequestCodec {
+pub struct ServerCodec {
     body: Option<BytesMut>,
     builder: Builder,
     content_length: ContentLength,
@@ -46,7 +47,7 @@ fn trim_header(mut header: &[u8]) -> &[u8] {
     header
 }
 
-impl RequestCodec {
+impl ServerCodec {
     /// This function more so just extracts the body with a length determined by the content length
     /// than it does parse it. This decoder does not try to parse the body based on the content
     /// type, this should be done at a higher level.
@@ -96,9 +97,11 @@ impl RequestCodec {
                             "found multiple \"Content-Length\" headers".to_string(),
                         )));
                     } else {
-                        match ContentLength::try_from_header_raw(
-                            &entry.iter().cloned().collect::<Vec<HeaderValue>>(),
-                        ) {
+                        match ContentLength::try_from_header_raw(&entry
+                            .iter()
+                            .cloned()
+                            .collect::<Vec<HeaderValue>>())
+                        {
                             Ok(content_length) => content_length,
                             Err(_) => {
                                 return Some(Err(io::Error::new(
@@ -212,7 +215,7 @@ impl RequestCodec {
     }
 }
 
-impl Decoder for RequestCodec {
+impl Decoder for ServerCodec {
     type Item = Result<Request<BytesMut>, InvalidRequest>;
     type Error = io::Error;
 
@@ -244,18 +247,35 @@ impl Decoder for RequestCodec {
     }
 }
 
-impl Encoder for RequestCodec {
-    type Item = ();
+impl Encoder for ServerCodec {
+    type Item = Response<BytesMut>;
     type Error = io::Error;
 
-    fn encode(&mut self, _message: Self::Item, _buffer: &mut BytesMut) -> io::Result<()> {
+    fn encode(&mut self, message: Self::Item, buffer: &mut BytesMut) -> io::Result<()> {
+        buffer.extend(message.version().as_str().as_bytes());
+        buffer.extend(b" ");
+        buffer.extend(message.status_code().to_string().as_bytes());
+        buffer.extend(b" ");
+        buffer.extend(message.reason().as_bytes());
+        buffer.extend(b"\r\n");
+
+        for (name, value) in message.headers().iter() {
+            buffer.extend(name.canonical_name().as_bytes());
+            buffer.extend(b": ");
+            buffer.extend(value.as_bytes());
+            buffer.extend(b"\r\n");
+        }
+
+        buffer.extend(b"\r\n");
+        buffer.extend(message.body());
+
         Ok(())
     }
 }
 
-impl Default for RequestCodec {
+impl Default for ServerCodec {
     fn default() -> Self {
-        RequestCodec {
+        ServerCodec {
             body: None,
             builder: Builder::new(),
             content_length: ContentLength::from(0),
@@ -313,5 +333,41 @@ impl From<BuilderError> for InvalidRequest {
             BuilderError::MissingMethod => MissingMethod,
             BuilderError::MissingURI => MissingURI,
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    use header::types::ContentLength;
+
+    #[test]
+    fn test_decoder() {
+        // This test is sensitive to the padding in the `Content-Length` header. If a space is added
+        // after the `:`, it will fail.
+
+        let mut buffer = BytesMut::from(
+            "SETUP * RTSP/2.0\r\n\
+             Content-Length:4\r\n\
+             \r\n\
+             Body"
+                .as_bytes(),
+        );
+        let mut decoder = ServerCodec::default();
+        let decoded_request = decoder
+            .decode(&mut buffer)
+            .unwrap()
+            .unwrap()
+            .unwrap()
+            .into_typed();
+        let expected_request = Request::typed_builder()
+            .method("SETUP")
+            .uri("*")
+            .header(ContentLength(4))
+            .build(BytesMut::from("Body".as_bytes()))
+            .unwrap();
+
+        assert_eq!(decoded_request, expected_request);
     }
 }
