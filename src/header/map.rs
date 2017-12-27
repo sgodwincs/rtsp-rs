@@ -2422,8 +2422,7 @@ impl<'a, T: 'a> GetAll<'a, T> {
     /// assert!(iter.next().is_none());
     /// ```
     pub fn iter(&self) -> ValueIter<'a, T> {
-        // This creates a new GetAll struct so that the lifetime
-        // isn't bound to &self.
+        // This creates a new GetAll struct so that the lifetime is not bound to &self.
         GetAll {
             map: self.map,
             index: self.index,
