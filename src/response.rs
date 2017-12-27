@@ -8,7 +8,7 @@ use std::convert::TryFrom;
 use std::{error, fmt};
 use std::mem::replace;
 
-use header::{HeaderMap, HeaderName, HeaderValue};
+use header::{HeaderMap, HeaderName, HeaderValue, TypedHeader, TypedHeaderMap};
 use reason::ReasonPhrase;
 use status::StatusCode;
 use version::Version;
@@ -18,18 +18,21 @@ use version::Version;
 /// An RTSP response consists of a header and a, potentially empty, body. The body component is
 /// generic, enabling arbitrary types to represent the RTSP body.
 #[derive(Clone, Eq, PartialEq)]
-pub struct Response<T> {
+pub struct Response<B, H = HeaderMap<HeaderValue>>
+where
+    H: Default,
+{
+    /// The body component of the response. This is generic to support arbitrary content types.
+    body: B,
+
     /// Specifies a custom reason phrase for the given status code. RTSP allows agents to give
     /// custom reason phrases and even recommends it in specific cases. If it is detected that the
     /// status code is an extension or that the reason phrase is not the canonical reason phrase for
     /// the given status code, then this will be the custom reason phrase.
     custom_reason_phrase: Option<ReasonPhrase>,
 
-    /// The body component of the response. This is generic to support arbitrary content types.
-    body: T,
-
-    /// A multimap of header names to values that maintains insertion order.
-    headers: HeaderMap<HeaderValue>,
+    /// A header map that will either be `HeaderMap<HeaderValue>` or `TypedHeaderMap`.
+    headers: H,
 
     /// The status code of the response.
     status_code: StatusCode,
@@ -42,28 +45,35 @@ impl Response<()> {
     pub fn builder() -> Builder {
         Builder::new()
     }
+
+    pub fn typed_builder() -> Builder<TypedHeaderMap> {
+        Builder::new()
+    }
 }
 
-impl<T> Response<T> {
-    pub fn body(&self) -> &T {
+impl<B, H> Response<B, H>
+where
+    H: Default,
+{
+    pub fn body(&self) -> &B {
         &self.body
     }
 
-    pub fn body_mut(&mut self) -> &mut T {
+    pub fn body_mut(&mut self) -> &mut B {
         &mut self.body
     }
 
-    pub fn headers(&self) -> &HeaderMap<HeaderValue> {
+    pub fn headers(&self) -> &H {
         &self.headers
     }
 
-    pub fn headers_mut(&mut self) -> &mut HeaderMap<HeaderValue> {
+    pub fn headers_mut(&mut self) -> &mut H {
         &mut self.headers
     }
 
-    pub fn map<B, F>(self, mut f: F) -> Response<B>
+    pub fn map<T, F>(self, mut f: F) -> Response<T, H>
     where
-        F: FnMut(T) -> B,
+        F: FnMut(B) -> T,
     {
         let body = f(self.body);
 
@@ -104,11 +114,50 @@ impl<T> Response<T> {
     }
 }
 
+impl<B> Response<B, HeaderMap<HeaderValue>> {
+    pub fn into_typed(self) -> Response<B, TypedHeaderMap> {
+        Response {
+            body: self.body,
+            custom_reason_phrase: self.custom_reason_phrase,
+            headers: self.headers.into(),
+            status_code: self.status_code,
+            version: self.version,
+        }
+    }
+}
+
+impl<B> Response<B, TypedHeaderMap> {
+    pub fn into_untyped(self) -> Response<B, HeaderMap<HeaderValue>> {
+        Response {
+            body: self.body,
+            custom_reason_phrase: self.custom_reason_phrase,
+            headers: self.headers.into(),
+            status_code: self.status_code,
+            version: self.version,
+        }
+    }
+}
+
+impl<B: fmt::Debug> fmt::Debug for Response<B> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("Response")
+            .field("version", &self.version())
+            .field("status", self.status_code())
+            .field("reason", &self.reason().to_string())
+            .field("headers", self.headers())
+            .field("body", self.body())
+            .finish()
+    }
+}
+
 /// An RTSP response builder
 ///
 /// This type can be used to construct a `Response` through a builder-like pattern.
 #[derive(Clone, Debug)]
-pub struct Builder {
+pub struct Builder<H = HeaderMap<HeaderValue>>
+where
+    H: Default,
+{
     /// Specifies a custom reason phrase for the given status code. RTSP allows agents to give
     /// custom reason phrases and even recommends it in specific cases. If it is detected that the
     /// status code is an extension or that the reason phrase is not the canonical reason phrase for
@@ -118,8 +167,8 @@ pub struct Builder {
     /// A stored error used when making a `Response`.
     pub(crate) error: Option<BuilderError>,
 
-    /// A multimap of header names to values that maintains insertion order.
-    pub(crate) headers: HeaderMap<HeaderValue>,
+    /// A header map that will either be `HeaderMap<HeaderValue>` or `TypedHeaderMap`.
+    pub(crate) headers: H,
 
     /// The status code of the response.
     pub(crate) status_code: StatusCode,
@@ -128,17 +177,12 @@ pub struct Builder {
     pub(crate) version: Version,
 }
 
-impl Builder {
+impl<H> Builder<H>
+where
+    H: Default,
+{
     /// Creates a new default instance of a `Builder` to construct a `Response`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use rtsp::response::Builder;
-    ///
-    /// let response = Builder::new();
-    /// ```
-    pub fn new() -> Self {
+    pub fn new() -> Builder<H> {
         Builder::default()
     }
 
@@ -147,7 +191,7 @@ impl Builder {
     /// # Errors
     ///
     /// This function may return an error if part of the response is invalid (such as a header).
-    pub fn build<T>(&mut self, body: T) -> Result<Response<T>, BuilderError> {
+    pub fn build<B>(&mut self, body: B) -> Result<Response<B, H>, BuilderError> {
         if let Some(error) = self.error {
             return Err(error);
         }
@@ -161,47 +205,10 @@ impl Builder {
         Ok(Response {
             body,
             custom_reason_phrase: replace(&mut self.custom_reason_phrase, None),
-            headers: replace(&mut self.headers, HeaderMap::new()),
+            headers: replace(&mut self.headers, H::default()),
             status_code: self.status_code,
             version: self.version,
         })
-    }
-
-    /// Appends a header to this response.
-    ///
-    /// This function will append the provided key/value as a header to the internal `HeaderMap`
-    /// being constructued. Essentially, this is equivalent to calling `HeaderMap::append`. Because
-    /// of this, you are able to add a given header multiple times.
-    ///
-    /// By default, the response contains no headers.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use rtsp::*;
-    ///
-    /// let response = Response::builder()
-    ///     .status_code(StatusCode::MovedPermanently)
-    ///     .header("Location", "rtsp://example.com/resource")
-    ///     .build(())
-    ///     .unwrap();
-    /// ```
-    pub fn header<K, V>(&mut self, key: K, value: V) -> &mut Self
-    where
-        HeaderName: TryFrom<K>,
-        HeaderValue: TryFrom<V>,
-    {
-        match HeaderName::try_from(key) {
-            Ok(key) => match HeaderValue::try_from(value) {
-                Ok(value) => {
-                    self.headers.append(key, value);
-                }
-                Err(_) => self.error = Some(BuilderError::InvalidHeaderValue),
-            },
-            Err(_) => self.error = Some(BuilderError::InvalidHeaderName),
-        }
-
-        self
     }
 
     /// Set the reason phrase for this response.
@@ -307,13 +314,126 @@ impl Builder {
     }
 }
 
-impl Default for Builder {
+impl Builder<HeaderMap<HeaderValue>> {
+    /// Appends a header to this response.
+    ///
+    /// This function will append the provided key/value as a header to the internal `HeaderMap`
+    /// being constructued. Essentially, this is equivalent to calling `HeaderMap::append`. Because
+    /// of this, you are able to add a given header multiple times.
+    ///
+    /// By default, the response contains no headers.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rtsp::*;
+    ///
+    /// let response = Response::builder()
+    ///     .status_code(StatusCode::MovedPermanently)
+    ///     .header("Location", "rtsp://example.com/resource")
+    ///     .build(())
+    ///     .unwrap();
+    /// ```
+    pub fn header<K, V>(&mut self, key: K, value: V) -> &mut Self
+    where
+        HeaderName: TryFrom<K>,
+        HeaderValue: TryFrom<V>,
+    {
+        match HeaderName::try_from(key) {
+            Ok(key) => match HeaderValue::try_from(value) {
+                Ok(value) => {
+                    self.headers.append(key, value);
+                }
+                Err(_) => self.error = Some(BuilderError::InvalidHeaderValue),
+            },
+            Err(_) => self.error = Some(BuilderError::InvalidHeaderName),
+        }
+
+        self
+    }
+
+    /// Converts this builder into a builder that contains typed headers.
+    pub fn into_typed(self) -> Builder<TypedHeaderMap> {
+        Builder {
+            custom_reason_phrase: self.custom_reason_phrase,
+            error: self.error,
+            headers: self.headers.into(),
+            status_code: self.status_code,
+            version: self.version,
+        }
+    }
+}
+
+impl Builder<TypedHeaderMap> {
+    /// Sets a typed header for this request. Since typed headers are used here, this function
+    /// cannot produce an error for the builder.
+    ///
+    /// By default, the request contains no headers.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rtsp::*;
+    /// use rtsp::header::types::*;
+    ///
+    /// let response = Response::typed_builder()
+    ///     .status_code(StatusCode::OK)
+    ///     .header(ContentLength(5))
+    ///     .build(())
+    ///     .unwrap();
+    /// ```
+    pub fn header<H: TypedHeader>(&mut self, header: H) -> &mut Self {
+        self.headers.set(header);
+        self
+    }
+
+    /// Sets a raw header for this request. Since typed headers are used here, this function cannot
+    /// produce an error for the builder.
+    ///
+    /// By default, the request contains no headers.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #![feature(try_from)]
+    /// #
+    /// # use std::convert::TryFrom;
+    /// #
+    /// use rtsp::*;
+    ///
+    /// let response = Response::typed_builder()
+    ///     .status_code(StatusCode::OK)
+    ///     .header_raw(HeaderName::ContentLength, vec![HeaderValue::try_from("5").unwrap()])
+    ///     .build(())
+    ///     .unwrap();
+    /// ```
+    pub fn header_raw(&mut self, name: HeaderName, value: Vec<HeaderValue>) -> &mut Self {
+        self.headers.set_raw(name, value);
+        self
+    }
+
+    /// Converts this builder into a builder that contains untyped headers.
+    pub fn into_untyped(self) -> Builder<HeaderMap<HeaderValue>> {
+        Builder {
+            custom_reason_phrase: self.custom_reason_phrase,
+            error: self.error,
+            headers: self.headers.into(),
+            status_code: self.status_code,
+            version: self.version,
+        }
+    }
+}
+
+impl<H> Default for Builder<H>
+where
+    H: Default,
+{
     #[inline]
     fn default() -> Self {
         Builder {
             custom_reason_phrase: None,
             error: None,
-            headers: HeaderMap::new(),
+            headers: H::default(),
             status_code: StatusCode::default(),
             version: Version::default(),
         }

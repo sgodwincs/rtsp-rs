@@ -8,7 +8,7 @@ use std::convert::TryFrom;
 use std::{error, fmt};
 use std::mem::replace;
 
-use header::{HeaderMap, HeaderName, HeaderValue};
+use header::{HeaderMap, HeaderName, HeaderValue, TypedHeader, TypedHeaderMap};
 use method::Method;
 use uri::URI;
 use version::Version;
@@ -18,12 +18,15 @@ use version::Version;
 /// An RTSP request consists of a header and a, potentially empty, body. The body component is
 /// generic, enabling arbitrary types to represent the RTSP body.
 #[derive(Clone, Eq, PartialEq)]
-pub struct Request<T> {
+pub struct Request<B, H = HeaderMap<HeaderValue>>
+where
+    H: Default,
+{
     /// The body component of the request. This is generic to support arbitrary content types.
-    body: T,
+    body: B,
 
-    /// A multimap of header names to values that maintains insertion order.
-    headers: HeaderMap<HeaderValue>,
+    /// A header map that will either be `HeaderMap<HeaderValue>` or `TypedHeaderMap`.
+    headers: H,
 
     /// The RTSP method to be applied to the resource. This can be any standardized RTSP method or
     /// an extension method.
@@ -43,6 +46,10 @@ pub struct Request<T> {
 
 impl Request<()> {
     pub fn builder() -> Builder {
+        Builder::new()
+    }
+
+    pub fn typed_builder() -> Builder<TypedHeaderMap> {
         Builder::new()
     }
 
@@ -137,26 +144,29 @@ impl Request<()> {
     }
 }
 
-impl<T> Request<T> {
-    pub fn body(&self) -> &T {
+impl<B, H> Request<B, H>
+where
+    H: Default,
+{
+    pub fn body(&self) -> &B {
         &self.body
     }
 
-    pub fn body_mut(&mut self) -> &mut T {
+    pub fn body_mut(&mut self) -> &mut B {
         &mut self.body
     }
 
-    pub fn headers(&self) -> &HeaderMap<HeaderValue> {
+    pub fn headers(&self) -> &H {
         &self.headers
     }
 
-    pub fn headers_mut(&mut self) -> &mut HeaderMap<HeaderValue> {
+    pub fn headers_mut(&mut self) -> &mut H {
         &mut self.headers
     }
 
-    pub fn map<B, F>(self, mut f: F) -> Request<B>
+    pub fn map<T, F>(self, mut f: F) -> Request<T, H>
     where
-        F: FnMut(T) -> B,
+        F: FnMut(B) -> T,
     {
         let body = f(self.body);
 
@@ -194,7 +204,31 @@ impl<T> Request<T> {
     }
 }
 
-impl<T: fmt::Debug> fmt::Debug for Request<T> {
+impl<B> Request<B, HeaderMap<HeaderValue>> {
+    pub fn into_typed(self) -> Request<B, TypedHeaderMap> {
+        Request {
+            body: self.body,
+            headers: self.headers.into(),
+            method: self.method,
+            uri: self.uri,
+            version: self.version,
+        }
+    }
+}
+
+impl<B> Request<B, TypedHeaderMap> {
+    pub fn into_untyped(self) -> Request<B, HeaderMap<HeaderValue>> {
+        Request {
+            body: self.body,
+            headers: self.headers.into(),
+            method: self.method,
+            uri: self.uri,
+            version: self.version,
+        }
+    }
+}
+
+impl<B: fmt::Debug> fmt::Debug for Request<B> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("Request")
             .field("method", self.method())
@@ -210,12 +244,15 @@ impl<T: fmt::Debug> fmt::Debug for Request<T> {
 ///
 /// This type can be used to construct a `Request` through a builder-like pattern.
 #[derive(Clone, Debug)]
-pub struct Builder {
+pub struct Builder<H = HeaderMap<HeaderValue>>
+where
+    H: Default,
+{
     /// A stored error used when making a `Request`.
     pub(crate) error: Option<BuilderError>,
 
-    /// A multimap of header names to values that maintains insertion order.
-    pub(crate) headers: HeaderMap<HeaderValue>,
+    /// A header map that will either be `HeaderMap<HeaderValue>` or `TypedHeaderMap`.
+    pub(crate) headers: H,
 
     /// The RTSP method to be applied to the resource. This can be any standardized RTSP method or
     /// an extension method.
@@ -233,17 +270,13 @@ pub struct Builder {
     pub(crate) version: Version,
 }
 
-impl Builder {
+
+impl<H> Builder<H>
+where
+    H: Default,
+{
     /// Creates a new default instance of a `Builder` to construct a `Request`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use rtsp::request::Builder;
-    ///
-    /// let request = Builder::new();
-    /// ```
-    pub fn new() -> Self {
+    pub fn new() -> Builder<H> {
         Builder::default()
     }
 
@@ -253,7 +286,7 @@ impl Builder {
     ///
     /// This function may return an error if part of the request has not been configured (such as
     /// the method or URI) or a configured part is invalid (such as a header).
-    pub fn build<T>(&mut self, body: T) -> Result<Request<T>, BuilderError> {
+    pub fn build<B>(&mut self, body: B) -> Result<Request<B, H>, BuilderError> {
         if let Some(error) = self.error {
             return Err(error);
         }
@@ -262,7 +295,7 @@ impl Builder {
             if let Some(uri) = replace(&mut self.uri, None) {
                 Ok(Request {
                     body,
-                    headers: replace(&mut self.headers, HeaderMap::new()),
+                    headers: replace(&mut self.headers, H::default()),
                     method,
                     uri,
                     version: self.version,
@@ -273,45 +306,6 @@ impl Builder {
         } else {
             Err(BuilderError::MissingMethod)
         }
-    }
-
-    /// Appends a header to this request.
-    ///
-    /// This function will append the provided key/value as a header to the internal `HeaderMap`
-    /// being constructued. Essentially, this is equivalent to calling `HeaderMap::append`. Because
-    /// of this, you are able to add a given header multiple times.
-    ///
-    /// By default, the request contains no headers.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use rtsp::*;
-    ///
-    /// let request = Request::builder()
-    ///     .method(Method::Play)
-    ///     .uri("rtsp://server.com")
-    ///     .header("CSeq", "835")
-    ///     .header("Session", "ULExwZCXh2pd0xuFgkgZJW")
-    ///     .build(())
-    ///     .unwrap();
-    /// ```
-    pub fn header<K, V>(&mut self, key: K, value: V) -> &mut Self
-    where
-        HeaderName: TryFrom<K>,
-        HeaderValue: TryFrom<V>,
-    {
-        match HeaderName::try_from(key) {
-            Ok(key) => match HeaderValue::try_from(value) {
-                Ok(value) => {
-                    self.headers.append(key, value);
-                }
-                Err(_) => self.error = Some(BuilderError::InvalidHeaderValue),
-            },
-            Err(_) => self.error = Some(BuilderError::InvalidHeaderName),
-        }
-
-        self
     }
 
     /// Set the RTSP method for this request.
@@ -418,13 +412,129 @@ impl Builder {
     }
 }
 
+impl Builder<HeaderMap<HeaderValue>> {
+    /// Appends a header to this request.
+    ///
+    /// This function will append the provided key/value as a header to the internal `HeaderMap`
+    /// being constructued. Essentially, this is equivalent to calling `HeaderMap::append`. Because
+    /// of this, you are able to add a given header multiple times.
+    ///
+    /// By default, the request contains no headers.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rtsp::*;
+    ///
+    /// let request = Request::builder()
+    ///     .method(Method::Play)
+    ///     .uri("rtsp://server.com")
+    ///     .header("CSeq", "835")
+    ///     .header("Session", "ULExwZCXh2pd0xuFgkgZJW")
+    ///     .build(())
+    ///     .unwrap();
+    /// ```
+    pub fn header<K, V>(&mut self, key: K, value: V) -> &mut Self
+    where
+        HeaderName: TryFrom<K>,
+        HeaderValue: TryFrom<V>,
+    {
+        match HeaderName::try_from(key) {
+            Ok(key) => match HeaderValue::try_from(value) {
+                Ok(value) => {
+                    self.headers.append(key, value);
+                }
+                Err(_) => self.error = Some(BuilderError::InvalidHeaderValue),
+            },
+            Err(_) => self.error = Some(BuilderError::InvalidHeaderName),
+        }
 
-impl Default for Builder {
+        self
+    }
+
+    /// Converts this builder into a builder that contains typed headers.
+    pub fn into_typed(self) -> Builder<TypedHeaderMap> {
+        Builder {
+            error: self.error,
+            headers: self.headers.into(),
+            method: self.method,
+            uri: self.uri,
+            version: self.version,
+        }
+    }
+}
+
+impl Builder<TypedHeaderMap> {
+    /// Sets a typed header for this request. Since typed headers are used here, this function
+    /// cannot produce an error for the builder.
+    ///
+    /// By default, the request contains no headers.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rtsp::*;
+    /// use rtsp::header::types::*;
+    ///
+    /// let request = Request::typed_builder()
+    ///     .method(Method::Play)
+    ///     .uri("rtsp://server.com")
+    ///     .header(ContentLength(5))
+    ///     .build(())
+    ///     .unwrap();
+    /// ```
+    pub fn header<H: TypedHeader>(&mut self, header: H) -> &mut Self {
+        self.headers.set(header);
+        self
+    }
+
+    /// Sets a raw header for this request. Since typed headers are used here, this function cannot
+    /// produce an error for the builder.
+    ///
+    /// By default, the request contains no headers.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #![feature(try_from)]
+    /// #
+    /// # use std::convert::TryFrom;
+    /// #
+    /// use rtsp::*;
+    ///
+    /// let request = Request::typed_builder()
+    ///     .method(Method::Play)
+    ///     .uri("rtsp://server.com")
+    ///     .header_raw(HeaderName::ContentLength, vec![HeaderValue::try_from("5").unwrap()])
+    ///     .build(())
+    ///     .unwrap();
+    /// ```
+    pub fn header_raw(&mut self, name: HeaderName, value: Vec<HeaderValue>) -> &mut Self {
+        self.headers.set_raw(name, value);
+        self
+    }
+
+    /// Converts this builder into a builder that contains untyped headers.
+    pub fn into_untyped(self) -> Builder<HeaderMap<HeaderValue>> {
+        Builder {
+            error: self.error,
+            headers: self.headers.into(),
+            method: self.method,
+            uri: self.uri,
+            version: self.version,
+        }
+    }
+}
+
+impl<H> Default for Builder<H>
+where
+    H: Default,
+{
     #[inline]
     fn default() -> Self {
         Builder {
             error: None,
-            headers: HeaderMap::new(),
+            headers: H::default(),
             method: None,
             uri: None,
             version: Version::default(),

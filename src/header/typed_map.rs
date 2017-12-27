@@ -11,7 +11,7 @@ use std::error::Error;
 use std::iter::FromIterator;
 use std::{fmt, mem};
 
-use header::{HeaderName, HeaderValue};
+use header::{HeaderMap, HeaderName, HeaderValue};
 
 use self::sealed::TypedHeaderClone;
 
@@ -435,6 +435,41 @@ impl TypedHeaderMap {
     }
 }
 
+impl Default for TypedHeaderMap {
+    fn default() -> Self {
+        TypedHeaderMap::new()
+    }
+}
+
+impl From<HeaderMap<HeaderValue>> for TypedHeaderMap {
+    fn from(mut value: HeaderMap<HeaderValue>) -> Self {
+        let mut map = TypedHeaderMap::with_capacity(value.len());
+
+        for (key, values) in value.drain() {
+            let values = values.collect::<Vec<HeaderValue>>();
+            map.set_raw(key, values);
+        }
+
+        map
+    }
+}
+
+impl From<TypedHeaderMap> for HeaderMap<HeaderValue> {
+    fn from(value: TypedHeaderMap) -> Self {
+        let mut map = HeaderMap::with_capacity(value.len());
+
+        for view in value.iter() {
+            let key = view.name();
+
+            for raw in view.raw() {
+                map.append(key.clone(), raw.clone());
+            }
+        }
+
+        map
+    }
+}
+
 /// Immutable iterator over header items.
 pub struct TypedHeaderItems<'a> {
     inner: ::std::collections::hash_map::Iter<'a, HeaderName, TypedHeaderItem>,
@@ -559,9 +594,8 @@ impl TypedHeaderItem {
             }
             None => {
                 let raw_value = unsafe { raw.into_inner() }.unwrap();
-                H::try_from_header_raw(&raw_value).map(|value| -> Box<TypedHeader + Send + Sync> {
-                    Box::new(value)
-                })
+                H::try_from_header_raw(&raw_value)
+                    .map(|value| -> Box<TypedHeader + Send + Sync> { Box::new(value) })
             }
         }.map(|typed| unsafe { typed.downcast_unchecked() })
     }
