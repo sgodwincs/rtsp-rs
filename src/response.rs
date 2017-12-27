@@ -17,6 +17,10 @@ use version::Version;
 ///
 /// An RTSP response consists of a header and a, potentially empty, body. The body component is
 /// generic, enabling arbitrary types to represent the RTSP body.
+///
+/// This struct implements `PartialEq` but care should be taken when using it. Two requests can
+/// be semantically equivalent but not be byte by byte. This will mainly occur due to extra spaces
+/// in headers. Even when using a typed request, the same problem will occur.
 #[derive(Clone, Eq, PartialEq)]
 pub struct Response<B, H = HeaderMap<HeaderValue>>
 where
@@ -138,7 +142,11 @@ impl<B> Response<B, TypedHeaderMap> {
     }
 }
 
-impl<B: fmt::Debug> fmt::Debug for Response<B> {
+impl<B, H> fmt::Debug for Response<B, H>
+where
+    B: fmt::Debug,
+    H: fmt::Debug + Default,
+{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("Response")
             .field("version", &self.version())
