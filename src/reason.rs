@@ -1,4 +1,8 @@
+//! RTSP Reason Types
 //!
+//! This module contains structs related to RTSP reason phrases, notably the `ReasonPhrase` type
+//! itself. Typically, you will import the `rtsp::ReasonPhrase` type rather than reaching into this
+//! module itself.
 
 use std::convert::TryFrom;
 use std::error::Error;
