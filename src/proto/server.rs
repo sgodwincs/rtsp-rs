@@ -224,8 +224,7 @@ impl error::Error for InvalidRequest {
             &InvalidHeaderValue => "invalid RTSP request-  invalid header value",
             &InvalidMethod => "invalid RTSP request-  invalid method",
             &InvalidURI => "invalid RTSP request - invalid URI",
-            &InvalidVersion => "invalid RTSP request - invalid version",
-            _ => panic!("rest of `BuilderError`s should not be accessible"),
+            &InvalidVersion => "invalid RTSP request - invalid version"
         }
     }
 }

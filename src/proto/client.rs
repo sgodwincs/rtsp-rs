@@ -204,7 +204,6 @@ pub enum InvalidResponse {
     InvalidReasonPhrase,
     InvalidStatusCode,
     InvalidVersion,
-    MissingReasonPhrase,
 }
 
 impl fmt::Display for InvalidResponse {
@@ -225,7 +224,6 @@ impl error::Error for InvalidResponse {
             &InvalidReasonPhrase => "invalid RTSP request-  invalid reason phrase",
             &InvalidStatusCode => "invalid RTSP request - invalid status code",
             &InvalidVersion => "invalid RTSP request - invalid version",
-            _ => panic!("rest of `BuilderError`s should not be accessible"),
         }
     }
 }
