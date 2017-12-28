@@ -45,6 +45,14 @@ impl HeaderValue {
         self.0.as_str()
     }
 
+    /// Converts a string representation into a `HeaderValue` with no validation.
+    pub(crate) unsafe fn from_str_unchecked<S>(value: S) -> Self
+    where
+        S: Into<String>,
+    {
+        HeaderValue(value.into())
+    }
+
     /// Returns whether or not the length of the header value is 0.
     ///
     /// This length is in bytes.

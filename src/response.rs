@@ -21,6 +21,9 @@ use version::Version;
 /// This struct implements `PartialEq` but care should be taken when using it. Two requests can
 /// be semantically equivalent but not be byte by byte. This will mainly occur due to extra spaces
 /// in headers. Even when using a typed request, the same problem will occur.
+///
+/// Note that it is not necessary to ever set the `Content-Length` header as it will be forcibly
+/// set during encoding even if it is already present.
 #[derive(Clone, Eq, PartialEq)]
 pub struct Response<B, H = HeaderMap<HeaderValue>>
 where

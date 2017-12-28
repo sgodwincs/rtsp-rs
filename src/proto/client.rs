@@ -1,32 +1,31 @@
 use bytes::BytesMut;
-use std::{error, fmt, io};
 use std::mem::replace;
+use std::{error, fmt, io};
 use tokio_io::codec::{Decoder, Encoder};
 
 use super::{consume_line, get_content_length, parse_header, trim_header};
 use header::{HeaderName, HeaderValue};
 use header::types::ContentLength;
-use request::{Builder, BuilderError, Request};
-use response::Response;
+use request::Request;
+use response::{Builder, BuilderError, Response};
 use version::Version;
 
-#[derive(Debug)]
-pub struct ServerCodec {
+pub struct ClientCodec {
     body: Option<BytesMut>,
     builder: Builder,
     content_length: ContentLength,
     state: ParseState,
 }
 
-#[derive(Debug, Eq, Hash, PartialEq)]
+#[derive(Eq, PartialEq)]
 pub enum ParseState {
     Body,
     End,
     Header,
-    RequestLine,
+    ResponseLine,
 }
 
-impl ServerCodec {
+impl ClientCodec {
     /// This function more so just extracts the body with a length determined by the content length
     /// than it does parse it. This decoder does not try to parse the body based on the content
     /// type, this should be done at a higher level.
@@ -40,7 +39,7 @@ impl ServerCodec {
         }
     }
 
-    /// Parses a header of the request. If no more headers are present, it will parse the content
+    /// Parses a header of the response. If no more headers are present, it will parse the content
     /// length header and proceed to the next parse state.
     fn parse_header(&mut self, buffer: &mut BytesMut) -> Option<io::Result<()>> {
         match parse_header(buffer) {
@@ -68,15 +67,15 @@ impl ServerCodec {
         }
     }
 
-    /// Parses the request line of the request. Any empty newlines prior to the request line are
-    /// ignored. As long as the request line is of the form `METHOD URI VERSION\r\n` where `METHOD`,
-    /// `URI`, and `VERSION` are not necessarily valid values, the request will continue to be
-    /// parsed. This allows for handling bad requests due to invalid method characters for example.
-    /// If the request line is not of that form, then there is no way to recover, so the connection
-    /// will just be closed on return of the IO error. An IO error will also be returned if the
-    /// RTSP version given is not RTSP/2.0 since that is the only version this implementation
-    /// supports.
-    fn parse_request_line(&mut self, buffer: &mut BytesMut) -> Option<io::Result<()>> {
+    /// Parses the response line of the response. Any empty newlines prior to the response line are
+    /// ignored. As long as the response line is of the form `VERSION STATUS_CODE REASON_PHRASE\r\n`
+    /// where `VERSION`, `STATUS_CODE`, and `REASON_PHRASE` are not necessarily valid values, the
+    /// reseponse will continue to be parsed. This allows for handling bad responses due to invalid
+    /// reason phrase characters for example. If the response line is not of that form, then there
+    /// is no way to recover, so the connection will just be closed on return of the IO error. An IO
+    /// error will also be returned if the RTSP version given is not RTSP/2.0 since that is the only
+    /// version this implementation supports.
+    fn parse_response_line(&mut self, buffer: &mut BytesMut) -> Option<io::Result<()>> {
         match consume_line(buffer) {
             Some((_, 0)) => {
                 buffer.split_to(2);
@@ -84,18 +83,18 @@ impl ServerCodec {
             }
             Some((mut line, _)) => {
                 if let Some(i) = line.iter().position(|&b| b == b' ') {
-                    let method = line.split_to(i);
+                    let version = line.split_to(i);
                     line.split_to(1);
 
                     if let Some(i) = line.iter().position(|&b| b == b' ') {
-                        let uri = line.split_to(i);
+                        let status_code = line.split_to(i);
                         line.split_to(1);
 
                         self.state = ParseState::Header;
                         self.builder
-                            .method(method.as_ref())
-                            .uri(uri.as_ref())
-                            .version(line.as_ref());
+                            .version(version.as_ref())
+                            .status_code(status_code.as_ref())
+                            .reason(Some(line.as_ref()));
 
                         if self.builder.version != Version::RTSP20 {
                             return Some(Err(io::Error::new(
@@ -108,7 +107,7 @@ impl ServerCodec {
                     }
                 }
 
-                // Request line was not of the form `METHOD URI VERSION\r\n`.
+                // Request line was not of the form `VERSION STATUS_CODE REASON_PHRASE\r\n`.
 
                 Some(Err(io::Error::new(
                     io::ErrorKind::Other,
@@ -120,8 +119,8 @@ impl ServerCodec {
     }
 }
 
-impl Decoder for ServerCodec {
-    type Item = Result<Request<BytesMut>, InvalidRequest>;
+impl Decoder for ClientCodec {
+    type Item = Result<Response<BytesMut>, InvalidResponse>;
     type Error = io::Error;
 
     fn decode(&mut self, buffer: &mut BytesMut) -> io::Result<Option<Self::Item>> {
@@ -131,13 +130,13 @@ impl Decoder for ServerCodec {
             let parse_result = match self.state {
                 Body => self.parse_body(buffer),
                 Header => self.parse_header(buffer),
-                RequestLine => self.parse_request_line(buffer),
+                ResponseLine => self.parse_response_line(buffer),
                 End => {
                     let request = self.builder
                         .build(replace(&mut self.body, None).unwrap())
-                        .map_err(|error| InvalidRequest::from(error));
+                        .map_err(|error| InvalidResponse::from(error));
                     self.builder = Builder::new();
-                    self.state = RequestLine;
+                    self.state = ResponseLine;
 
                     break Ok(Some(request));
                 }
@@ -152,8 +151,8 @@ impl Decoder for ServerCodec {
     }
 }
 
-impl Encoder for ServerCodec {
-    type Item = Response<BytesMut>;
+impl Encoder for ClientCodec {
+    type Item = Request<BytesMut>;
     type Error = io::Error;
 
     fn encode(&mut self, mut message: Self::Item, buffer: &mut BytesMut) -> io::Result<()> {
@@ -165,11 +164,11 @@ impl Encoder for ServerCodec {
             .headers_mut()
             .insert(HeaderName::ContentLength, body_size);
 
+        buffer.extend(message.method().as_str().as_bytes());
+        buffer.extend(b" ");
+        buffer.extend(message.uri().as_str().as_bytes());
+        buffer.extend(b" ");
         buffer.extend(message.version().as_str().as_bytes());
-        buffer.extend(b" ");
-        buffer.extend(message.status_code().to_string().as_bytes());
-        buffer.extend(b" ");
-        buffer.extend(message.reason().as_str().as_bytes());
         buffer.extend(b"\r\n");
 
         for (name, value) in message.headers().iter() {
@@ -186,28 +185,29 @@ impl Encoder for ServerCodec {
     }
 }
 
-impl Default for ServerCodec {
+impl Default for ClientCodec {
     fn default() -> Self {
-        ServerCodec {
+        ClientCodec {
             body: None,
             builder: Builder::new(),
             content_length: ContentLength::from(0),
-            state: ParseState::RequestLine,
+            state: ParseState::ResponseLine,
         }
     }
 }
 
 /// An error type for when the request was successfully parsed but contained invalid values.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum InvalidRequest {
+pub enum InvalidResponse {
     InvalidHeaderName,
     InvalidHeaderValue,
-    InvalidMethod,
-    InvalidURI,
+    InvalidReasonPhrase,
+    InvalidStatusCode,
     InvalidVersion,
+    MissingReasonPhrase,
 }
 
-impl fmt::Display for InvalidRequest {
+impl fmt::Display for InvalidResponse {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use std::error::Error;
 
@@ -215,68 +215,32 @@ impl fmt::Display for InvalidRequest {
     }
 }
 
-impl error::Error for InvalidRequest {
+impl error::Error for InvalidResponse {
     fn description(&self) -> &str {
-        use self::InvalidRequest::*;
+        use self::InvalidResponse::*;
 
         match self {
             &InvalidHeaderName => "invalid RTSP request - invalid header name",
             &InvalidHeaderValue => "invalid RTSP request-  invalid header value",
-            &InvalidMethod => "invalid RTSP request-  invalid method",
-            &InvalidURI => "invalid RTSP request - invalid URI",
+            &InvalidReasonPhrase => "invalid RTSP request-  invalid reason phrase",
+            &InvalidStatusCode => "invalid RTSP request - invalid status code",
             &InvalidVersion => "invalid RTSP request - invalid version",
             _ => panic!("rest of `BuilderError`s should not be accessible"),
         }
     }
 }
 
-impl From<BuilderError> for InvalidRequest {
-    fn from(value: BuilderError) -> InvalidRequest {
-        use self::InvalidRequest::*;
+impl From<BuilderError> for InvalidResponse {
+    fn from(value: BuilderError) -> InvalidResponse {
+        use self::InvalidResponse::*;
 
         match value {
             BuilderError::InvalidHeaderName => InvalidHeaderName,
             BuilderError::InvalidHeaderValue => InvalidHeaderValue,
-            BuilderError::InvalidMethod => InvalidMethod,
-            BuilderError::InvalidURI => InvalidURI,
+            BuilderError::InvalidReasonPhrase => InvalidReasonPhrase,
+            BuilderError::InvalidStatusCode => InvalidStatusCode,
             BuilderError::InvalidVersion => InvalidVersion,
             _ => panic!("rest of `BuilderError`s should not be accessible"),
         }
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-
-    use header::types::ContentLength;
-
-    #[test]
-    fn test_decoder() {
-        // This test is sensitive to the padding in the `Content-Length` header. If a space is added
-        // after the `:`, it will fail.
-
-        let mut buffer = BytesMut::from(
-            "SETUP * RTSP/2.0\r\n\
-             Content-Length:4\r\n\
-             \r\n\
-             Body"
-                .as_bytes(),
-        );
-        let mut decoder = ServerCodec::default();
-        let decoded_request = decoder
-            .decode(&mut buffer)
-            .unwrap()
-            .unwrap()
-            .unwrap()
-            .into_typed();
-        let expected_request = Request::typed_builder()
-            .method("SETUP")
-            .uri("*")
-            .header(ContentLength(4))
-            .build(BytesMut::from("Body".as_bytes()))
-            .unwrap();
-
-        assert_eq!(decoded_request, expected_request);
     }
 }
