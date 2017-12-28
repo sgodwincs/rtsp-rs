@@ -122,7 +122,7 @@ impl TypedHeaderMap {
     /// use rtsp::header::types::ContentLength;
     ///
     /// let mut map = TypedHeaderMap::new();
-    /// map.set(ContentLength(20));
+    /// map.set(ContentLength::from(20));
     /// ```
     pub fn new() -> TypedHeaderMap {
         TypedHeaderMap(HashMap::new())
@@ -137,7 +137,7 @@ impl TypedHeaderMap {
     /// use rtsp::header::types::ContentLength;
     ///
     /// let mut map = TypedHeaderMap::with_capacity(5);
-    /// map.set(ContentLength(20));
+    /// map.set(ContentLength::from(20));
     /// ```
     pub fn with_capacity(capacity: usize) -> TypedHeaderMap {
         TypedHeaderMap(HashMap::with_capacity(capacity))
@@ -152,7 +152,7 @@ impl TypedHeaderMap {
     /// use rtsp::header::types::ContentLength;
     ///
     /// let mut map = TypedHeaderMap::new();
-    /// map.set(ContentLength(20));
+    /// map.set(ContentLength::from(20));
     ///
     /// assert_eq!(map.len(), 1);
     ///
@@ -179,9 +179,9 @@ impl TypedHeaderMap {
     /// use rtsp::header::types::ContentLength;
     ///
     /// let mut map = TypedHeaderMap::new();
-    /// map.set(ContentLength(20));
+    /// map.set(ContentLength::from(20));
     ///
-    /// assert_eq!(map.get::<ContentLength>().unwrap(), Ok(&ContentLength(20)));
+    /// assert_eq!(map.get::<ContentLength>().unwrap(), Ok(&ContentLength::from(20)));
     ///
     /// let raw = vec![HeaderValue::try_from("invalid content length").unwrap()];
     /// map.set_raw(HeaderName::ContentLength, raw);
@@ -201,14 +201,14 @@ impl TypedHeaderMap {
     /// use rtsp::header::types::ContentLength;
     ///
     /// let mut map = TypedHeaderMap::new();
-    /// map.set(ContentLength(20));
+    /// map.set(ContentLength::from(20));
     ///
     /// {
     ///     let header = map.get_mut::<ContentLength>().unwrap().unwrap();
-    ///     *header = ContentLength(50);
+    ///     *header = ContentLength::from(50);
     /// }
     ///
-    /// assert_eq!(map.get::<ContentLength>().unwrap(), Ok(&ContentLength(50)));
+    /// assert_eq!(map.get::<ContentLength>().unwrap(), Ok(&ContentLength::from(50)));
     /// ```
     pub fn get_mut<H: TypedHeader>(&mut self) -> Option<Result<&mut H, InvalidTypedHeader>> {
         self.0
@@ -231,7 +231,7 @@ impl TypedHeaderMap {
     /// use rtsp::header::types::ContentLength;
     ///
     /// let mut map = TypedHeaderMap::new();
-    /// map.set(ContentLength(20));
+    /// map.set(ContentLength::from(20));
     ///
     /// assert_eq!(
     ///     map.get_raw(&HeaderName::ContentLength).unwrap(),
@@ -256,14 +256,14 @@ impl TypedHeaderMap {
     /// use rtsp::header::types::ContentLength;
     ///
     /// let mut map = TypedHeaderMap::new();
-    /// map.set(ContentLength(20));
+    /// map.set(ContentLength::from(20));
     ///
     /// {
     ///     let header = map.get_raw_mut(&HeaderName::ContentLength).unwrap();
     ///     *header = vec![HeaderValue::try_from("50").unwrap()];
     /// }
     ///
-    /// assert_eq!(map.get::<ContentLength>().unwrap(), Ok(&ContentLength(50)));
+    /// assert_eq!(map.get::<ContentLength>().unwrap(), Ok(&ContentLength::from(50)));
     /// ```
     pub fn get_raw_mut(&mut self, name: &HeaderName) -> Option<&mut Vec<HeaderValue>> {
         self.0.get_mut(name).map(|item| item.raw_mut())
@@ -279,7 +279,7 @@ impl TypedHeaderMap {
     /// use rtsp::header::types::ContentLength;
     ///
     /// let mut map = TypedHeaderMap::new();
-    /// map.set(ContentLength(20));
+    /// map.set(ContentLength::from(20));
     ///
     /// assert!(map.has::<ContentLength>());
     /// ```
@@ -297,7 +297,7 @@ impl TypedHeaderMap {
     /// use rtsp::header::types::ContentLength;
     ///
     /// let mut map = TypedHeaderMap::new();
-    /// map.set(ContentLength(20));
+    /// map.set(ContentLength::from(20));
     ///
     /// assert!(map.has_raw(&HeaderName::ContentLength));
     /// ```
@@ -314,7 +314,7 @@ impl TypedHeaderMap {
     /// use rtsp::header::types::ContentLength;
     ///
     /// let mut map = TypedHeaderMap::new();
-    /// map.set(ContentLength(20));
+    /// map.set(ContentLength::from(20));
     ///
     /// for view in map.iter() {
     ///     // The following will print `Content-Length`.
@@ -339,7 +339,7 @@ impl TypedHeaderMap {
     ///
     /// assert_eq!(map.len(), 0);
     ///
-    /// map.set(ContentLength(20));
+    /// map.set(ContentLength::from(20));
     ///
     /// assert_eq!(map.len(), 1);
     /// ```
@@ -357,9 +357,9 @@ impl TypedHeaderMap {
     /// use rtsp::header::types::ContentLength;
     ///
     /// let mut map = TypedHeaderMap::new();
-    /// map.set(ContentLength(20));
+    /// map.set(ContentLength::from(20));
     ///
-    /// assert_eq!(map.remove::<ContentLength>().unwrap(), Ok(ContentLength(20)));
+    /// assert_eq!(map.remove::<ContentLength>().unwrap(), Ok(ContentLength::from(20)));
     /// assert!(!map.has::<ContentLength>())
     /// ```
     pub fn remove<H: TypedHeader>(&mut self) -> Option<Result<H, InvalidTypedHeader>> {
@@ -382,7 +382,7 @@ impl TypedHeaderMap {
     /// use rtsp::header::types::ContentLength;
     ///
     /// let mut map = TypedHeaderMap::new();
-    /// map.set(ContentLength(20));
+    /// map.set(ContentLength::from(20));
     ///
     /// assert_eq!(
     ///     map.remove_raw(&HeaderName::ContentLength).unwrap(),
@@ -404,7 +404,7 @@ impl TypedHeaderMap {
     /// use rtsp::header::types::ContentLength;
     ///
     /// let mut map = TypedHeaderMap::new();
-    /// map.set(ContentLength(20));
+    /// map.set(ContentLength::from(20));
     /// assert!(map.has::<ContentLength>())
     /// ```
     pub fn set<H: TypedHeader>(&mut self, value: H) {
@@ -739,14 +739,17 @@ mod test {
     fn test_typed_map_get_mut() {
         let mut map = TypedHeaderMap::new();
 
-        map.set(ContentLength(100));
+        map.set(ContentLength::from(100));
 
         {
             let header = map.get_mut::<ContentLength>().unwrap().unwrap();
-            *header = ContentLength(20);
+            *header = ContentLength::from(20);
         }
 
-        assert_eq!(map.get::<ContentLength>().unwrap(), Ok(&ContentLength(20)));
+        assert_eq!(
+            map.get::<ContentLength>().unwrap(),
+            Ok(&ContentLength::from(20))
+        );
 
         map.get_mut::<ContentLength>();
 
@@ -760,7 +763,7 @@ mod test {
     fn test_typed_map_get_raw_mut() {
         let mut map = TypedHeaderMap::new();
 
-        map.set(ContentLength(100));
+        map.set(ContentLength::from(100));
 
         {
             let header = map.get_raw_mut(&HeaderName::ContentLength).unwrap();
@@ -771,7 +774,7 @@ mod test {
 
         assert_eq!(
             map.get::<ContentLength>().unwrap().unwrap(),
-            &ContentLength(0)
+            &ContentLength::from(0)
         );
         assert_eq!(
             map.get_raw(&HeaderName::ContentLength).unwrap(),
@@ -783,9 +786,12 @@ mod test {
     fn test_typed_map_set() {
         let mut map = TypedHeaderMap::new();
 
-        map.set(ContentLength(5));
+        map.set(ContentLength::from(5));
 
-        assert_eq!(map.get::<ContentLength>().unwrap(), Ok(&ContentLength(5)));
+        assert_eq!(
+            map.get::<ContentLength>().unwrap(),
+            Ok(&ContentLength::from(5))
+        );
         assert_eq!(
             map.get_raw(&HeaderName::ContentLength).unwrap(),
             &vec![HeaderValue::try_from("5").unwrap()]
@@ -803,7 +809,7 @@ mod test {
 
         assert_eq!(
             map.get::<ContentLength>().unwrap(),
-            Ok(&ContentLength(1002))
+            Ok(&ContentLength::from(1002))
         );
         assert_eq!(
             map.get_raw(&HeaderName::ContentLength).unwrap(),

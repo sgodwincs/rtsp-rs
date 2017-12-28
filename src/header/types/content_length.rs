@@ -1,17 +1,18 @@
-
-use std::convert::TryFrom;
 use std::ops::Deref;
 
 use header::{HeaderName, HeaderValue, InvalidTypedHeader, TypedHeader};
 use syntax::trim_whitespace_left;
 
+/// The `Content-Length` typed header as described by
+/// [RFC7826](https://tools.ietf.org/html/rfc7826#section-18.17).
+///
 /// The RFC states that the content length of a request/response can be up to 19 digits long which
 /// actually would require use of u64, but since the length of the buffer during decoding is of
 /// type `usize`, this cannot be guaranteed on all platforms.
 ///
 /// The default value for this header is 0.
 #[derive(Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct ContentLength(pub usize);
+pub struct ContentLength(usize);
 
 impl TypedHeader for ContentLength {
     /// Returns the statically assigned `HeaderName` for this header.
@@ -31,12 +32,14 @@ impl TypedHeader for ContentLength {
     /// use rtsp::*;
     /// use rtsp::header::types::ContentLength;
     ///
-    /// let typed_header = ContentLength(10);
+    /// let typed_header = ContentLength::from(10);
     /// let raw_header = vec![HeaderValue::try_from("10").unwrap()];
     /// assert_eq!(typed_header.to_header_raw(), raw_header);
     /// ```
     fn to_header_raw(&self) -> Vec<HeaderValue> {
-        vec![HeaderValue::try_from(self.0.to_string().as_str()).unwrap()]
+        vec![
+            unsafe { HeaderValue::from_str_unchecked(self.0.to_string().as_str()) },
+        ]
     }
 
     /// Converts the raw header values to the `ContentLength` header type. Based on the syntax
@@ -44,6 +47,7 @@ impl TypedHeader for ContentLength {
     /// following syntax:
     ///
     /// ```text
+    /// DIGIT = %x30-39 ; any US-ASCII digit "0".."9"
     /// Content-Length = "Content-Length" HCOLON 1*19DIGIT
     /// ```
     ///
@@ -63,7 +67,7 @@ impl TypedHeader for ContentLength {
     /// use rtsp::*;
     /// use rtsp::header::types::ContentLength;
     ///
-    /// let typed_header = ContentLength(0);
+    /// let typed_header = ContentLength::from(0);
     /// let raw_header: Vec<HeaderValue> = vec![];
     ///
     /// assert_eq!(
@@ -71,7 +75,7 @@ impl TypedHeader for ContentLength {
     ///     typed_header
     /// );
     ///
-    /// let typed_header = ContentLength(10);
+    /// let typed_header = ContentLength::from(10);
     /// let raw_header = vec![HeaderValue::try_from("10").unwrap()];
     ///
     /// assert_eq!(
@@ -92,13 +96,13 @@ impl TypedHeader for ContentLength {
             trim_whitespace_left(header[0].as_str())
                 .parse::<usize>()
                 .map_err(|_| InvalidTypedHeader)
-                .and_then(|x| {
+                .and_then(|content_length| {
                     // Content length can have a maximum of 19 digits.
-                    
-                    if x > 9999999999999999999 {
+
+                    if content_length > 9999999999999999999 {
                         Err(InvalidTypedHeader)
                     } else {
-                        Ok(ContentLength(x))
+                        Ok(ContentLength(content_length))
                     }
                 })
         }

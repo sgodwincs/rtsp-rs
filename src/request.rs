@@ -281,7 +281,6 @@ where
     pub(crate) version: Version,
 }
 
-
 impl<H> Builder<H>
 where
     H: Default,
@@ -490,7 +489,7 @@ impl Builder<TypedHeaderMap> {
     /// let request = Request::typed_builder()
     ///     .method(Method::Play)
     ///     .uri("rtsp://server.com")
-    ///     .header(ContentLength(5))
+    ///     .header(ContentLength::from(5))
     ///     .build(())
     ///     .unwrap();
     /// ```

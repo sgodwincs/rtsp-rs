@@ -224,7 +224,7 @@ impl error::Error for InvalidRequest {
             &InvalidHeaderValue => "invalid RTSP request-  invalid header value",
             &InvalidMethod => "invalid RTSP request-  invalid method",
             &InvalidURI => "invalid RTSP request - invalid URI",
-            &InvalidVersion => "invalid RTSP request - invalid version"
+            &InvalidVersion => "invalid RTSP request - invalid version",
         }
     }
 }
@@ -272,7 +272,7 @@ mod test {
         let expected_request = Request::typed_builder()
             .method("SETUP")
             .uri("*")
-            .header(ContentLength(4))
+            .header(ContentLength::from(4))
             .build(BytesMut::from("Body".as_bytes()))
             .unwrap();
 

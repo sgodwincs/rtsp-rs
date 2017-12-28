@@ -391,7 +391,7 @@ impl Builder<TypedHeaderMap> {
     ///
     /// let response = Response::typed_builder()
     ///     .status_code(StatusCode::OK)
-    ///     .header(ContentLength(5))
+    ///     .header(ContentLength::from(5))
     ///     .build(())
     ///     .unwrap();
     /// ```
