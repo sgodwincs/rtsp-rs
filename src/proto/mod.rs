@@ -7,6 +7,9 @@ use header::types::ContentLength;
 pub mod client;
 pub mod server;
 
+pub use self::client::{ClientCodec, InvalidResponse};
+pub use self::server::{InvalidRequest, ServerCodec};
+
 /// Consumes a line from the buffer, returning the line found and the index at which the `\r\n`
 /// started.
 fn consume_line(buffer: &mut BytesMut) -> Option<(BytesMut, usize)> {
