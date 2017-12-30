@@ -17,7 +17,7 @@ use super::{HeaderName, HeaderValue, InvalidHeaderName};
 pub use self::as_header_name::AsHeaderName;
 pub use self::into_header_name::IntoHeaderName;
 
-/// A multimap of RTSP `HeaderName to values.
+/// A multimap of RTSP `HeaderName` to values.
 ///
 /// # Examples
 ///
@@ -217,7 +217,7 @@ enum Cursor {
     Values(usize),
 }
 
-/// Type used for representing the size of a HeaderMap value.
+/// Type used for representing the size of a `HeaderMap` value.
 ///
 /// 32,768 is more than enough entries for a single header map. Setting this limit enables using
 /// `u16` to represent all offsets, which takes 2 bytes instead of 8 on 64 bit processors.

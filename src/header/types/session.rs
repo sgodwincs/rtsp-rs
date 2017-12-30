@@ -6,6 +6,7 @@ use session::{InvalidSessionID, SessionID};
 use syntax::trim_whitespace;
 
 pub const DEFAULT_TIMEOUT: u64 = 60;
+pub const MAX_TIMEOUT: u64 = 9_999_999_999_999_999_999;
 
 /// The `Session` typed header as described by
 /// [RFC7826](https://tools.ietf.org/html/rfc7826#section-18.49).
@@ -188,9 +189,7 @@ impl TypedHeader for Session {
                     .parse::<u64>()
                     .map_err(|_| InvalidTypedHeader)
                     .and_then(|delta| {
-                        // Timeout can have a maximum of 19 digits.
-
-                        if delta > 9999999999999999999 {
+                        if delta > MAX_TIMEOUT {
                             Err(InvalidTypedHeader)
                         } else {
                             Ok(Session {

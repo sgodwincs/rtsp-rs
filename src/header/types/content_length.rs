@@ -3,6 +3,8 @@ use std::ops::Deref;
 use header::{HeaderName, HeaderValue, InvalidTypedHeader, TypedHeader};
 use syntax::trim_whitespace_left;
 
+pub const MAX_CONTENT_LENGTH: u64 = 9_999_999_999_999_999_999;
+
 /// The `Content-Length` typed header as described by
 /// [RFC7826](https://tools.ietf.org/html/rfc7826#section-18.17).
 ///
@@ -97,9 +99,7 @@ impl TypedHeader for ContentLength {
                 .parse::<usize>()
                 .map_err(|_| InvalidTypedHeader)
                 .and_then(|content_length| {
-                    // Content length can have a maximum of 19 digits.
-
-                    if content_length > 9999999999999999999 {
+                    if content_length > MAX_CONTENT_LENGTH {
                         Err(InvalidTypedHeader)
                     } else {
                         Ok(ContentLength(content_length))
