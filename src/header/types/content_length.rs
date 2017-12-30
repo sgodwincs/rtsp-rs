@@ -99,7 +99,7 @@ impl TypedHeader for ContentLength {
                 .parse::<usize>()
                 .map_err(|_| InvalidTypedHeader)
                 .and_then(|content_length| {
-                    if content_length > MAX_CONTENT_LENGTH {
+                    if content_length as u64 > MAX_CONTENT_LENGTH {
                         Err(InvalidTypedHeader)
                     } else {
                         Ok(ContentLength(content_length))
