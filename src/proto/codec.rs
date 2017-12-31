@@ -51,8 +51,8 @@ impl Encoder for ClientCodec {
     type Item = Request<BytesMut>;
     type Error = io::Error;
 
-    fn encode(&mut self, mut message: Self::Item, buffer: &mut BytesMut) -> io::Result<()> {
-        encode_request(&mut message, buffer);
+    fn encode(&mut self, message: Self::Item, buffer: &mut BytesMut) -> io::Result<()> {
+        encode_request(&message, buffer);
         Ok(())
     }
 }
@@ -146,8 +146,8 @@ impl Encoder for ServerCodec {
     type Item = Response<BytesMut>;
     type Error = io::Error;
 
-    fn encode(&mut self, mut message: Self::Item, buffer: &mut BytesMut) -> io::Result<()> {
-        encode_response(&mut message, buffer);
+    fn encode(&mut self, message: Self::Item, buffer: &mut BytesMut) -> io::Result<()> {
+        encode_response(&message, buffer);
         Ok(())
     }
 }
