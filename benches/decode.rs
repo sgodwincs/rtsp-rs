@@ -6,6 +6,9 @@ extern crate test;
 use rtsp::proto::{RequestDecoder, ResponseDecoder};
 use test::Bencher;
 
+// Decoding seems to be up to twice as slow as decoding a response. After some investigation, this
+// seems to be due to the parsing of the URL. Using `"*"`, results in a benchmark time smaller than
+// the decoding of the response.
 #[bench]
 fn bench_decode_request(b: &mut Bencher) {
     let mut decoder = RequestDecoder::new();
