@@ -1,6 +1,6 @@
 use bytes::BytesMut;
 
-use header::{HeaderName, HeaderValue};
+use header::HeaderName;
 use request::Request;
 use response::Response;
 
