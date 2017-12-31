@@ -115,10 +115,10 @@ impl Decoder for ServerCodec {
 
     fn decode(&mut self, buffer: &mut BytesMut) -> io::Result<Option<Self::Item>> {
         use self::ParseResult::*;
-        println!("Before: {:?}", buffer);
+
         let (result, bytes_parsed) = self.decoder.decode(&buffer);
         buffer.split_to(bytes_parsed);
-        println!("After ({}): {:?}", bytes_parsed, buffer);
+
         match result {
             Complete(request) => Ok(Some(Ok(request))),
             Error(error) => {
