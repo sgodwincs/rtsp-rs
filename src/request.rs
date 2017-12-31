@@ -414,7 +414,8 @@ where
         Version: TryFrom<T>,
     {
         match Version::try_from(version) {
-            Ok(version) => self.version = version,
+            Ok(version) if version == Version::RTSP20 => self.version = version,
+            Ok(_) => self.error = Some(BuilderError::UnsupportedVersion),
             Err(_) => self.error = Some(BuilderError::InvalidVersion),
         }
 
@@ -562,6 +563,7 @@ pub enum BuilderError {
     InvalidVersion,
     MissingMethod,
     MissingURI,
+    UnsupportedVersion,
 }
 
 impl fmt::Display for BuilderError {
@@ -584,6 +586,7 @@ impl error::Error for BuilderError {
             &InvalidVersion => "invalid RTSP version",
             &MissingMethod => "missing RTSP method",
             &MissingURI => "missing RTSP URI",
+            &UnsupportedVersion => "unsupported RTSP version",
         }
     }
 }

@@ -310,7 +310,7 @@ where
     /// use rtsp::*;
     ///
     /// let response = Response::builder()
-    ///     .version(Version::RTSP10)
+    ///     .version(Version::RTSP20)
     ///     .build(())
     ///     .unwrap();
     /// ```
@@ -319,7 +319,8 @@ where
         Version: TryFrom<T>,
     {
         match Version::try_from(version) {
-            Ok(version) => self.version = version,
+            Ok(version) if version == Version::RTSP20 => self.version = version,
+            Ok(_) => self.error = Some(BuilderError::UnsupportedVersion),
             Err(_) => self.error = Some(BuilderError::InvalidVersion),
         }
 
@@ -462,6 +463,7 @@ pub enum BuilderError {
     InvalidStatusCode,
     InvalidVersion,
     MissingReasonPhrase,
+    UnsupportedVersion,
 }
 
 impl fmt::Display for BuilderError {
@@ -483,6 +485,7 @@ impl error::Error for BuilderError {
             &InvalidStatusCode => "invalid RTSP status code",
             &InvalidVersion => "invalid RTSP version",
             &MissingReasonPhrase => "missing RTSP reason phrase",
+            &UnsupportedVersion => "unsupported RTSP version",
         }
     }
 }
