@@ -10,11 +10,10 @@ pub fn encode_request<B>(request: &mut Request<B>, buffer: &mut BytesMut)
 where
     B: AsRef<[u8]>,
 {
-    let body_size = unsafe {
-        HeaderValue::from_str_unchecked(request.body().as_ref().len().to_string())
-    };
+    let body_size = request.body().as_ref().len();
 
     if body_size > 0 {
+        let body_size = unsafe { HeaderValue::from_str_unchecked(body_size.to_string()) };
         request
             .headers_mut()
             .insert(HeaderName::ContentLength, body_size);
@@ -44,11 +43,10 @@ pub fn encode_response<B>(response: &mut Response<B>, buffer: &mut BytesMut)
 where
     B: AsRef<[u8]>,
 {
-    let body_size = unsafe {
-        HeaderValue::from_str_unchecked(response.body().as_ref().len().to_string())
-    };
+    let body_size = response.body().as_ref().len();
 
     if body_size > 0 {
+        let body_size = unsafe { HeaderValue::from_str_unchecked(body_size.to_string()) };
         response
             .headers_mut()
             .insert(HeaderName::ContentLength, body_size);
