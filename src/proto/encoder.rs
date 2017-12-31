@@ -13,9 +13,12 @@ where
     let body_size = unsafe {
         HeaderValue::from_str_unchecked(request.body().as_ref().len().to_string())
     };
-    request
-        .headers_mut()
-        .insert(HeaderName::ContentLength, body_size);
+
+    if body_size > 0 {
+        request
+            .headers_mut()
+            .insert(HeaderName::ContentLength, body_size);
+    }
 
     buffer.extend(request.method().as_str().as_bytes());
     buffer.extend(b" ");
@@ -44,9 +47,12 @@ where
     let body_size = unsafe {
         HeaderValue::from_str_unchecked(response.body().as_ref().len().to_string())
     };
-    response
-        .headers_mut()
-        .insert(HeaderName::ContentLength, body_size);
+
+    if body_size > 0 {
+        response
+            .headers_mut()
+            .insert(HeaderName::ContentLength, body_size);
+    }
 
     buffer.extend(response.version().as_str().as_bytes());
     buffer.extend(b" ");
