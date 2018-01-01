@@ -1,3 +1,4 @@
+#![feature(non_exhaustive)]
 #![feature(slice_patterns)]
 #![feature(try_from)]
 
