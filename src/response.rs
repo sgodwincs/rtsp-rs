@@ -456,6 +456,7 @@ where
 
 /// An error type for when the response builder encounters an error.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub enum BuilderError {
     InvalidHeaderName,
     InvalidHeaderValue,

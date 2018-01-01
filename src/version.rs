@@ -26,6 +26,7 @@ use std::fmt;
 
 /// Represents a version of the RTSP spec.
 #[derive(Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[non_exhaustive]
 pub enum Version {
     /// `RTSP/1.0`
     /// [[RFC2326](https://tools.ietf.org/html/rfc2326)]

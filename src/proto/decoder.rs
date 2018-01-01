@@ -674,6 +674,7 @@ impl RequestDecoder {
 /// An error type for when the request was invalid. Within the set of errors exist two subsets:
 /// recoverable and irrecoverable errors.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub enum InvalidRequest {
     InvalidContentLength,
     InvalidHeaderLine,
@@ -1102,6 +1103,7 @@ impl ResponseDecoder {
 /// An error type for when the response was invalid. Within the set of errors exist two subsets:
 /// recoverable and irrecoverable errors.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub enum InvalidResponse {
     InvalidContentLength,
     InvalidHeaderLine,

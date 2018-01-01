@@ -20,6 +20,7 @@ macro_rules! standard_headers {
         /// All standardized header names are supported with an ASCII encoded extension that is
         /// always lowercase.
         #[derive(Clone, Eq, Hash, PartialEq)]
+        #[non_exhaustive]
         pub enum HeaderName {
         $(
             $(#[$docs])*

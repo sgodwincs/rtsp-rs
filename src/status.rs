@@ -55,6 +55,7 @@ macro_rules! status_codes {
         /// ```
         ///
         #[derive(Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd)]
+        #[non_exhaustive]
         pub enum StatusCode {
         $(
             $(#[$docs])*

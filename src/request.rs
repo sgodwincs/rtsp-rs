@@ -555,6 +555,7 @@ where
 
 /// An error type for when the request builder encounters an error.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub enum BuilderError {
     InvalidHeaderName,
     InvalidHeaderValue,

@@ -59,6 +59,7 @@ impl Encoder for ClientCodec {
 
 /// An error type for when the response was invalid. These are all recoverable errors.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub enum InvalidParsedResponse {
     InvalidHeaderName,
     InvalidHeaderValue,
@@ -154,6 +155,7 @@ impl Encoder for ServerCodec {
 
 /// An error type for when the request was invalid. These are all recoverable errors.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub enum InvalidParsedRequest {
     InvalidHeaderName,
     InvalidHeaderValue,

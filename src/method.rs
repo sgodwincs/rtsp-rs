@@ -41,6 +41,7 @@ use syntax::is_token;
 /// assert_eq!(Method::Describe.as_str(), "DESCRIBE");
 /// ```
 #[derive(Clone, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub enum Method {
     /// DESCRIBE
     /// [[RFC7826, Section 13.2](https://tools.ietf.org/html/rfc7826#section-13.2)]
