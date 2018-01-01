@@ -88,90 +88,6 @@ pub enum Method {
     Extension(ExtensionMethod),
 }
 
-/// A wrapper type used to avoid users creating extension methods that are actually standardized
-/// methods.
-#[derive(Clone, Eq, Hash, PartialEq)]
-pub struct ExtensionMethod(AsciiString);
-
-impl fmt::Debug for ExtensionMethod {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl fmt::Display for ExtensionMethod {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-/// Performs equality checking of a `ExtensionMethod` with a `str`. This check is case insensitive.
-///
-/// # Examples
-///
-/// ```
-/// # #![feature(try_from)]
-/// #
-/// # use std::convert::TryFrom;
-/// #
-/// use rtsp::Method;
-///
-/// match Method::try_from("extension").unwrap() {
-///     Method::Extension(extension) => assert_eq!(extension, *"eXtEnSiOn"),
-///     _ => panic!("expected extension method")
-/// }
-/// ```
-impl PartialEq<str> for ExtensionMethod {
-    fn eq(&self, other: &str) -> bool {
-        self.0 == other.to_ascii_uppercase()
-    }
-}
-
-/// Performs equality checking of a `ExtensionMethod` with a `&str`. This check is case insensitive.
-///
-/// # Examples
-///
-/// ```
-/// # #![feature(try_from)]
-/// #
-/// # use std::convert::TryFrom;
-/// #
-/// use rtsp::Method;
-///
-/// match Method::try_from("extension").unwrap() {
-///     Method::Extension(extension) => assert_eq!(extension, "eXtEnSiOn"),
-///     _ => panic!("expected extension method")
-/// }
-/// ```
-impl<'a> PartialEq<&'a str> for ExtensionMethod {
-    fn eq(&self, other: &&'a str) -> bool {
-        self.0 == (*other).to_ascii_uppercase()
-    }
-}
-
-impl ExtensionMethod {
-    /// Returns a `&str` representation of the extension method. The returned string is uppercase
-    /// even if the extension method originally was a non-uppercase method.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # #![feature(try_from)]
-    /// #
-    /// # use std::convert::TryFrom;
-    /// #
-    /// use rtsp::Method;
-    ///
-    /// match Method::try_from("extension").unwrap() {
-    ///     Method::Extension(extension) => assert_eq!(extension.as_str(), "EXTENSION"),
-    ///     _ => panic!("expected extension method")
-    /// }
-    /// ```
-    pub fn as_str(&self) -> &str {
-        self.0.as_str()
-    }
-}
-
 impl Method {
     /// Returns a `&str` representation of the RTSP method. The returned string is uppercase even
     /// if the method originally was a non-uppercase extension method.
@@ -391,6 +307,90 @@ impl<'a> TryFrom<&'a str> for Method {
 
     fn try_from(value: &'a str) -> Result<Self, Self::Error> {
         Method::try_from(value.as_bytes())
+    }
+}
+
+/// A wrapper type used to avoid users creating extension methods that are actually standardized
+/// methods.
+#[derive(Clone, Eq, Hash, PartialEq)]
+pub struct ExtensionMethod(AsciiString);
+
+impl fmt::Debug for ExtensionMethod {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl fmt::Display for ExtensionMethod {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+/// Performs equality checking of a `ExtensionMethod` with a `str`. This check is case insensitive.
+///
+/// # Examples
+///
+/// ```
+/// # #![feature(try_from)]
+/// #
+/// # use std::convert::TryFrom;
+/// #
+/// use rtsp::Method;
+///
+/// match Method::try_from("extension").unwrap() {
+///     Method::Extension(extension) => assert_eq!(extension, *"eXtEnSiOn"),
+///     _ => panic!("expected extension method")
+/// }
+/// ```
+impl PartialEq<str> for ExtensionMethod {
+    fn eq(&self, other: &str) -> bool {
+        self.0 == other.to_ascii_uppercase()
+    }
+}
+
+/// Performs equality checking of a `ExtensionMethod` with a `&str`. This check is case insensitive.
+///
+/// # Examples
+///
+/// ```
+/// # #![feature(try_from)]
+/// #
+/// # use std::convert::TryFrom;
+/// #
+/// use rtsp::Method;
+///
+/// match Method::try_from("extension").unwrap() {
+///     Method::Extension(extension) => assert_eq!(extension, "eXtEnSiOn"),
+///     _ => panic!("expected extension method")
+/// }
+/// ```
+impl<'a> PartialEq<&'a str> for ExtensionMethod {
+    fn eq(&self, other: &&'a str) -> bool {
+        self.0 == (*other).to_ascii_uppercase()
+    }
+}
+
+impl ExtensionMethod {
+    /// Returns a `&str` representation of the extension method. The returned string is uppercase
+    /// even if the extension method originally was a non-uppercase method.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #![feature(try_from)]
+    /// #
+    /// # use std::convert::TryFrom;
+    /// #
+    /// use rtsp::Method;
+    ///
+    /// match Method::try_from("extension").unwrap() {
+    ///     Method::Extension(extension) => assert_eq!(extension.as_str(), "EXTENSION"),
+    ///     _ => panic!("expected extension method")
+    /// }
+    /// ```
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
     }
 }
 

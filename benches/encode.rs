@@ -58,6 +58,7 @@ fn bench_encode_response(b: &mut Bencher) {
         )
         .build("")
         .unwrap();
+
     // Make sure that allocating is not part of the benchmark.
     let mut buffer = BytesMut::with_capacity(500);
 
