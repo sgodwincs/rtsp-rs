@@ -16,13 +16,12 @@
 //! let rtsp20 = Version::RTSP20;
 //!
 //! assert!(rtsp10 != rtsp20);
-//! assert_eq!(format!("{}", rtsp20), "RTSP/2.0")
+//! assert_eq!(rtsp20.to_string(), "RTSP/2.0")
 //! ```
 //!
 
+use std::{error, fmt};
 use std::convert::TryFrom;
-use std::error;
-use std::fmt;
 
 /// Represents a version of the RTSP spec.
 #[derive(Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -61,6 +60,50 @@ impl Version {
             RTSP20 => "RTSP/2.0",
         }
     }
+
+    /// Returns whether or not the version is `RTSP10`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rtsp::Version;
+    ///
+    /// assert!(Version::RTSP10.is_rtsp10());
+    /// assert!(!Version::RTSP20.is_rtsp10());
+    /// ```
+    pub fn is_rtsp10(&self) -> bool {
+        use self::Version::*;
+
+        match *self {
+            RTSP10 => true,
+            _ => false,
+        }
+    }
+
+    /// Returns whether or not the version is `RTSP20`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rtsp::Version;
+    ///
+    /// assert!(!Version::RTSP10.is_rtsp20());
+    /// assert!(Version::RTSP20.is_rtsp20());
+    /// ```
+    pub fn is_rtsp20(&self) -> bool {
+        use self::Version::*;
+
+        match *self {
+            RTSP20 => true,
+            _ => false,
+        }
+    }
+}
+
+impl fmt::Debug for Version {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
 }
 
 impl Default for Version {
@@ -69,15 +112,9 @@ impl Default for Version {
     }
 }
 
-impl fmt::Debug for Version {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:?}", self.as_str())
-    }
-}
-
 impl fmt::Display for Version {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.as_str())
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str(self.as_str())
     }
 }
 
@@ -104,15 +141,15 @@ impl<'a> TryFrom<&'a [u8]> for Version {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryFrom;
-    /// #
-    /// use rtsp::Version;
+    /// use std::convert::TryFrom;
     ///
-    /// let rtsp20 = Version::try_from(&b"RTSP/2.0"[..]).unwrap();
-    /// assert_eq!(rtsp20, Version::RTSP20);
+    /// use rtsp::Version;
     ///
     /// let rtsp10 = Version::try_from(&b"RTSP/1.0"[..]).unwrap();
     /// assert_eq!(rtsp10, Version::RTSP10);
+    ///
+    /// let rtsp20 = Version::try_from(&b"RTSP/2.0"[..]).unwrap();
+    /// assert_eq!(rtsp20, Version::RTSP20);
     ///
     /// let error = Version::try_from(&b"RTSP/3.0"[..]);
     /// assert!(error.is_err());
@@ -142,6 +179,29 @@ impl<'a> TryFrom<&'a [u8]> for Version {
 impl<'a> TryFrom<&'a str> for Version {
     type Error = Error;
 
+    /// Converts a `&str` to an RTSP version. The version must be of the form `RTSP/*.*` where the
+    /// `*` are 1 digit numbers.
+    ///
+    /// The conversion is case insensitive.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #![feature(try_from)]
+    /// #
+    /// use std::convert::TryFrom;
+    ///
+    /// use rtsp::Version;
+    ///
+    /// let rtsp10 = Version::try_from(&b"RTSP/1.0"[..]).unwrap();
+    /// assert_eq!(rtsp10, Version::RTSP10);
+    ///
+    /// let rtsp20 = Version::try_from(&b"RTSP/2.0"[..]).unwrap();
+    /// assert_eq!(rtsp20, Version::RTSP20);
+    ///
+    /// let error = Version::try_from(&b"RTSP/3.0"[..]);
+    /// assert!(error.is_err());
+    /// ```
     fn try_from(value: &'a str) -> Result<Self, Self::Error> {
         Version::try_from(value.as_bytes())
     }
@@ -160,10 +220,10 @@ pub enum Error {
 }
 
 impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         use std::error::Error;
 
-        write!(f, "{}", self.description())
+        formatter.write_str(self.description())
     }
 }
 
@@ -171,9 +231,9 @@ impl error::Error for Error {
     fn description(&self) -> &str {
         use self::Error::*;
 
-        match self {
-            &InvalidVersion => "invalid RTSP version",
-            &UnknownVersion => "unknown RTSP version",
+        match *self {
+            InvalidVersion => "invalid RTSP version",
+            UnknownVersion => "unknown RTSP version",
         }
     }
 }
