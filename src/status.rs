@@ -10,16 +10,17 @@
 //! ```
 //! # #![feature(try_from)]
 //! #
-//! # use std::convert::TryFrom;
-//! #
+//! use std::convert::TryFrom;
+//!
 //! use rtsp::{StatusCode, StatusCodeClass};
 //!
 //! assert_eq!(StatusCode::try_from(200), Ok(StatusCode::OK));
-//! assert_eq!(StatusCode::try_from("404"), Ok(StatusCode::NotFound));
-//! assert_eq!(u16::from(StatusCode::NotFound), 404);
+//! assert_eq!(StatusCode::try_from("404").unwrap(), StatusCode::NotFound);
+//! assert_eq!(StatusCode::NotFound, 404);
 //! assert_eq!(StatusCode::OK.class(), StatusCodeClass::Success);
 //! ```
 
+use std::cmp::Ordering;
 use std::convert::TryFrom;
 use std::error::Error;
 use std::fmt;
@@ -44,17 +45,17 @@ macro_rules! status_codes {
         /// ```
         /// # #![feature(try_from)]
         /// #
-        /// # use std::convert::TryFrom;
-        /// #
+        /// use std::convert::TryFrom;
+        ///
         /// use rtsp::{StatusCode, StatusCodeClass};
         ///
         /// assert_eq!(StatusCode::try_from(200).unwrap(), StatusCode::OK);
-        /// assert_eq!(StatusCode::try_from("404"), Ok(StatusCode::NotFound));
-        /// assert_eq!(u16::from(StatusCode::NotFound), 404);
+        /// assert_eq!(StatusCode::try_from("404").unwrap(), StatusCode::NotFound);
+        /// assert_eq!(StatusCode::NotFound, 404);
         /// assert_eq!(StatusCode::OK.class(), StatusCodeClass::Success);
         /// ```
         ///
-        #[derive(Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd)]
+        #[derive(Clone, Copy, Eq, Hash, PartialEq)]
         #[non_exhaustive]
         pub enum StatusCode {
         $(
@@ -96,7 +97,7 @@ macro_rules! status_codes {
 
             /// Constructs a new `StatusCode` from a given `u16`. It is assumed that the `u16` is
             /// in the allowed range.
-            fn from_u16(status_code: u16) -> Self {
+            unsafe fn from_u16(status_code: u16) -> Self {
                 use self::StatusCode::*;
 
                 match status_code {
@@ -127,6 +128,9 @@ macro_rules! status_codes {
             let status_code = StatusCode::$variant;
             assert_eq!(status_code.canonical_reason().unwrap().as_str(), $phrase);
         )+
+
+            let status_code = StatusCode::Extension(ExtensionStatusCode(599));
+            assert!(status_code.canonical_reason().is_none());
         }
 
         #[test]
@@ -139,17 +143,6 @@ macro_rules! status_codes {
             let status_code = StatusCode::Extension(ExtensionStatusCode(599));
             assert_eq!(u16::from(status_code), 599);
         }
-    }
-}
-
-/// A wrapper type used to avoid users creating extension status codes that are actually
-/// standardized status codes.
-#[derive(Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct ExtensionStatusCode(u16);
-
-impl From<ExtensionStatusCode> for u16 {
-    fn from(value: ExtensionStatusCode) -> u16 {
-        value.0
     }
 }
 
@@ -176,6 +169,20 @@ impl StatusCode {
         }
     }
 
+    /// Returns whether the status code is of the client error class (between [400, 499]).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rtsp::StatusCode;
+    ///
+    /// assert!(StatusCode::NotFound.is_client_error());
+    /// assert!(!StatusCode::InternalServerError.is_client_error());
+    /// ```
+    pub fn is_client_error(&self) -> bool {
+        self.class() == StatusCodeClass::ClientError
+    }
+
     /// Returns whether the status code is of the informational class (between [100, 199]).
     ///
     /// # Examples
@@ -188,20 +195,6 @@ impl StatusCode {
     /// ```
     pub fn is_informational(&self) -> bool {
         self.class() == StatusCodeClass::Informational
-    }
-
-    /// Returns whether the status code is of the success class (between [200, 299]).
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use rtsp::StatusCode;
-    ///
-    /// assert!(StatusCode::OK.is_success());
-    /// assert!(!StatusCode::NotFound.is_success());
-    /// ```
-    pub fn is_success(&self) -> bool {
-        self.class() == StatusCodeClass::Success
     }
 
     /// Returns whether the status code is of the redirection class (between [300, 399]).
@@ -218,20 +211,6 @@ impl StatusCode {
         self.class() == StatusCodeClass::Redirection
     }
 
-    /// Returns whether the status code is of the client error class (between [400, 499]).
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use rtsp::StatusCode;
-    ///
-    /// assert!(StatusCode::NotFound.is_client_error());
-    /// assert!(!StatusCode::InternalServerError.is_client_error());
-    /// ```
-    pub fn is_client_error(&self) -> bool {
-        self.class() == StatusCodeClass::ClientError
-    }
-
     /// Returns whether the status code is of the server error class (between [100, 199]).
     ///
     /// # Examples
@@ -245,23 +224,61 @@ impl StatusCode {
     pub fn is_server_error(&self) -> bool {
         self.class() == StatusCodeClass::ServerError
     }
-}
 
-impl fmt::Debug for StatusCode {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", u16::from(*self))
+    /// Returns whether the status code is of the success class (between [200, 299]).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rtsp::StatusCode;
+    ///
+    /// assert!(StatusCode::OK.is_success());
+    /// assert!(!StatusCode::NotFound.is_success());
+    /// ```
+    pub fn is_success(&self) -> bool {
+        self.class() == StatusCodeClass::Success
     }
 }
 
-impl fmt::Display for StatusCode {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", u16::from(*self))
+impl fmt::Debug for StatusCode {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        write!(formatter, "{}", u16::from(*self))
     }
 }
 
 impl Default for StatusCode {
     fn default() -> Self {
         StatusCode::OK
+    }
+}
+
+impl fmt::Display for StatusCode {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        write!(formatter, "{}", u16::from(*self))
+    }
+}
+
+impl Ord for StatusCode {
+    fn cmp(&self, other: &StatusCode) -> Ordering {
+        u16::from(*self).cmp(&u16::from(*other))
+    }
+}
+
+impl PartialEq<u16> for StatusCode {
+    fn eq(&self, other: &u16) -> bool {
+        u16::from(*self) == *other
+    }
+}
+
+impl PartialEq<StatusCode> for u16 {
+    fn eq(&self, other: &StatusCode) -> bool {
+        *self == u16::from(*other)
+    }
+}
+
+impl PartialOrd for StatusCode {
+    fn partial_cmp(&self, other: &StatusCode) -> Option<Ordering> {
+        Some(self.cmp(other))
     }
 }
 
@@ -286,8 +303,8 @@ impl<'a> TryFrom<&'a [u8]> for StatusCode {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryFrom;
-    /// #
+    /// use std::convert::TryFrom;
+    ///
     /// use rtsp::StatusCode;
     ///
     /// let ok = StatusCode::try_from(&b"200"[..]).unwrap();
@@ -301,16 +318,16 @@ impl<'a> TryFrom<&'a [u8]> for StatusCode {
             return Err(InvalidStatusCode);
         }
 
-        let a = value[0].wrapping_sub(b'0') as u16;
-        let b = value[1].wrapping_sub(b'0') as u16;
-        let c = value[2].wrapping_sub(b'0') as u16;
+        let a = u16::from(value[0].wrapping_sub(b'0'));
+        let b = u16::from(value[1].wrapping_sub(b'0'));
+        let c = u16::from(value[2].wrapping_sub(b'0'));
 
         if a == 0 || a > 5 || b > 9 || c > 9 {
             return Err(InvalidStatusCode);
         }
 
         let status_code = (a * 100) + (b * 10) + c;
-        Ok(StatusCode::from_u16(status_code))
+        Ok(unsafe { StatusCode::from_u16(status_code) })
     }
 }
 
@@ -335,8 +352,8 @@ impl TryFrom<u16> for StatusCode {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryFrom;
-    /// #
+    /// use std::convert::TryFrom;
+    ///
     /// use rtsp::StatusCode;
     ///
     /// let ok = StatusCode::try_from(200).unwrap();
@@ -350,9 +367,14 @@ impl TryFrom<u16> for StatusCode {
             return Err(InvalidStatusCode);
         }
 
-        Ok(StatusCode::from_u16(value))
+        Ok(unsafe { StatusCode::from_u16(value) })
     }
 }
+
+/// A wrapper type used to avoid users creating extension status codes that are actually
+/// standardized status codes.
+#[derive(Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct ExtensionStatusCode(u16);
 
 /// Represents the class that a status code falls under.
 /// [[RFC7826, Section 17]](https://tools.ietf.org/html/rfc7826#section-17)
@@ -384,8 +406,8 @@ pub enum StatusCodeClass {
 pub struct InvalidStatusCode;
 
 impl fmt::Display for InvalidStatusCode {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", Error::description(self))
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str(self.description())
     }
 }
 
