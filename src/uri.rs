@@ -6,8 +6,9 @@
 //! of valid URIs that are allowed in the request line, specifically, the URIs must contain an
 //! authority part.
 
-use std::{error, fmt, str};
+use std::{fmt, str};
 use std::convert::TryFrom;
+use std::error::Error;
 use url::Url;
 
 /// The main type of this module. Represents either a valid URI or a URI of the form `'*'`.
@@ -221,13 +222,11 @@ pub struct InvalidURI;
 
 impl fmt::Display for InvalidURI {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        use std::error::Error;
-
         formatter.write_str(self.description())
     }
 }
 
-impl error::Error for InvalidURI {
+impl Error for InvalidURI {
     fn description(&self) -> &str {
         "invalid RTSP URI"
     }
