@@ -295,8 +295,12 @@ impl PartialOrd for StatusCode {
 impl<'a> TryFrom<&'a [u8]> for StatusCode {
     type Error = InvalidStatusCode;
 
-    /// Converts a `&[u8]` to a status code. The size of the byte slice must be exactly 3, and the
-    /// resulting `u16` must be greater than or equal to 100 but less than 600.
+    /// Converts a `&[u8]` to a status code.
+    ///
+    /// # Errors
+    ///
+    /// An error will be returned if the byte slice is not of length 3, or the parsed `u16` is less
+    /// than 100 or greater than 599.
     ///
     /// # Examples
     ///
@@ -334,6 +338,28 @@ impl<'a> TryFrom<&'a [u8]> for StatusCode {
 impl<'a> TryFrom<&'a str> for StatusCode {
     type Error = InvalidStatusCode;
 
+    /// Converts a `&str` to a status code.
+    ///
+    /// # Errors
+    ///
+    /// An error will be returned if the string as a byte slice is not of length 3, or the parsed
+    /// `u16` is less than 100 or greater than 599.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #![feature(try_from)]
+    /// #
+    /// use std::convert::TryFrom;
+    ///
+    /// use rtsp::StatusCode;
+    ///
+    /// let ok = StatusCode::try_from("200").unwrap();
+    /// assert_eq!(ok, StatusCode::OK);
+    ///
+    /// let error = StatusCode::try_from("099");
+    /// assert!(error.is_err());
+    /// ```
     fn try_from(value: &'a str) -> Result<Self, Self::Error> {
         StatusCode::try_from(value.as_bytes())
     }
@@ -344,8 +370,9 @@ impl TryFrom<u16> for StatusCode {
 
     /// Converts a u16 to a status code.
     ///
-    /// The function validates the correctness of the supplied `u16`. It must be greater than or
-    /// equal to 100 but less than 600.
+    /// # Errors
+    ///
+    /// An error will be returned if the given `u16` is less than 100 or greater than 599.
     ///
     /// # Examples
     ///

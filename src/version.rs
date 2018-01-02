@@ -131,10 +131,12 @@ impl fmt::Display for Version {
 impl<'a> TryFrom<&'a [u8]> for Version {
     type Error = Error;
 
-    /// Converts a `&[u8]` to an RTSP version. The version must be of the form `RTSP/*.*` where the
-    /// `*` are 1 digit numbers.
+    /// Converts a `&[u8]` to an RTSP version. The conversion is case insensitive.
     ///
-    /// The conversion is case insensitive.
+    /// # Errors
+    ///
+    /// An error will be returned if he version is not of the form `"RTSP/*.*"` where the `*` are 1
+    /// digit numbers.
     ///
     /// # Examples
     ///
@@ -179,10 +181,12 @@ impl<'a> TryFrom<&'a [u8]> for Version {
 impl<'a> TryFrom<&'a str> for Version {
     type Error = Error;
 
-    /// Converts a `&str` to an RTSP version. The version must be of the form `RTSP/*.*` where the
-    /// `*` are 1 digit numbers.
+    /// Converts a `&str` to an RTSP version. The conversion is case insensitive.
     ///
-    /// The conversion is case insensitive.
+    /// # Errors
+    ///
+    /// An error will be returned if he version is not of the form `"RTSP/*.*"` where the `*` are 1
+    /// digit numbers.
     ///
     /// # Examples
     ///

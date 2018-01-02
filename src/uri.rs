@@ -123,8 +123,12 @@ impl fmt::Display for URI {
 impl<'a> TryFrom<&'a [u8]> for URI {
     type Error = InvalidURI;
 
-    /// Converts a `&[u8]` to an RTSP URI. The URI must be either a valid URI with an authority part
-    /// or `"*"`.
+    /// Converts a `&[u8]` to an RTSP URI.
+    ///
+    /// # Errors
+    ///
+    /// An error will be returned if the URI is not `"*"`, or it is not a valid URI with an
+    /// authority part.
     ///
     /// # Examples
     ///
@@ -153,8 +157,12 @@ impl<'a> TryFrom<&'a [u8]> for URI {
 impl<'a> TryFrom<&'a str> for URI {
     type Error = InvalidURI;
 
-    /// Converts a `&str` to an RTSP URI. The URI must be either a valid URI with an authority part
-    /// or `"*"`.
+    /// Converts a `&str` to an RTSP URI.
+    ///
+    /// # Errors
+    ///
+    /// An error will be returned if the URI is not `"*"`, and it is not a valid URI with an
+    /// authority part.
     ///
     /// # Examples
     ///
