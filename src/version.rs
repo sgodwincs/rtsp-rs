@@ -135,7 +135,7 @@ impl<'a> TryFrom<&'a [u8]> for Version {
     ///
     /// # Errors
     ///
-    /// An error will be returned if he version is not of the form `"RTSP/*.*"` where the `*` are 1
+    /// An error will be returned if the version is not of the form `"RTSP/*.*"` where the `*` are 1
     /// digit numbers.
     ///
     /// # Examples
@@ -185,7 +185,7 @@ impl<'a> TryFrom<&'a str> for Version {
     ///
     /// # Errors
     ///
-    /// An error will be returned if he version is not of the form `"RTSP/*.*"` where the `*` are 1
+    /// An error will be returned if the version is not of the form `"RTSP/*.*"` where the `*` are 1
     /// digit numbers.
     ///
     /// # Examples
