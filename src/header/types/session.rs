@@ -163,7 +163,7 @@ impl TypedHeader for Session {
             return Err(InvalidTypedHeader);
         }
 
-        let parts = header[0].as_str().split(';').collect::<Vec<&str>>();
+        let parts = header[0].as_str().splitn(2, ';').collect::<Vec<&str>>();
 
         if parts.len() > 2 {
             return Err(InvalidTypedHeader);
@@ -178,7 +178,7 @@ impl TypedHeader for Session {
             })
         } else {
             let parts = parts[1]
-                .split('=')
+                .splitn(2, '=')
                 .map(|part| trim_whitespace(part))
                 .collect::<Vec<&str>>();
 
