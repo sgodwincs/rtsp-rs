@@ -5,7 +5,8 @@
 //! rather than reaching into this module itself.
 
 use std::convert::TryFrom;
-use std::{error, fmt};
+use std::error::Error;
+use std::fmt;
 use std::mem::replace;
 
 use header::{HeaderMap, HeaderName, HeaderValue, TypedHeader, TypedHeaderMap};
@@ -25,7 +26,7 @@ use version::Version;
 /// Note that it is not necessary to ever set the `Content-Length` header as it will be forcibly
 /// set during encoding even if it is already present.
 #[derive(Clone, Eq, PartialEq)]
-pub struct Response<B, H = HeaderMap<HeaderValue>>
+pub struct Response<B, H = HeaderMap>
 where
     H: Default,
 {
@@ -36,7 +37,7 @@ where
     /// reason phrases and even recommends it in specific cases.
     reason_phrase: ReasonPhrase,
 
-    /// A header map that will either be `HeaderMap<HeaderValue>` or `TypedHeaderMap`.
+    /// A header map that will either be `HeaderMap` or `TypedHeaderMap`.
     headers: H,
 
     /// The status code of the response.
@@ -116,7 +117,7 @@ where
     }
 }
 
-impl<B> Response<B, HeaderMap<HeaderValue>> {
+impl<B> Response<B, HeaderMap> {
     pub fn into_typed(self) -> Response<B, TypedHeaderMap> {
         Response {
             body: self.body,
@@ -129,7 +130,7 @@ impl<B> Response<B, HeaderMap<HeaderValue>> {
 }
 
 impl<B> Response<B, TypedHeaderMap> {
-    pub fn into_untyped(self) -> Response<B, HeaderMap<HeaderValue>> {
+    pub fn into_untyped(self) -> Response<B, HeaderMap> {
         Response {
             body: self.body,
             headers: self.headers.into(),
@@ -160,7 +161,7 @@ where
 ///
 /// This type can be used to construct a `Response` through a builder-like pattern.
 #[derive(Clone, Debug)]
-pub struct Builder<H = HeaderMap<HeaderValue>>
+pub struct Builder<H = HeaderMap>
 where
     H: Default,
 {
@@ -173,7 +174,7 @@ where
     /// A stored error used when making a `Response`.
     pub(crate) error: Option<BuilderError>,
 
-    /// A header map that will either be `HeaderMap<HeaderValue>` or `TypedHeaderMap`.
+    /// A header map that will either be `HeaderMap` or `TypedHeaderMap`.
     pub(crate) headers: H,
 
     /// The status code of the response.
@@ -192,11 +193,13 @@ where
         Builder::default()
     }
 
-    /// Consumes this builder, using the provided `body` to return a constructed `Response`.
+    /// Constructs a `Response` by using the given body. Note that this function does not consume
+    /// the builder, allowing you to construct responses with different bodies with the same
+    /// buider.
     ///
     /// # Errors
     ///
-    /// This function may return an error if part of the response is invalid (such as a header).
+    /// An error will be returned if part of the response is invalid.
     pub fn build<B>(&mut self, body: B) -> Result<Response<B, H>, BuilderError> {
         if let Some(error) = self.error {
             return Err(error);
@@ -226,14 +229,11 @@ where
 
     /// Set the reason phrase for this response.
     ///
-    /// This function will configure the RTSP reason phrase of the `Response` that will be returned
-    /// from `build`. If a reason phrase is not given or `None` is supplied here, the canonical
-    /// reason phrase for the given `StatusCode` will be used. If the status code does not have a
-    /// canonical reason phrase (it is an extension), the `build` function will return an error.
+    /// # Errors
     ///
-    /// The given reason phrase must be non-empty and be valid UTF-8 with a subset of characters
-    /// allowed from ASCII-US. If these conditions are not met, the `build` function will return an
-    /// error.
+    /// An error will be stored if the given reason phrase is `Some(T)` where `T` is an invalid
+    /// `ReasonPhrase`. Note that if a extension status code is specified, you *must* specify a
+    /// reason phrase or an error will be returned during the `build` function.
     ///
     /// # Examples
     ///
@@ -264,15 +264,11 @@ where
 
     /// Set the status code for this response.
     ///
-    /// This function will configure the RTSP version of the `Response` that will be returned from
-    /// `build`.
-    ///
     /// The default value for the status code is 200.
     ///
     /// # Errors
     ///
-    /// If the given status code is not a valid status code, an error will be saved and retured when
-    /// the `build` function is invoked.
+    /// An error will be stored if the given status code is an invalid `StatusCode`.
     ///
     /// # Examples
     ///
@@ -299,10 +295,12 @@ where
 
     /// Set the RTSP version for this response.
     ///
-    /// This function will configure the RTSP version of the `Response` that will be returned from
-    /// `build`.
-    ///
     /// The default value for the version is RTSP/2.0.
+    ///
+    /// # Errors
+    ///
+    /// An error will be stored if the given version is an invalid or unsupported `Version`.
+    /// Currently the only supported version is RTSP/2.0.
     ///
     /// # Examples
     ///
@@ -328,14 +326,19 @@ where
     }
 }
 
-impl Builder<HeaderMap<HeaderValue>> {
+impl Builder<HeaderMap> {
     /// Appends a header to this response.
     ///
     /// This function will append the provided key/value as a header to the internal `HeaderMap`
-    /// being constructued. Essentially, this is equivalent to calling `HeaderMap::append`. Because
+    /// being constructed. Essentially, this is equivalent to calling `HeaderMap::append`. Because
     /// of this, you are able to add a given header multiple times.
     ///
     /// By default, the response contains no headers.
+    ///
+    /// # Errors
+    ///
+    /// An error will be stored if the given name is an invalid `HeaderName`, or the given value is
+    /// an invalid `HeaderValue`.
     ///
     /// # Examples
     ///
@@ -348,15 +351,15 @@ impl Builder<HeaderMap<HeaderValue>> {
     ///     .build(())
     ///     .unwrap();
     /// ```
-    pub fn header<K, V>(&mut self, key: K, value: V) -> &mut Self
+    pub fn header<K, V>(&mut self, name: K, value: V) -> &mut Self
     where
         HeaderName: TryFrom<K>,
         HeaderValue: TryFrom<V>,
     {
-        match HeaderName::try_from(key) {
-            Ok(key) => match HeaderValue::try_from(value) {
+        match HeaderName::try_from(name) {
+            Ok(name) => match HeaderValue::try_from(value) {
                 Ok(value) => {
-                    self.headers.append(key, value);
+                    self.headers.append(name, value);
                 }
                 Err(_) => self.error = Some(BuilderError::InvalidHeaderValue),
             },
@@ -379,10 +382,13 @@ impl Builder<HeaderMap<HeaderValue>> {
 }
 
 impl Builder<TypedHeaderMap> {
-    /// Sets a typed header for this request. Since typed headers are used here, this function
-    /// cannot produce an error for the builder.
+    /// Sets a typed header for this request.
     ///
     /// By default, the request contains no headers.
+    ///
+    /// # Errors
+    ///
+    /// Since typed headers are used here, this function cannot produce an error for the builder.
     ///
     /// # Examples
     ///
@@ -401,10 +407,16 @@ impl Builder<TypedHeaderMap> {
         self
     }
 
-    /// Sets a raw header for this request. Since typed headers are used here, this function cannot
-    /// produce an error for the builder.
+    /// Sets a raw header for this request. This is slightly different from the untyped builder's
+    /// `header` function in that setting the raw value for a previously set header will end up
+    /// overwriting it.
     ///
-    /// By default, the request contains no headers.
+    /// By default, the response contains no headers.
+    ///
+    /// # Errors
+    ///
+    /// An error will be stored in the builder if the given name is an invalid `HeaderName`, or the
+    /// given values contains an invalid `HeaderValue`.
     ///
     /// # Examples
     ///
@@ -417,17 +429,37 @@ impl Builder<TypedHeaderMap> {
     ///
     /// let response = Response::typed_builder()
     ///     .status_code(StatusCode::OK)
-    ///     .header_raw(HeaderName::ContentLength, vec![HeaderValue::try_from("5").unwrap()])
+    ///     .header_raw("Content-Length", vec!["5"])
     ///     .build(())
     ///     .unwrap();
     /// ```
-    pub fn header_raw(&mut self, name: HeaderName, value: Vec<HeaderValue>) -> &mut Self {
-        self.headers.set_raw(name, value);
+    pub fn header_raw<K, V>(&mut self, name: K, values: Vec<V>) -> &mut Self
+    where
+        HeaderName: TryFrom<K>,
+        HeaderValue: TryFrom<V>,
+    {
+        match HeaderName::try_from(name) {
+            Ok(name) => {
+                let values = values
+                    .into_iter()
+                    .map(|value| HeaderValue::try_from(value))
+                    .collect::<Result<Vec<_>, _>>();
+
+                match values {
+                    Ok(values) => {
+                        self.headers.set_raw(name, values);
+                    }
+                    Err(_) => self.error = Some(BuilderError::InvalidHeaderValue),
+                }
+            }
+            Err(_) => self.error = Some(BuilderError::InvalidHeaderName),
+        }
+
         self
     }
 
     /// Converts this builder into a builder that contains untyped headers.
-    pub fn into_untyped(self) -> Builder<HeaderMap<HeaderValue>> {
+    pub fn into_untyped(self) -> Builder<HeaderMap> {
         Builder {
             custom_reason_phrase: self.custom_reason_phrase,
             error: self.error,
@@ -458,24 +490,38 @@ where
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub enum BuilderError {
+    /// This error indicates that a given header name was invalid.
     InvalidHeaderName,
+
+    /// This error indicates that a given header value was invalid.
     InvalidHeaderValue,
+
+    /// This error indicates that the reason phrase was invalid.
     InvalidReasonPhrase,
+
+    /// This error indicates that the status code was invalid.
     InvalidStatusCode,
+
+    /// This error indicates that the version was invalid.
     InvalidVersion,
+
+    /// This error indicates that an extension status code was given, but a corresponding reason
+    /// phrase was not given. There is no default reason phrase to use for extensions, so one must
+    /// be specified.
     MissingReasonPhrase,
+
+    /// This error indicates that the version was unsupported. The only supported version is
+    /// RTSP 2.0.
     UnsupportedVersion,
 }
 
 impl fmt::Display for BuilderError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use std::error::Error;
-
-        write!(f, "{}", self.description())
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str(self.description())
     }
 }
 
-impl error::Error for BuilderError {
+impl Error for BuilderError {
     fn description(&self) -> &str {
         use self::BuilderError::*;
 
