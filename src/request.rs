@@ -5,7 +5,8 @@
 //! reaching into this module itself.
 
 use std::convert::TryFrom;
-use std::{error, fmt};
+use std::error::Error;
+use std::fmt;
 use std::mem::replace;
 
 use header::{HeaderMap, HeaderName, HeaderValue, TypedHeader, TypedHeaderMap};
@@ -25,14 +26,14 @@ use version::Version;
 /// Note that it is not necessary to ever set the `Content-Length` header as it will be forcibly
 /// set during encoding even if it is already present.
 #[derive(Clone, Eq, PartialEq)]
-pub struct Request<B, H = HeaderMap<HeaderValue>>
+pub struct Request<B, H = HeaderMap>
 where
     H: Default,
 {
     /// The body component of the request. This is generic to support arbitrary content types.
     body: B,
 
-    /// A header map that will either be `HeaderMap<HeaderValue>` or `TypedHeaderMap`.
+    /// A header map that will either be `HeaderMap` or `TypedHeaderMap`.
     headers: H,
 
     /// The RTSP method to be applied to the resource. This can be any standardized RTSP method or
@@ -52,14 +53,18 @@ where
 }
 
 impl Request<()> {
+    /// Constructs a new builder that uses untyped headers.
     pub fn builder() -> Builder {
         Builder::new()
     }
 
+    /// Constructs a new builder that uses typed headers.
     pub fn typed_builder() -> Builder<TypedHeaderMap> {
         Builder::new()
     }
 
+    /// A convenience function for quickly creating a new builder with the method set to
+    /// `"DESCRIBE"` and the URI set to `uri`.
     pub fn describe<T>(uri: T) -> Builder
     where
         URI: TryFrom<T>,
@@ -69,6 +74,8 @@ impl Request<()> {
         b
     }
 
+    /// A convenience function for quickly creating a new builder with the method set to
+    /// `"GET_PARAMETER"` and the URI set to `uri`.
     pub fn get_parameter<T>(uri: T) -> Builder
     where
         URI: TryFrom<T>,
@@ -78,6 +85,8 @@ impl Request<()> {
         b
     }
 
+    /// A convenience function for quickly creating a new builder with the method set to `"OPTIONS"`
+    /// and the URI set to `uri`.
     pub fn options<T>(uri: T) -> Builder
     where
         URI: TryFrom<T>,
@@ -87,6 +96,8 @@ impl Request<()> {
         b
     }
 
+    /// A convenience function for quickly creating a new builder with the method set to `"PAUSE"`
+    /// and the URI set to `uri`.
     pub fn pause<T>(uri: T) -> Builder
     where
         URI: TryFrom<T>,
@@ -96,6 +107,8 @@ impl Request<()> {
         b
     }
 
+    /// A convenience function for quickly creating a new builder with the method set to `"PLAY"`
+    /// and the URI set to `uri`.
     pub fn play<T>(uri: T) -> Builder
     where
         URI: TryFrom<T>,
@@ -105,6 +118,8 @@ impl Request<()> {
         b
     }
 
+    /// A convenience function for quickly creating a new builder with the method set to
+    /// `"PLAY_NOTIFY"` and the URI set to `uri`.
     pub fn play_notify<T>(uri: T) -> Builder
     where
         URI: TryFrom<T>,
@@ -114,6 +129,8 @@ impl Request<()> {
         b
     }
 
+    /// A convenience function for quickly creating a new builder with the method set to
+    /// `"REDIRECT"` and the URI set to `uri`.
     pub fn redirect<T>(uri: T) -> Builder
     where
         URI: TryFrom<T>,
@@ -123,6 +140,8 @@ impl Request<()> {
         b
     }
 
+    /// A convenience function for quickly creating a new builder with the method set to
+    /// `"SET_PARAMETER"` and the URI set to `uri`.
     pub fn set_parameter<T>(uri: T) -> Builder
     where
         URI: TryFrom<T>,
@@ -132,6 +151,8 @@ impl Request<()> {
         b
     }
 
+    /// A convenience function for quickly creating a new builder with the method set to `"SETUP"`
+    /// and the URI set to `uri`.
     pub fn setup<T>(uri: T) -> Builder
     where
         URI: TryFrom<T>,
@@ -141,6 +162,8 @@ impl Request<()> {
         b
     }
 
+    /// A convenience function for quickly creating a new builder with the method set to
+    /// `"TEARDOWN"` and the URI set to `uri`.
     pub fn teardown<T>(uri: T) -> Builder
     where
         URI: TryFrom<T>,
@@ -155,30 +178,34 @@ impl<B, H> Request<B, H>
 where
     H: Default,
 {
+    /// Returns an immutable reference to the request body.
     pub fn body(&self) -> &B {
         &self.body
     }
 
+    /// Returns a mutable reference to the request body. To Change the type of the body, use the
+    /// `map` function.
     pub fn body_mut(&mut self) -> &mut B {
         &mut self.body
     }
 
+    /// Returns an immutable reference to the request header map.
     pub fn headers(&self) -> &H {
         &self.headers
     }
 
+    /// Returns a mutable reference to the request header map.
     pub fn headers_mut(&mut self) -> &mut H {
         &mut self.headers
     }
 
-    pub fn map<T, F>(self, mut f: F) -> Request<T, H>
+    /// Maps the body of this request to a new type `T` using the provided function.
+    pub fn map<T, F>(self, mut mapper: F) -> Request<T, H>
     where
         F: FnMut(B) -> T,
     {
-        let body = f(self.body);
-
         Request {
-            body: body,
+            body: mapper(self.body),
             headers: self.headers,
             method: self.method,
             uri: self.uri,
@@ -186,32 +213,39 @@ where
         }
     }
 
+    /// Returns an immutable reference to the request method.
     pub fn method(&self) -> &Method {
         &self.method
     }
 
+    /// Returns a mutable reference to the request method.
     pub fn method_mut(&mut self) -> &mut Method {
         &mut self.method
     }
 
+    /// Returns an immutable reference to the request URI.
     pub fn uri(&self) -> &URI {
         &self.uri
     }
 
+    /// Returns a mutable reference to the request URI.
     pub fn uri_mut(&mut self) -> &mut URI {
         &mut self.uri
     }
 
+    /// Returns a copy of the request version.
     pub fn version(&self) -> Version {
         self.version
     }
 
+    /// Returns a mutable reference to the request version.
     pub fn version_mut(&mut self) -> &mut Version {
         &mut self.version
     }
 }
 
-impl<B> Request<B, HeaderMap<HeaderValue>> {
+impl<B> Request<B, HeaderMap> {
+    /// Converts the request from using untyped headers to typed headers.
     pub fn into_typed(self) -> Request<B, TypedHeaderMap> {
         Request {
             body: self.body,
@@ -224,7 +258,8 @@ impl<B> Request<B, HeaderMap<HeaderValue>> {
 }
 
 impl<B> Request<B, TypedHeaderMap> {
-    pub fn into_untyped(self) -> Request<B, HeaderMap<HeaderValue>> {
+    /// Converts the request from using typed headers to untyped headers.
+    pub fn into_untyped(self) -> Request<B, HeaderMap> {
         Request {
             body: self.body,
             headers: self.headers.into(),
@@ -240,8 +275,9 @@ where
     B: fmt::Debug,
     H: fmt::Debug + Default,
 {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("Request")
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter
+            .debug_struct("Request")
             .field("method", self.method())
             .field("uri", self.uri())
             .field("version", &self.version())
@@ -255,14 +291,14 @@ where
 ///
 /// This type can be used to construct a `Request` through a builder-like pattern.
 #[derive(Clone, Debug)]
-pub struct Builder<H = HeaderMap<HeaderValue>>
+pub struct Builder<H = HeaderMap>
 where
     H: Default,
 {
     /// A stored error used when making a `Request`.
     pub(crate) error: Option<BuilderError>,
 
-    /// A header map that will either be `HeaderMap<HeaderValue>` or `TypedHeaderMap`.
+    /// A header map that will either be `HeaderMap` or `TypedHeaderMap`.
     pub(crate) headers: H,
 
     /// The RTSP method to be applied to the resource. This can be any standardized RTSP method or
@@ -290,12 +326,25 @@ where
         Builder::default()
     }
 
-    /// Consumes this builder, using the provided `body` to return a constructed `Request`.
+    /// Constructs a `Request` by using the given body. Note that this function does not consume
+    /// the builder, allowing you to construct requests with different bodies with the same
+    /// builder.
     ///
     /// # Errors
     ///
-    /// This function may return an error if part of the request has not been configured (such as
-    /// the method or URI) or a configured part is invalid (such as a header).
+    /// An error will be returned if part of the request is invalid.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rtsp::*;
+    ///
+    /// let request = Request::builder()
+    ///     .method(Method::Setup)
+    ///     .uri("rtsp://server.com")
+    ///     .build(())
+    ///     .unwrap();
+    /// ```
     pub fn build<B>(&mut self, body: B) -> Result<Request<B, H>, BuilderError> {
         if let Some(error) = self.error {
             return Err(error);
@@ -318,18 +367,12 @@ where
         }
     }
 
-    /// Set the RTSP method for this request.
-    ///
-    /// This function will configure the RTSP method of the `Request` that will be returned from
-    /// `build`.
-    ///
-    /// This does not have a default value and, as a result, it must be specified before `build` is
-    /// called.
+    /// Set the method for this request.
     ///
     /// # Errors
     ///
-    /// If the given method is not a valid method, an error will be saved and retured when the
-    /// `build` function is invoked.
+    /// An error will be stored if the given method is an invalid `Method`. Also, this does not have
+    /// a default value and, as a result, it must be specified before `build` is called.
     ///
     /// # Examples
     ///
@@ -354,18 +397,12 @@ where
         self
     }
 
-    /// Set the RTSP URI for this request.
-    ///
-    /// This function will configure the RTSP URI of the `Request` that will be returned from
-    /// `build`.
-    ///
-    /// This does not have a default value and, as a result, it must be specified before `build` is
-    /// called.
+    /// Set the URI for this request.
     ///
     /// # Errors
     ///
-    /// A given URI must have an authority part specified or an error will be saved and returned
-    /// when the `build` function is invoked.
+    /// An error will be stored if the given URI is an invalid `URI`. Also, this does not have a
+    /// default value and, as a result, it must be specified before `build` is called.
     ///
     /// # Examples
     ///
@@ -390,12 +427,14 @@ where
         self
     }
 
-    /// Set the RTSP version for this request.
-    ///
-    /// This function will configure the RTSP version of the `Request` that will be returned from
-    /// `build`.
+    /// Set the version for this request.
     ///
     /// The default value for the version is RTSP/2.0.
+    ///
+    /// # Errors
+    ///
+    /// An error will be stored if the given version is an invalid or unsupported `Version`.
+    /// Currently the only supported version is RTSP/2.0.
     ///
     /// # Examples
     ///
@@ -423,14 +462,19 @@ where
     }
 }
 
-impl Builder<HeaderMap<HeaderValue>> {
+impl Builder<HeaderMap> {
     /// Appends a header to this request.
     ///
     /// This function will append the provided key/value as a header to the internal `HeaderMap`
-    /// being constructued. Essentially, this is equivalent to calling `HeaderMap::append`. Because
+    /// being constructed. Essentially, this is equivalent to calling `HeaderMap::append`. Because
     /// of this, you are able to add a given header multiple times.
     ///
     /// By default, the request contains no headers.
+    ///
+    /// # Errors
+    ///
+    /// An error will be stored if the given name is an invalid `HeaderName`, or the given value is
+    /// an invalid `HeaderValue`.
     ///
     /// # Examples
     ///
@@ -476,10 +520,13 @@ impl Builder<HeaderMap<HeaderValue>> {
 }
 
 impl Builder<TypedHeaderMap> {
-    /// Sets a typed header for this request. Since typed headers are used here, this function
-    /// cannot produce an error for the builder.
+    /// Sets a typed header for this request.
     ///
     /// By default, the request contains no headers.
+    ///
+    /// # Errors
+    ///
+    /// Since typed headers are used here, this function cannot produce an error for the builder.
     ///
     /// # Examples
     ///
@@ -499,18 +546,24 @@ impl Builder<TypedHeaderMap> {
         self
     }
 
-    /// Sets a raw header for this request. Since typed headers are used here, this function cannot
-    /// produce an error for the builder.
+    /// Sets a raw header for this request. This is slightly different from the untyped builder's
+    /// `header` function in that setting the raw value for a previously set header will end up
+    /// overwriting it.
     ///
     /// By default, the request contains no headers.
+    ///
+    /// # Errors
+    ///
+    /// An error will be stored in the builder if the given name is an invalid `HeaderName`, or the
+    /// given values contains an invalid `HeaderValue`.
     ///
     /// # Examples
     ///
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryFrom;
-    /// #
+    /// use std::convert::TryFrom;
+    ///
     /// use rtsp::*;
     ///
     /// let request = Request::typed_builder()
@@ -526,7 +579,7 @@ impl Builder<TypedHeaderMap> {
     }
 
     /// Converts this builder into a builder that contains untyped headers.
-    pub fn into_untyped(self) -> Builder<HeaderMap<HeaderValue>> {
+    pub fn into_untyped(self) -> Builder<HeaderMap> {
         Builder {
             error: self.error,
             headers: self.headers.into(),
@@ -557,25 +610,39 @@ where
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub enum BuilderError {
+    /// This error indicates that a given header name was invalid.
     InvalidHeaderName,
+
+    /// This error indicates that a given header value was invalid.
     InvalidHeaderValue,
+
+    /// This error indicates that the given method was invalid.
     InvalidMethod,
+
+    /// This error indicates that the given URI was invalid.
     InvalidURI,
+
+    /// This error indicates that the version was invalid.
     InvalidVersion,
+
+    /// This error indicates that a method was not specified.
     MissingMethod,
+
+    /// This error indicates that a URI was not specified.
     MissingURI,
+
+    /// This error indicates that the version was unsupported. The only supported version is
+    /// RTSP 2.0.
     UnsupportedVersion,
 }
 
 impl fmt::Display for BuilderError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use std::error::Error;
-
-        write!(f, "{}", self.description())
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str(self.description())
     }
 }
 
-impl error::Error for BuilderError {
+impl Error for BuilderError {
     fn description(&self) -> &str {
         use self::BuilderError::*;
 

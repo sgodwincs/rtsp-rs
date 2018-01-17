@@ -19,9 +19,9 @@ use version::Version;
 /// An RTSP response consists of a header and a, potentially empty, body. The body component is
 /// generic, enabling arbitrary types to represent the RTSP body.
 ///
-/// This struct implements `PartialEq` but care should be taken when using it. Two requests can
+/// This struct implements `PartialEq` but care should be taken when using it. Two responses can
 /// be semantically equivalent but not be byte by byte. This will mainly occur due to extra spaces
-/// in headers. Even when using a typed request, the same problem will occur.
+/// in headers. Even when using a typed response, the same problem will occur.
 ///
 /// Note that it is not necessary to ever set the `Content-Length` header as it will be forcibly
 /// set during encoding even if it is already present.
@@ -48,10 +48,12 @@ where
 }
 
 impl Response<()> {
+    /// Constructs a new builder that uses untyped headers.
     pub fn builder() -> Builder {
         Builder::new()
     }
 
+    /// Constructs a new builder that uses typed headers.
     pub fn typed_builder() -> Builder<TypedHeaderMap> {
         Builder::new()
     }
@@ -61,30 +63,34 @@ impl<B, H> Response<B, H>
 where
     H: Default,
 {
+    /// Returns an immutable reference to the response body.
     pub fn body(&self) -> &B {
         &self.body
     }
 
+    /// Returns a mutable reference to the response body. To change the type of the body, use the
+    /// `map` function.
     pub fn body_mut(&mut self) -> &mut B {
         &mut self.body
     }
 
+    /// Returns an immutable reference to the response header map.
     pub fn headers(&self) -> &H {
         &self.headers
     }
 
+    /// Returns a mutable reference to the response header map.
     pub fn headers_mut(&mut self) -> &mut H {
         &mut self.headers
     }
 
-    pub fn map<T, F>(self, mut f: F) -> Response<T, H>
+    /// Maps the body of this response to a new type `T` using the provided function.
+    pub fn map<T, F>(self, mut mapper: F) -> Response<T, H>
     where
         F: FnMut(B) -> T,
     {
-        let body = f(self.body);
-
         Response {
-            body: body,
+            body: mapper(self.body),
             headers: self.headers,
             reason_phrase: self.reason_phrase,
             status_code: self.status_code,
@@ -92,32 +98,39 @@ where
         }
     }
 
+    /// Returns an immutable reference to the response reason.
     pub fn reason(&self) -> &ReasonPhrase {
         &self.reason_phrase
     }
 
+    /// Returns a mutable reference to the response reason.
     pub fn reason_mut(&mut self) -> &mut ReasonPhrase {
         &mut self.reason_phrase
     }
 
-    pub fn status_code(&self) -> &StatusCode {
-        &self.status_code
+    /// Returns a copy of the response status code.
+    pub fn status_code(&self) -> StatusCode {
+        self.status_code
     }
 
+    /// Returns a mutable reference to the response status code.
     pub fn status_code_mut(&mut self) -> &mut StatusCode {
         &mut self.status_code
     }
 
+    /// Returns a copy of the response version.
     pub fn version(&self) -> Version {
         self.version
     }
 
+    /// Returns a mutable reference to the response version.
     pub fn version_mut(&mut self) -> &mut Version {
         &mut self.version
     }
 }
 
 impl<B> Response<B, HeaderMap> {
+    /// Converts the response from using untyped headers to typed headers.
     pub fn into_typed(self) -> Response<B, TypedHeaderMap> {
         Response {
             body: self.body,
@@ -130,6 +143,7 @@ impl<B> Response<B, HeaderMap> {
 }
 
 impl<B> Response<B, TypedHeaderMap> {
+    /// Converts the response from using typed headers to untyped headers.
     pub fn into_untyped(self) -> Response<B, HeaderMap> {
         Response {
             body: self.body,
@@ -146,10 +160,11 @@ where
     B: fmt::Debug,
     H: fmt::Debug + Default,
 {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("Response")
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter
+            .debug_struct("Response")
             .field("version", &self.version())
-            .field("status", self.status_code())
+            .field("status", &self.status_code())
             .field("reason", self.reason())
             .field("headers", self.headers())
             .field("body", self.body())
@@ -195,11 +210,21 @@ where
 
     /// Constructs a `Response` by using the given body. Note that this function does not consume
     /// the builder, allowing you to construct responses with different bodies with the same
-    /// buider.
+    /// builder.
     ///
     /// # Errors
     ///
     /// An error will be returned if part of the response is invalid.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rtsp::*;
+    ///
+    /// let response = Response::builder()
+    ///     .build(())
+    ///     .unwrap();
+    /// ```
     pub fn build<B>(&mut self, body: B) -> Result<Response<B, H>, BuilderError> {
         if let Some(error) = self.error {
             return Err(error);
@@ -382,9 +407,9 @@ impl Builder<HeaderMap> {
 }
 
 impl Builder<TypedHeaderMap> {
-    /// Sets a typed header for this request.
+    /// Sets a typed header for this response.
     ///
-    /// By default, the request contains no headers.
+    /// By default, the response contains no headers.
     ///
     /// # Errors
     ///
@@ -407,7 +432,7 @@ impl Builder<TypedHeaderMap> {
         self
     }
 
-    /// Sets a raw header for this request. This is slightly different from the untyped builder's
+    /// Sets a raw header for this response. This is slightly different from the untyped builder's
     /// `header` function in that setting the raw value for a previously set header will end up
     /// overwriting it.
     ///
@@ -423,8 +448,8 @@ impl Builder<TypedHeaderMap> {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryFrom;
-    /// #
+    /// use std::convert::TryFrom;
+    ///
     /// use rtsp::*;
     ///
     /// let response = Response::typed_builder()
