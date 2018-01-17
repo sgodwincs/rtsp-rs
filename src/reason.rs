@@ -4,9 +4,9 @@
 //! itself. Typically, you will import the `rtsp::ReasonPhrase` type rather than reaching into this
 //! module itself.
 
+use std::{fmt, str};
 use std::convert::TryFrom;
 use std::error::Error;
-use std::{fmt, str};
 
 /// A wrapper type used to avoid users creating invalid reason phrases for the `Response` type.
 #[derive(Clone, Eq, Hash, PartialEq)]
@@ -20,8 +20,8 @@ impl ReasonPhrase {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryFrom;
-    /// #
+    /// use std::convert::TryFrom;
+    ///
     /// use rtsp::ReasonPhrase;
     ///
     /// assert_eq!(ReasonPhrase::try_from("OK").unwrap().as_str(), "OK");
@@ -64,8 +64,8 @@ impl fmt::Display for ReasonPhrase {
 /// ```
 /// # #![feature(try_from)]
 /// #
-/// # use std::convert::TryFrom;
-/// #
+/// use std::convert::TryFrom;
+///
 /// use rtsp::ReasonPhrase;
 ///
 /// assert_eq!(ReasonPhrase::try_from("OK").unwrap(), "OK");
@@ -83,8 +83,8 @@ impl PartialEq<str> for ReasonPhrase {
 /// ```
 /// # #![feature(try_from)]
 /// #
-/// # use std::convert::TryFrom;
-/// #
+/// use std::convert::TryFrom;
+///
 /// use rtsp::ReasonPhrase;
 ///
 /// assert_eq!(ReasonPhrase::try_from("OK").unwrap(), "OK");
@@ -108,17 +108,20 @@ impl<'a> PartialEq<&'a str> for ReasonPhrase {
 impl<'a> TryFrom<&'a [u8]> for ReasonPhrase {
     type Error = InvalidReasonPhrase;
 
-    /// Converts a `&[u8]` to an RTSP reason phrase. The reason phrase must be non-empty and be
-    /// valid UTF-8 with only printable characters allowed from ASCII-US. Case sensitivity is
-    /// preserved.
+    /// Converts a `&[u8]` to an RTSP reason phrase.Case sensitivity is preserved.
+    ///
+    /// # Errors
+    ///
+    /// An error will be returned if the value is empty, is invalid UTF-8, or contains non-printable
+    /// characters from ASCII-US.
     ///
     /// # Examples
     ///
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryFrom;
-    /// #
+    /// use std::convert::TryFrom;
+    ///
     /// use rtsp::ReasonPhrase;
     ///
     /// let ok = ReasonPhrase::try_from(&b"OK"[..]).unwrap();
@@ -158,8 +161,8 @@ impl<'a> TryFrom<&'a str> for ReasonPhrase {
 pub struct InvalidReasonPhrase;
 
 impl fmt::Display for InvalidReasonPhrase {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.description())
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str(self.description())
     }
 }
 
