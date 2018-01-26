@@ -1,35 +1,68 @@
 use bytes::BytesMut;
-use std::{error, fmt, io};
+use std::{fmt, io};
 use std::convert::TryFrom;
+use std::error::Error;
 use tokio_io::codec::{Decoder, Encoder};
 
 use proto::{encode_request, encode_response, InvalidRequest, InvalidResponse, ParseResult,
-            RequestDecoder, ResponseDecoder};
+            ParseState, RequestDecoder, ResponseDecoder};
 use request::Request;
 use response::Response;
 
-/// The client codec that handles encoding requests and decoding responses.
+const MINIMUM_INFO_LINE_SIZE: usize = 14;
+
+/// The codec that handles encoding requests/responses and decoding requests/responses. Because
+/// servers and clients can both send requests and receive responses, this codec is shared by the
+/// two.
 #[derive(Debug)]
-pub struct ClientCodec {
-    decoder: ResponseDecoder,
+pub struct Codec {
+    request_decoder: RequestDecoder,
+    response_decoder: ResponseDecoder,
 }
 
-impl Decoder for ClientCodec {
-    type Item = Result<Response<BytesMut>, InvalidParsedResponse>;
-    type Error = io::Error;
-
-    fn decode(&mut self, buffer: &mut BytesMut) -> io::Result<Option<Self::Item>> {
+impl Codec {
+    fn decode_request(
+        &mut self,
+        buffer: &mut BytesMut,
+    ) -> io::Result<Option<<Self as Decoder>::Item>> {
         use self::ParseResult::*;
 
-        let (result, bytes_parsed) = self.decoder.decode(&buffer);
+        let (result, bytes_parsed) = self.request_decoder.decode(&buffer);
         buffer.split_to(bytes_parsed);
 
         match result {
-            Complete(response) => Ok(Some(Ok(response))),
+            Complete(request) => Ok(Some(Ok(Message::Request(request)))),
             Error(error) => {
                 if error.is_recoverable() {
-                    Ok(Some(Err(InvalidParsedResponse::try_from(error)
-                        .expect("unexpected irrecoverable response parse error"))))
+                    Ok(Some(Err(InvalidMessage::InvalidRequest(
+                        InvalidParsedRequest::try_from(error)
+                            .expect("unexpected irrecoverable request parse error"),
+                    ))))
+                } else {
+                    Err(io::Error::new(io::ErrorKind::Other, error.to_string()))
+                }
+            }
+            Incomplete => Ok(None),
+        }
+    }
+
+    fn decode_response(
+        &mut self,
+        buffer: &mut BytesMut,
+    ) -> io::Result<Option<<Self as Decoder>::Item>> {
+        use self::ParseResult::*;
+
+        let (result, bytes_parsed) = self.response_decoder.decode(&buffer);
+        buffer.split_to(bytes_parsed);
+
+        match result {
+            Complete(response) => Ok(Some(Ok(Message::Response(response)))),
+            Error(error) => {
+                if error.is_recoverable() {
+                    Ok(Some(Err(InvalidMessage::InvalidResponse(
+                        InvalidParsedResponse::try_from(error)
+                            .expect("unexpected irrecoverable response parse error"),
+                    ))))
                 } else {
                     Err(io::Error::new(io::ErrorKind::Other, error.to_string()))
                 }
@@ -39,22 +72,62 @@ impl Decoder for ClientCodec {
     }
 }
 
-impl Default for ClientCodec {
-    fn default() -> Self {
-        ClientCodec {
-            decoder: ResponseDecoder::new(),
+impl Decoder for Codec {
+    type Item = Result<Message, InvalidMessage>;
+    type Error = io::Error;
+
+    fn decode(&mut self, buffer: &mut BytesMut) -> io::Result<Option<Self::Item>> {
+        if self.request_decoder.parse_state() != ParseState::InfoLine {
+            self.decode_request(buffer)
+        } else if self.response_decoder.parse_state() != ParseState::InfoLine {
+            self.decode_response(buffer)
+        } else {
+            while buffer.starts_with(b"\r\n") {
+                buffer.split_to(2);
+            }
+
+            if buffer.len() < MINIMUM_INFO_LINE_SIZE {
+                Ok(None)
+            } else if buffer.starts_with(b"RTSP/") {
+                self.decode_response(buffer)
+            } else {
+                self.decode_request(buffer)
+            }
         }
     }
 }
 
-impl Encoder for ClientCodec {
-    type Item = Request<BytesMut>;
+impl Default for Codec {
+    fn default() -> Self {
+        Codec {
+            request_decoder: RequestDecoder::new(),
+            response_decoder: ResponseDecoder::new(),
+        }
+    }
+}
+
+impl Encoder for Codec {
+    type Item = Message;
     type Error = io::Error;
 
     fn encode(&mut self, message: Self::Item, buffer: &mut BytesMut) -> io::Result<()> {
-        encode_request(&message, buffer);
+        match message {
+            Message::Request(request) => encode_request(&request, buffer),
+            Message::Response(response) => encode_response(&response, buffer),
+        }
+
         Ok(())
     }
+}
+
+pub enum Message {
+    Request(Request<BytesMut>),
+    Response(Response<BytesMut>),
+}
+
+pub enum InvalidMessage {
+    InvalidRequest(InvalidParsedRequest),
+    InvalidResponse(InvalidParsedResponse),
 }
 
 /// An error type for when the response was invalid. These are all recoverable errors.
@@ -68,14 +141,12 @@ pub enum InvalidParsedResponse {
 }
 
 impl fmt::Display for InvalidParsedResponse {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use std::error::Error;
-
-        write!(f, "{}", self.description())
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str(self.description())
     }
 }
 
-impl error::Error for InvalidParsedResponse {
+impl Error for InvalidParsedResponse {
     fn description(&self) -> &str {
         use self::InvalidParsedResponse::*;
 
@@ -104,55 +175,6 @@ impl TryFrom<InvalidResponse> for InvalidParsedResponse {
     }
 }
 
-/// The server codec that handles encoding responses and decoding requests.
-#[derive(Debug)]
-pub struct ServerCodec {
-    decoder: RequestDecoder,
-}
-
-impl Decoder for ServerCodec {
-    type Item = Result<Request<BytesMut>, InvalidParsedRequest>;
-    type Error = io::Error;
-
-    fn decode(&mut self, buffer: &mut BytesMut) -> io::Result<Option<Self::Item>> {
-        use self::ParseResult::*;
-
-        let (result, bytes_parsed) = self.decoder.decode(&buffer);
-        buffer.split_to(bytes_parsed);
-
-        match result {
-            Complete(request) => Ok(Some(Ok(request))),
-            Error(error) => {
-                if error.is_recoverable() {
-                    Ok(Some(Err(InvalidParsedRequest::try_from(error)
-                        .expect("unexpected irrecoverable request parse error"))))
-                } else {
-                    Err(io::Error::new(io::ErrorKind::Other, error.to_string()))
-                }
-            }
-            Incomplete => Ok(None),
-        }
-    }
-}
-
-impl Default for ServerCodec {
-    fn default() -> Self {
-        ServerCodec {
-            decoder: RequestDecoder::new(),
-        }
-    }
-}
-
-impl Encoder for ServerCodec {
-    type Item = Response<BytesMut>;
-    type Error = io::Error;
-
-    fn encode(&mut self, message: Self::Item, buffer: &mut BytesMut) -> io::Result<()> {
-        encode_response(&message, buffer);
-        Ok(())
-    }
-}
-
 /// An error type for when the request was invalid. These are all recoverable errors.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
@@ -164,14 +186,12 @@ pub enum InvalidParsedRequest {
 }
 
 impl fmt::Display for InvalidParsedRequest {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use std::error::Error;
-
-        write!(f, "{}", self.description())
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str(self.description())
     }
 }
 
-impl error::Error for InvalidParsedRequest {
+impl Error for InvalidParsedRequest {
     fn description(&self) -> &str {
         use self::InvalidParsedRequest::*;
 
