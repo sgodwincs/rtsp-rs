@@ -3,12 +3,9 @@ use std::convert::TryFrom;
 use std::time::Duration;
 
 use header::{HeaderName, HeaderValue, InvalidTypedHeader, TypedHeader};
-use session::{ExpiredSession, InvalidSessionID, SessionID};
+use session::{ExpiredSession, InvalidSessionID, SessionID, DEFAULT_TIMEOUT, MAX_TIMEOUT};
 use session::Session as SessionData;
 use syntax::trim_whitespace;
-
-pub const DEFAULT_TIMEOUT: u64 = 60;
-pub const MAX_TIMEOUT: u64 = 9_999_999_999_999_999_999;
 
 /// The `Session` typed header as described by
 /// [RFC7826](https://tools.ietf.org/html/rfc7826#section-18.49).
@@ -86,7 +83,10 @@ impl Session {
         &mut self.timeout
     }
 
-    pub fn try_from_session<S>(value: S) -> Result<Self, ExpiredSession> where S: SessionData {
+    pub fn try_from_session<S>(value: S) -> Result<Self, ExpiredSession>
+    where
+        S: SessionData,
+    {
         let timeout = value
             .timeout()
             .signed_duration_since(Utc::now())

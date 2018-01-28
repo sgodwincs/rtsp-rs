@@ -1,8 +1,12 @@
 //!
 
+use chrono::{offset, DateTime, Duration, Utc};
+use std::{fmt, str};
 use std::convert::TryFrom;
 use std::error::Error;
-use std::{fmt, str};
+
+pub const DEFAULT_TIMEOUT: u64 = 60;
+pub const MAX_TIMEOUT: u64 = 9_999_999_999_999_999_999;
 
 /// A wrapper type used to avoid users creating invalid session identifiers.
 #[derive(Clone, Eq, Hash, PartialEq)]
@@ -37,14 +41,14 @@ impl AsRef<str> for SessionID {
 }
 
 impl fmt::Debug for SessionID {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.0)
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        write!(formatter, "{}", self.0)
     }
 }
 
 impl fmt::Display for SessionID {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.0)
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        write!(formatter, "{}", self.0)
     }
 }
 
@@ -158,13 +162,76 @@ impl<'a> TryFrom<&'a str> for SessionID {
 pub struct InvalidSessionID;
 
 impl fmt::Display for InvalidSessionID {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.description())
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str(self.description())
     }
 }
 
 impl Error for InvalidSessionID {
     fn description(&self) -> &str {
         "invalid RTSP session identifier"
+    }
+}
+
+pub trait Session {
+    fn id(&self) -> &SessionID;
+    fn timeout(&self) -> DateTime<Utc>;
+    fn touch(&mut self);
+}
+
+pub struct DefaultSession {
+    id: SessionID,
+    timeout: DateTime<Utc>,
+}
+
+impl DefaultSession {
+    pub fn new<T>(id: T) -> Result<Self, InvalidSessionID>
+    where
+        SessionID: TryFrom<T, Error = InvalidSessionID>,
+    {
+        let timeout = offset::Utc::now()
+            .checked_add_signed(Duration::seconds(DEFAULT_TIMEOUT as i64))
+            .unwrap();
+
+        DefaultSession::with_timeout(id, timeout)
+    }
+
+    pub fn with_timeout<T>(id: T, timeout: DateTime<Utc>) -> Result<Self, InvalidSessionID>
+    where
+        SessionID: TryFrom<T, Error = InvalidSessionID>,
+    {
+        Ok(DefaultSession {
+            id: SessionID::try_from(id)?,
+            timeout: timeout,
+        })
+    }
+}
+
+impl Session for DefaultSession {
+    fn id(&self) -> &SessionID {
+        &self.id
+    }
+
+    fn timeout(&self) -> DateTime<Utc> {
+        self.timeout
+    }
+
+    fn touch(&mut self) {
+        self.timeout = offset::Utc::now();
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct ExpiredSession;
+
+impl fmt::Display for ExpiredSession {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str(self.description())
+    }
+}
+
+impl Error for ExpiredSession {
+    fn description(&self) -> &str {
+        "expired RTSP session"
     }
 }
