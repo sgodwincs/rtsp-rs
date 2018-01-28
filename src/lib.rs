@@ -1,9 +1,11 @@
 #![feature(non_exhaustive)]
 #![feature(slice_patterns)]
 #![feature(try_from)]
+#![feature(universal_impl_trait)]
 
 extern crate ascii;
 extern crate bytes;
+extern crate chrono;
 extern crate fnv;
 extern crate futures;
 #[macro_use]
