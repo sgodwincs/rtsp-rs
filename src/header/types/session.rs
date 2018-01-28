@@ -1,8 +1,10 @@
+use chrono::offset::Utc;
 use std::convert::TryFrom;
 use std::time::Duration;
 
 use header::{HeaderName, HeaderValue, InvalidTypedHeader, TypedHeader};
-use session::{InvalidSessionID, SessionID};
+use session::{ExpiredSession, InvalidSessionID, SessionID};
+use session::Session as SessionData;
 use syntax::trim_whitespace;
 
 pub const DEFAULT_TIMEOUT: u64 = 60;
@@ -72,8 +74,29 @@ impl Session {
         &self.id
     }
 
+    pub fn id_mut(&mut self) -> &mut SessionID {
+        &mut self.id
+    }
+
     pub fn timeout(&self) -> Duration {
         self.timeout
+    }
+
+    pub fn timeout_mut(&mut self) -> &mut Duration {
+        &mut self.timeout
+    }
+
+    pub fn try_from_session<S>(value: S) -> Result<Self, ExpiredSession> where S: SessionData {
+        let timeout = value
+            .timeout()
+            .signed_duration_since(Utc::now())
+            .to_std()
+            .map_err(|_| ExpiredSession)?;
+
+        Ok(Session {
+            id: value.id().clone(),
+            timeout: timeout,
+        })
     }
 }
 
