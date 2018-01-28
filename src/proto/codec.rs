@@ -21,6 +21,10 @@ pub struct Codec {
 }
 
 impl Codec {
+    pub fn new() -> Self {
+        Codec::default()
+    }
+
     fn decode_request(
         &mut self,
         buffer: &mut BytesMut,
