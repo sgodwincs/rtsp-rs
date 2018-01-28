@@ -244,28 +244,28 @@ where
     }
 }
 
-impl<B> Request<B, HeaderMap> {
+impl<B> From<Request<B>> for Request<B, TypedHeaderMap> {
     /// Converts the request from using untyped headers to typed headers.
-    pub fn into_typed(self) -> Request<B, TypedHeaderMap> {
+    fn from(value: Request<B>) -> Request<B, TypedHeaderMap> {
         Request {
-            body: self.body,
-            headers: self.headers.into(),
-            method: self.method,
-            uri: self.uri,
-            version: self.version,
+            body: value.body,
+            headers: value.headers.into(),
+            method: value.method,
+            uri: value.uri,
+            version: value.version,
         }
     }
 }
 
-impl<B> Request<B, TypedHeaderMap> {
+impl<B> From<Request<B, TypedHeaderMap>> for Request<B> {
     /// Converts the request from using typed headers to untyped headers.
-    pub fn into_untyped(self) -> Request<B, HeaderMap> {
+    fn from(value: Request<B, TypedHeaderMap>) -> Request<B> {
         Request {
-            body: self.body,
-            headers: self.headers.into(),
-            method: self.method,
-            uri: self.uri,
-            version: self.version,
+            body: value.body,
+            headers: value.headers.into(),
+            method: value.method,
+            uri: value.uri,
+            version: value.version,
         }
     }
 }

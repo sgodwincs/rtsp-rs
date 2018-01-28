@@ -129,28 +129,28 @@ where
     }
 }
 
-impl<B> Response<B, HeaderMap> {
+impl<B> From<Response<B>> for Response<B, TypedHeaderMap> {
     /// Converts the response from using untyped headers to typed headers.
-    pub fn into_typed(self) -> Response<B, TypedHeaderMap> {
+    fn from(value: Response<B>) -> Response<B, TypedHeaderMap> {
         Response {
-            body: self.body,
-            headers: self.headers.into(),
-            reason_phrase: self.reason_phrase,
-            status_code: self.status_code,
-            version: self.version,
+            body: value.body,
+            headers: value.headers.into(),
+            reason_phrase: value.reason_phrase,
+            status_code: value.status_code,
+            version: value.version,
         }
     }
 }
 
-impl<B> Response<B, TypedHeaderMap> {
+impl<B> From<Response<B, TypedHeaderMap>> for Response<B> {
     /// Converts the response from using typed headers to untyped headers.
-    pub fn into_untyped(self) -> Response<B, HeaderMap> {
+    fn from(value: Response<B, TypedHeaderMap>) -> Response<B> {
         Response {
-            body: self.body,
-            headers: self.headers.into(),
-            reason_phrase: self.reason_phrase,
-            status_code: self.status_code,
-            version: self.version,
+            body: value.body,
+            headers: value.headers.into(),
+            reason_phrase: value.reason_phrase,
+            status_code: value.status_code,
+            version: value.version,
         }
     }
 }
