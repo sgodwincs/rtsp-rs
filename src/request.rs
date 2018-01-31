@@ -328,7 +328,7 @@ where
 
     /// Constructs a `Request` by using the given body. Note that this function does not consume
     /// the builder, allowing you to construct requests with different bodies with the same
-    /// builder.
+    /// builder, but all of the fields will be reset.
     ///
     /// # Errors
     ///

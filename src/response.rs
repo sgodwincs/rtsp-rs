@@ -210,7 +210,7 @@ where
 
     /// Constructs a `Response` by using the given body. Note that this function does not consume
     /// the builder, allowing you to construct responses with different bodies with the same
-    /// builder.
+    /// builder, but all of the fields will be reset.
     ///
     /// # Errors
     ///
