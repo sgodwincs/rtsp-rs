@@ -11,6 +11,10 @@ use response::Response;
 
 const MINIMUM_INFO_LINE_SIZE: usize = 14;
 
+pub type MessageResult = Result<Message, InvalidMessage>;
+pub type RequestResult = Result<Request<BytesMut>, InvalidParsedRequest>;
+pub type ResponseResult = Result<Response<BytesMut>, InvalidParsedResponse>;
+
 /// The codec that handles encoding requests/responses and decoding requests/responses. Because
 /// servers and clients can both send requests and receive responses, this codec is shared by the
 /// two.
@@ -77,7 +81,7 @@ impl Codec {
 }
 
 impl Decoder for Codec {
-    type Item = Result<Message, InvalidMessage>;
+    type Item = MessageResult;
     type Error = io::Error;
 
     fn decode(&mut self, buffer: &mut BytesMut) -> io::Result<Option<Self::Item>> {
@@ -124,14 +128,33 @@ impl Encoder for Codec {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Message {
     Request(Request<BytesMut>),
     Response(Response<BytesMut>),
 }
 
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum InvalidMessage {
     InvalidRequest(InvalidParsedRequest),
     InvalidResponse(InvalidParsedResponse),
+}
+
+impl fmt::Display for InvalidMessage {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str(self.description())
+    }
+}
+
+impl Error for InvalidMessage {
+    fn description(&self) -> &str {
+        use self::InvalidMessage::*;
+
+        match *self {
+            InvalidRequest(ref request) => request.description(),
+            InvalidResponse(ref response) => response.description(),
+        }
+    }
 }
 
 /// An error type for when the response was invalid. These are all recoverable errors.
