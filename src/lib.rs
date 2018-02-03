@@ -1,3 +1,4 @@
+#![feature(conservative_impl_trait)]
 #![feature(non_exhaustive)]
 #![feature(slice_patterns)]
 #![feature(try_from)]
@@ -7,6 +8,7 @@ extern crate ascii;
 extern crate bytes;
 extern crate chrono;
 extern crate fnv;
+#[macro_use]
 extern crate futures;
 #[macro_use]
 extern crate lazy_static;
@@ -19,6 +21,7 @@ extern crate url;
 
 mod syntax;
 
+pub mod client;
 pub mod header;
 pub mod method;
 pub mod proto;
