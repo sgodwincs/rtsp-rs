@@ -47,7 +47,7 @@ impl Codec {
                             .expect("unexpected irrecoverable request parse error"),
                     ))))
                 } else {
-                    Err(io::Error::new(io::ErrorKind::Other, error.to_string()))
+                    Err(io::Error::new(io::ErrorKind::Other, error))
                 }
             }
             Incomplete => Ok(None),
@@ -72,7 +72,7 @@ impl Codec {
                             .expect("unexpected irrecoverable response parse error"),
                     ))))
                 } else {
-                    Err(io::Error::new(io::ErrorKind::Other, error.to_string()))
+                    Err(io::Error::new(io::ErrorKind::Other, error))
                 }
             }
             Incomplete => Ok(None),
