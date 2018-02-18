@@ -576,11 +576,12 @@ impl TypedHeaderItem {
     pub fn into_raw(self) -> Vec<HeaderValue> {
         let TypedHeaderItem { raw, typed, .. } = self;
 
-        if let Some(raw) = unsafe { raw.into_inner() } {
+        if let Some(raw) = raw.into_inner() {
             return raw;
         }
 
-        unsafe { typed.into_inner() }
+        typed
+            .into_inner()
             .expect("`raw` and `typed` cannot both be `None`")
             .1
             .to_header_raw()
@@ -593,15 +594,14 @@ impl TypedHeaderItem {
 
         let header_type_id = TypeId::of::<H>();
         let TypedHeaderItem { raw, typed, .. } = self;
-        let typed = unsafe { typed.into_inner() };
 
-        match typed {
+        match typed.into_inner() {
             Some((type_id, value)) => {
                 assert_eq!(header_type_id, type_id);
                 Ok(value)
             }
             None => {
-                let raw_value = unsafe { raw.into_inner() }.unwrap();
+                let raw_value = raw.into_inner().unwrap();
                 H::try_from_header_raw(&raw_value)
                     .map(|value| -> Box<TypedHeader + Send + Sync> { Box::new(value) })
             }
