@@ -13,10 +13,8 @@ extern crate futures;
 #[macro_use]
 extern crate lazy_static;
 extern crate regex;
-extern crate tokio_core;
+extern crate tokio;
 extern crate tokio_io;
-extern crate tokio_proto;
-extern crate tokio_service;
 extern crate url;
 
 mod syntax;
