@@ -1,10 +1,10 @@
 use bytes::BytesMut;
 use futures::{future, Async, AsyncSink, Future, Poll, Sink, Stream};
-use futures::future::Either;
+use futures::future::{Either, Shared};
 use futures::stream::Fuse;
 use futures::sync::mpsc::{channel, unbounded, Receiver, UnboundedSender};
 use futures::sync::oneshot;
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::io;
 use std::rc::Rc;
 use tokio::executor::current_thread;
@@ -26,13 +26,32 @@ macro_rules! try_ready_ignore_error {
     })
 }
 
+fn wrap_task<T, E>(
+    task: impl Future<Item = T, Error = E>,
+    tx_shutdown: Rc<RefCell<Option<oneshot::Sender<()>>>>,
+    rx_shutdown: Shared<oneshot::Receiver<()>>,
+) -> impl Future<Item = (), Error = ()> {
+    rx_shutdown
+        .map(|_| ())
+        .map_err(|_| ())
+        .select(task.then(move |_| {
+            if let Some(sender) = tx_shutdown.replace(None) {
+                sender.send(()).ok();
+            }
+
+            Ok::<_, ()>(())
+        }))
+        .map(|_| ())
+        .map_err(|_| ())
+}
+
 #[derive(Debug)]
 pub struct Protocol {
     error: Rc<RefCell<Option<Rc<io::Error>>>>,
-    is_done: Rc<Cell<bool>>,
     message_sink: UnboundedSender<Message>,
     request_stream: Receiver<RequestResult>,
     response_channel_sink: UnboundedSender<oneshot::Sender<ResponseResult>>,
+    shutdown_oneshot: Rc<RefCell<Option<oneshot::Sender<()>>>>,
 }
 
 impl Protocol {
@@ -44,36 +63,46 @@ impl Protocol {
         let (tx_matching_response, rx_matching_response) =
             unbounded::<oneshot::Sender<ResponseResult>>();
         let error = Rc::new(RefCell::new(None));
-        let is_done = Rc::new(Cell::new(false));
+        let (tx_shutdown, rx_shutdown) = oneshot::channel();
+        let tx_shutdown = Rc::new(RefCell::new(Some(tx_shutdown)));
+        let rx_shutdown = rx_shutdown.shared();
 
-        current_thread::spawn(SplitMessagesTask::new(
-            stream,
-            tx_incoming_request.sink_map_err(|_| ()),
-            tx_incoming_response.sink_map_err(|_| ()),
-            is_done.clone(),
-            error.clone(),
+        current_thread::spawn(wrap_task(
+            SplitMessagesTask::new(
+                stream,
+                tx_incoming_request.sink_map_err(|_| ()),
+                tx_incoming_response.sink_map_err(|_| ()),
+                error.clone(),
+            ),
+            tx_shutdown.clone(),
+            rx_shutdown.clone(),
         ));
-        current_thread::spawn(SendMessagesTask::new(
-            sink,
-            rx_outgoing_message,
-            is_done.clone(),
-            error.clone(),
+
+        current_thread::spawn(wrap_task(
+            SendMessagesTask::new(sink, rx_outgoing_message, error.clone()),
+            tx_shutdown.clone(),
+            rx_shutdown.clone(),
         ));
-        current_thread::spawn(rx_incoming_response.zip(rx_matching_response).for_each(
-            |(response, channel)| {
-                channel
-                    .send(response)
-                    .expect("oneshot for matching responses should not be cancelled");
-                Ok(())
-            },
+
+        current_thread::spawn(wrap_task(
+            rx_incoming_response
+                .zip(rx_matching_response)
+                .for_each(|(response, channel)| {
+                    channel
+                        .send(response)
+                        .expect("oneshot for matching responses should not be cancelled");
+                    Ok(())
+                }),
+            tx_shutdown.clone(),
+            rx_shutdown.clone(),
         ));
 
         Ok(Protocol {
             error,
-            is_done,
             message_sink: tx_outgoing_message,
             request_stream: rx_incoming_request,
             response_channel_sink: tx_matching_response,
+            shutdown_oneshot: tx_shutdown,
         })
     }
 
@@ -85,8 +114,8 @@ impl Protocol {
         self.error().is_some()
     }
 
-    pub fn is_done(&self) -> bool {
-        self.is_done.get()
+    pub fn is_shutdown(&self) -> bool {
+        self.shutdown_oneshot.borrow().is_none()
     }
 
     pub fn send_request<B>(
@@ -96,7 +125,7 @@ impl Protocol {
     where
         B: AsRef<[u8]>,
     {
-        if self.is_done() {
+        if self.is_shutdown() {
             let error = io::Error::from(io::ErrorKind::NotConnected);
             return Either::A(future::err(Rc::new(error)));
         }
@@ -107,10 +136,10 @@ impl Protocol {
 
         self.message_sink
             .unbounded_send(Message::Request(request))
-            .expect("`SendMessagesTask` be running if `is_done` is false during request sending");
+            .expect("`SendMessagesTask` be running if `is_closed` is false during request sending");
         self.response_channel_sink
             .unbounded_send(tx_incoming_response)
-            .expect("matching should be running if `is_done` is false during request sending");
+            .expect("matching should be running if `is_closed` is false during request sending");
 
         let future = rx_incoming_response.then(move |result| {
             result.map_err(|_| {
@@ -130,16 +159,26 @@ impl Protocol {
     where
         B: AsRef<[u8]>,
     {
-        if self.is_done() {
+        if self.is_shutdown() {
             return Err(io::Error::from(io::ErrorKind::NotConnected));
         }
 
         let response = response.map(|body| BytesMut::from(body.as_ref()));
         self.message_sink
             .unbounded_send(Message::Response(response))
-            .expect("`SendMessagesTask` be running if `is_done` is false during response sending");
+            .expect(
+                "`SendMessagesTask` be running if `is_closed` is false during response sending",
+            );
 
         Ok(())
+    }
+}
+
+impl Drop for Protocol {
+    fn drop(&mut self) {
+        if let Some(sender) = self.shutdown_oneshot.replace(None) {
+            sender.send(()).ok();
+        }
     }
 }
 
@@ -151,7 +190,6 @@ where
     buffered_request: Option<RequestResult>,
     buffered_response: Option<ResponseResult>,
     error: Rc<RefCell<Option<Rc<io::Error>>>>,
-    is_done: Rc<Cell<bool>>,
     request_sink: Option<RequestSink>,
     response_sink: Option<ResponseSink>,
     stream: Option<Fuse<MessageStream>>,
@@ -168,14 +206,12 @@ where
         stream: MessageStream,
         request_sink: RequestSink,
         response_sink: ResponseSink,
-        is_done: Rc<Cell<bool>>,
         error: Rc<RefCell<Option<Rc<io::Error>>>>,
     ) -> Self {
         SplitMessagesTask {
             buffered_request: None,
             buffered_response: None,
             error,
-            is_done,
             request_sink: Some(request_sink),
             response_sink: Some(response_sink),
             stream: Some(stream.fuse()),
@@ -197,11 +233,6 @@ where
     }
 
     fn poll_task(&mut self) -> Poll<<Self as Future>::Item, io::Error> {
-        if self.is_done.get() {
-            try_ready_ignore_error!(self.close_sinks());
-            return Ok(Async::Ready(()));
-        }
-
         if let Some(request) = self.buffered_request.take() {
             try_ready_ignore_error!(self.try_start_send_request(request));
         }
@@ -233,7 +264,6 @@ where
                     }
                 },
                 Async::Ready(None) => {
-                    self.is_done.set(true);
                     try_ready_ignore_error!(self.close_sinks());
                     return Ok(Async::Ready(()));
                 }
@@ -312,7 +342,6 @@ where
             Ok(Async::NotReady) => Ok(Async::NotReady),
             Err(error) => {
                 *self.error.borrow_mut() = Some(Rc::new(error));
-                self.is_done.set(true);
                 Err(())
             }
         }
@@ -325,7 +354,6 @@ where
 {
     buffered_message: Option<Message>,
     error: Rc<RefCell<Option<Rc<io::Error>>>>,
-    is_done: Rc<Cell<bool>>,
     message_sink: Option<MessageSink>,
     message_stream: Option<Fuse<MessageStream>>,
 }
@@ -338,24 +366,17 @@ where
     pub fn new(
         message_sink: MessageSink,
         message_stream: MessageStream,
-        is_done: Rc<Cell<bool>>,
         error: Rc<RefCell<Option<Rc<io::Error>>>>,
     ) -> Self {
         SendMessagesTask {
             buffered_message: None,
             error,
-            is_done,
             message_sink: Some(message_sink),
             message_stream: Some(message_stream.fuse()),
         }
     }
 
     fn poll_task(&mut self) -> Poll<<Self as Future>::Item, io::Error> {
-        if self.is_done.get() {
-            try_ready!(self.sink_mut().close());
-            return Ok(Async::Ready(()));
-        }
-
         if let Some(message) = self.buffered_message.take() {
             try_ready!(self.try_start_send(message));
         }
@@ -364,7 +385,6 @@ where
             match self.stream_mut().poll() {
                 Ok(Async::Ready(Some(message))) => try_ready!(self.try_start_send(message)),
                 Ok(Async::Ready(None)) | Err(_) => {
-                    self.is_done.set(true);
                     try_ready!(self.sink_mut().close());
                     return Ok(Async::Ready(()));
                 }
@@ -416,7 +436,6 @@ where
             Ok(Async::NotReady) => Ok(Async::NotReady),
             Err(error) => {
                 *self.error.borrow_mut() = Some(Rc::new(error));
-                self.is_done.set(true);
                 Err(())
             }
         }
