@@ -15,6 +15,7 @@ extern crate lazy_static;
 extern crate regex;
 extern crate tokio;
 extern crate tokio_io;
+extern crate tokio_service;
 extern crate url;
 
 mod syntax;
