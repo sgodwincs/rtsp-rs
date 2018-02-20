@@ -1,6 +1,6 @@
 use bytes::BytesMut;
 use futures::{future, Async, AsyncSink, Future, Poll, Sink, Stream};
-use futures::future::{Either, Shared};
+use futures::future::{empty, Either, IntoFuture};
 use futures::stream::Fuse;
 use futures::sync::mpsc::{channel, unbounded, Receiver, UnboundedSender};
 use futures::sync::oneshot;
@@ -26,11 +26,15 @@ macro_rules! try_ready_ignore_error {
     })
 }
 
-fn wrap_task<T, E>(
-    task: impl Future<Item = T, Error = E>,
+fn wrap_task<F, T, E, U>(
+    task: F,
     tx_shutdown: Rc<RefCell<Option<oneshot::Sender<()>>>>,
-    rx_shutdown: Shared<oneshot::Receiver<()>>,
-) -> impl Future<Item = (), Error = ()> {
+    rx_shutdown: U,
+) -> impl Future<Item = (), Error = ()>
+where
+    F: Future<Item = T, Error = E>,
+    U: Future<Item = (), Error = ()> + 'static,
+{
     rx_shutdown
         .map(|_| ())
         .map_err(|_| ())
@@ -49,23 +53,28 @@ fn wrap_task<T, E>(
 pub struct Protocol {
     error: Rc<RefCell<Option<Rc<io::Error>>>>,
     message_sink: UnboundedSender<Message>,
-    request_stream: Receiver<RequestResult>,
+    request_stream: RefCell<Option<Receiver<RequestResult>>>,
     response_channel_sink: UnboundedSender<oneshot::Sender<ResponseResult>>,
     shutdown_oneshot: Rc<RefCell<Option<oneshot::Sender<()>>>>,
 }
 
 impl Protocol {
-    pub fn new(tcp_stream: TcpStream) -> io::Result<Protocol> {
+    pub fn new(tcp_stream: TcpStream) -> Self {
+        Protocol::with_config(tcp_stream, Config::default())
+    }
+
+    pub fn with_config(tcp_stream: TcpStream, config: Config) -> Self {
+        let (requests_buffer_size, responses_buffer_size, shutdown_future) = config.into_parts();
         let (sink, stream) = tcp_stream.framed(Codec::new()).split();
-        let (tx_incoming_request, rx_incoming_request) = channel(REQUESTS_BUFFER_SIZE);
-        let (tx_incoming_response, rx_incoming_response) = channel(RESPONSES_BUFFER_SIZE);
+        let (tx_incoming_request, rx_incoming_request) = channel(requests_buffer_size);
+        let (tx_incoming_response, rx_incoming_response) = channel(responses_buffer_size);
         let (tx_outgoing_message, rx_outgoing_message) = unbounded();
         let (tx_matching_response, rx_matching_response) =
             unbounded::<oneshot::Sender<ResponseResult>>();
         let error = Rc::new(RefCell::new(None));
         let (tx_shutdown, rx_shutdown) = oneshot::channel();
         let tx_shutdown = Rc::new(RefCell::new(Some(tx_shutdown)));
-        let rx_shutdown = rx_shutdown.shared();
+        let rx_shutdown = rx_shutdown.map_err(|_| ()).select(shutdown_future).shared();
 
         current_thread::spawn(wrap_task(
             SplitMessagesTask::new(
@@ -75,13 +84,13 @@ impl Protocol {
                 error.clone(),
             ),
             tx_shutdown.clone(),
-            rx_shutdown.clone(),
+            rx_shutdown.clone().map(|_| ()).map_err(|_| ()),
         ));
 
         current_thread::spawn(wrap_task(
             SendMessagesTask::new(sink, rx_outgoing_message, error.clone()),
             tx_shutdown.clone(),
-            rx_shutdown.clone(),
+            rx_shutdown.clone().map(|_| ()).map_err(|_| ()),
         ));
 
         current_thread::spawn(wrap_task(
@@ -94,20 +103,32 @@ impl Protocol {
                     Ok(())
                 }),
             tx_shutdown.clone(),
-            rx_shutdown.clone(),
+            rx_shutdown.clone().map(|_| ()).map_err(|_| ()),
         ));
 
-        Ok(Protocol {
+        Protocol {
             error,
             message_sink: tx_outgoing_message,
-            request_stream: rx_incoming_request,
+            request_stream: RefCell::new(Some(rx_incoming_request)),
             response_channel_sink: tx_matching_response,
             shutdown_oneshot: tx_shutdown,
-        })
+        }
     }
 
     pub fn error(&self) -> Option<Rc<io::Error>> {
         self.error.borrow().clone()
+    }
+
+    pub fn for_each_request<F, R>(&self, handler: F) -> impl Future<Item = (), Error = ()>
+    where
+        F: FnMut(RequestResult) -> R,
+        R: IntoFuture<Item = (), Error = ()>,
+    {
+        self.request_stream
+            .borrow_mut()
+            .take()
+            .expect("request stream can only be consumed once")
+            .for_each(handler)
     }
 
     pub fn has_error(&self) -> bool {
@@ -119,7 +140,7 @@ impl Protocol {
     }
 
     pub fn send_request<B>(
-        &mut self,
+        &self,
         request: Request<B>,
     ) -> impl Future<Item = ResponseResult, Error = Rc<io::Error>>
     where
@@ -136,10 +157,10 @@ impl Protocol {
 
         self.message_sink
             .unbounded_send(Message::Request(request))
-            .expect("`SendMessagesTask` be running if `is_closed` is false during request sending");
+            .expect("`SendMessagesTask` should be running during request sending");
         self.response_channel_sink
             .unbounded_send(tx_incoming_response)
-            .expect("matching should be running if `is_closed` is false during request sending");
+            .expect("response matching task should be running during request sending");
 
         let future = rx_incoming_response.then(move |result| {
             result.map_err(|_| {
@@ -155,7 +176,7 @@ impl Protocol {
         Either::B(future)
     }
 
-    pub fn send_response<B>(&mut self, response: Response<B>) -> io::Result<()>
+    pub fn send_response<B>(&self, response: Response<B>) -> io::Result<()>
     where
         B: AsRef<[u8]>,
     {
@@ -166,9 +187,7 @@ impl Protocol {
         let response = response.map(|body| BytesMut::from(body.as_ref()));
         self.message_sink
             .unbounded_send(Message::Response(response))
-            .expect(
-                "`SendMessagesTask` be running if `is_closed` is false during response sending",
-            );
+            .expect("`SendMessagesTask` be running during response sending");
 
         Ok(())
     }
@@ -178,6 +197,63 @@ impl Drop for Protocol {
     fn drop(&mut self) {
         if let Some(sender) = self.shutdown_oneshot.replace(None) {
             sender.send(()).ok();
+        }
+    }
+}
+
+pub struct Config {
+    requests_buffer_size: usize,
+    responses_buffer_size: usize,
+    shutdown_future: Box<Future<Item = (), Error = ()>>,
+}
+
+impl Config {
+    pub fn new() -> Self {
+        Config::default()
+    }
+
+    pub fn into_parts(self) -> (usize, usize, Box<Future<Item = (), Error = ()>>) {
+        let Config {
+            requests_buffer_size,
+            responses_buffer_size,
+            shutdown_future,
+        } = self;
+
+        (requests_buffer_size, responses_buffer_size, shutdown_future)
+    }
+
+    pub fn set_request_buffer_size(&mut self, requests_buffer_size: usize) -> Result<(), ()> {
+        if requests_buffer_size == 0 {
+            return Err(());
+        }
+
+        self.requests_buffer_size = requests_buffer_size;
+        Ok(())
+    }
+
+    pub fn set_response_buffer_size(&mut self, responses_buffer_size: usize) -> Result<(), ()> {
+        if responses_buffer_size == 0 {
+            return Err(());
+        }
+
+        self.responses_buffer_size = responses_buffer_size;
+        Ok(())
+    }
+
+    pub fn set_shutdown_future<F>(&mut self, shutdown_future: F)
+    where
+        F: Future<Item = (), Error = ()> + 'static,
+    {
+        self.shutdown_future = Box::new(shutdown_future);
+    }
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Config {
+            requests_buffer_size: REQUESTS_BUFFER_SIZE,
+            responses_buffer_size: RESPONSES_BUFFER_SIZE,
+            shutdown_future: Box::new(empty()),
         }
     }
 }

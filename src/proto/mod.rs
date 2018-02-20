@@ -8,4 +8,4 @@ pub use self::codec::{Codec, InvalidMessage, InvalidParsedRequest, InvalidParsed
 pub use self::decoder::{InvalidRequest, InvalidResponse, ParseResult, ParseState, RequestDecoder,
                         RequestParseResult, ResponseDecoder, ResponseParseResult};
 pub use self::encoder::{encode_request, encode_response};
-pub use self::protocol::Protocol;
+pub use self::protocol::{Config, Protocol};
