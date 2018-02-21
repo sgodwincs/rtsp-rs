@@ -26,27 +26,20 @@ macro_rules! try_ready_ignore_error {
     })
 }
 
-fn wrap_task<F, T, E, U>(
+fn wrap_task<F>(
     task: F,
     tx_shutdown: Rc<RefCell<Option<oneshot::Sender<()>>>>,
-    rx_shutdown: U,
 ) -> impl Future<Item = (), Error = ()>
 where
-    F: Future<Item = T, Error = E>,
-    U: Future<Item = (), Error = ()> + 'static,
+    F: Future<Item = (), Error = ()>,
 {
-    rx_shutdown
-        .map(|_| ())
-        .map_err(|_| ())
-        .select(task.then(move |_| {
-            if let Some(sender) = tx_shutdown.replace(None) {
-                sender.send(()).ok();
-            }
+    task.then(move |_| {
+        if let Some(sender) = tx_shutdown.replace(None) {
+            sender.send(()).ok();
+        }
 
-            Ok::<_, ()>(())
-        }))
-        .map(|_| ())
-        .map_err(|_| ())
+        Ok::<_, ()>(())
+    })
 }
 
 #[derive(Debug)]
@@ -82,15 +75,14 @@ impl Protocol {
                 tx_incoming_request.sink_map_err(|_| ()),
                 tx_incoming_response.sink_map_err(|_| ()),
                 error.clone(),
+                rx_shutdown.clone().map(|_| ()).map_err(|_| ()),
             ),
             tx_shutdown.clone(),
-            rx_shutdown.clone().map(|_| ()).map_err(|_| ()),
         ));
 
         current_thread::spawn(wrap_task(
             SendMessagesTask::new(sink, rx_outgoing_message, error.clone()),
             tx_shutdown.clone(),
-            rx_shutdown.clone().map(|_| ()).map_err(|_| ()),
         ));
 
         current_thread::spawn(wrap_task(
@@ -103,7 +95,6 @@ impl Protocol {
                     Ok(())
                 }),
             tx_shutdown.clone(),
-            rx_shutdown.clone().map(|_| ()).map_err(|_| ()),
         ));
 
         Protocol {
@@ -259,7 +250,7 @@ impl Default for Config {
 }
 
 #[must_use = "futures do nothing unless polled"]
-struct SplitMessagesTask<MessageStream, RequestSink, ResponseSink>
+struct SplitMessagesTask<MessageStream, RequestSink, ResponseSink, ShutdownFuture>
 where
     MessageStream: Stream,
 {
@@ -268,21 +259,24 @@ where
     error: Rc<RefCell<Option<Rc<io::Error>>>>,
     request_sink: Option<RequestSink>,
     response_sink: Option<ResponseSink>,
+    shutdown_future: ShutdownFuture,
     stream: Option<Fuse<MessageStream>>,
 }
 
-impl<MessageStream, RequestSink, ResponseSink>
-    SplitMessagesTask<MessageStream, RequestSink, ResponseSink>
+impl<MessageStream, RequestSink, ResponseSink, ShutdownFuture>
+    SplitMessagesTask<MessageStream, RequestSink, ResponseSink, ShutdownFuture>
 where
     MessageStream: Stream<Item = MessageResult, Error = io::Error>,
     RequestSink: Sink<SinkItem = RequestResult, SinkError = ()>,
     ResponseSink: Sink<SinkItem = ResponseResult, SinkError = ()>,
+    ShutdownFuture: Future<Item = (), Error = ()>,
 {
     pub fn new(
         stream: MessageStream,
         request_sink: RequestSink,
         response_sink: ResponseSink,
         error: Rc<RefCell<Option<Rc<io::Error>>>>,
+        shutdown_future: ShutdownFuture,
     ) -> Self {
         SplitMessagesTask {
             buffered_request: None,
@@ -290,6 +284,7 @@ where
             error,
             request_sink: Some(request_sink),
             response_sink: Some(response_sink),
+            shutdown_future,
             stream: Some(stream.fuse()),
         }
     }
@@ -322,6 +317,11 @@ where
         }
 
         loop {
+            match self.shutdown_future.poll() {
+                Ok(Async::Ready(_)) | Err(_) => return Ok(Async::Ready(())),
+                _ => (),
+            }
+
             match self.stream_mut().poll()? {
                 Async::Ready(Some(message)) => match message {
                     Ok(Message::Request(request)) => {
@@ -402,12 +402,13 @@ where
     }
 }
 
-impl<MessageStream, RequestSink, ResponseSink> Future
-    for SplitMessagesTask<MessageStream, RequestSink, ResponseSink>
+impl<MessageStream, RequestSink, ResponseSink, ShutdownFuture> Future
+    for SplitMessagesTask<MessageStream, RequestSink, ResponseSink, ShutdownFuture>
 where
     MessageStream: Stream<Item = MessageResult, Error = io::Error>,
     RequestSink: Sink<SinkItem = RequestResult, SinkError = ()>,
     ResponseSink: Sink<SinkItem = ResponseResult, SinkError = ()>,
+    ShutdownFuture: Future<Item = (), Error = ()>,
 {
     type Item = ();
     type Error = ();
@@ -424,6 +425,7 @@ where
     }
 }
 
+#[must_use = "futures do nothing unless polled"]
 pub struct SendMessagesTask<MessageSink, MessageStream>
 where
     MessageStream: Stream,
