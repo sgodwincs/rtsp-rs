@@ -66,7 +66,7 @@ impl Client {
 
 impl Drop for Client {
     fn drop(&mut self) {
-        // This actually is not necessarily since if the sender is dropped, it will send a cancelled
+        // This actually is not necessary since if the sender is dropped, it will send a cancelled
         // error which will have the same result. But the compiler will complain about the sender
         // not being used, so this deals with that.
 
