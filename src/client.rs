@@ -70,6 +70,10 @@ impl Drop for Client {
         // error which will have the same result. But the compiler will complain about the sender
         // not being used, so this deals with that.
 
-        self.shutdown_oneshot.take().unwrap().send(()).ok();
+        self.shutdown_oneshot
+            .take()
+            .unwrap()
+            .send(())
+            .expect("signal to shutdown protocol should not fail");
     }
 }
