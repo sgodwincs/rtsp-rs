@@ -15,7 +15,7 @@
 //! use bytes::BytesMut;
 //!
 //! use rtsp::{HeaderName, Request};
-//! use rtsp::proto::RequestDecoder;
+//! use rtsp::protocol::RequestDecoder;
 //!
 //! # fn main() {
 //! let buffer =
@@ -46,7 +46,7 @@
 //! use bytes::BytesMut;
 //!
 //! use rtsp::{HeaderName, Response};
-//! use rtsp::proto::ResponseDecoder;
+//! use rtsp::protocol::ResponseDecoder;
 //!
 //! # fn main() {
 //! let buffer =
@@ -146,7 +146,7 @@ impl<T, E> ParseResult<T, E> {
     /// # Examples
     ///
     /// ```
-    /// use rtsp::proto::ParseResult;
+    /// use rtsp::protocol::ParseResult;
     ///
     /// let parse_result: ParseResult<(), ()> = ParseResult::Complete(());
     /// assert_eq!(parse_result.is_complete(), true);
@@ -166,7 +166,7 @@ impl<T, E> ParseResult<T, E> {
     /// # Examples
     ///
     /// ```
-    /// use rtsp::proto::ParseResult;
+    /// use rtsp::protocol::ParseResult;
     ///
     /// let parse_result: ParseResult<(), ()> = ParseResult::Error(());
     /// assert_eq!(parse_result.is_error(), true);
@@ -186,7 +186,7 @@ impl<T, E> ParseResult<T, E> {
     /// # Examples
     ///
     /// ```
-    /// use rtsp::proto::ParseResult;
+    /// use rtsp::protocol::ParseResult;
     ///
     /// let parse_result: ParseResult<(), ()> = ParseResult::Incomplete;
     /// assert_eq!(parse_result.is_incomplete(), true);
@@ -206,7 +206,7 @@ impl<T, E> ParseResult<T, E> {
     /// # Examples
     ///
     /// ```
-    /// use rtsp::proto::ParseResult;
+    /// use rtsp::protocol::ParseResult;
     ///
     /// let parse_result: ParseResult<(), ()> = ParseResult::Complete(());
     /// assert_eq!(parse_result.map(|_| 5).unwrap(), 5);
@@ -227,7 +227,7 @@ impl<T, E> ParseResult<T, E> {
     /// # Examples
     ///
     /// ```
-    /// use rtsp::proto::ParseResult;
+    /// use rtsp::protocol::ParseResult;
     ///
     /// let parse_result: ParseResult<(), ()> = ParseResult::Error(());
     /// assert_eq!(parse_result.map_error(|_| 5).unwrap_error(), 5);
@@ -252,14 +252,14 @@ impl<T, E> ParseResult<T, E> {
     /// # Examples
     ///
     /// ```
-    /// use rtsp::proto::ParseResult;
+    /// use rtsp::protocol::ParseResult;
     ///
     /// let parse_result: ParseResult<(), ()> = ParseResult::Complete(());
     /// assert_eq!(parse_result.unwrap(), ());
     /// ```
     ///
     /// ```{.should_panic}
-    /// use rtsp::proto::ParseResult;
+    /// use rtsp::protocol::ParseResult;
     ///
     /// let parse_result: ParseResult<(), ()> = ParseResult::Incomplete;
     /// parse_result.unwrap();
@@ -280,14 +280,14 @@ impl<T, E> ParseResult<T, E> {
     /// # Examples
     ///
     /// ```
-    /// use rtsp::proto::ParseResult;
+    /// use rtsp::protocol::ParseResult;
     ///
     /// let parse_result: ParseResult<(), ()> = ParseResult::Error(());
     /// assert_eq!(parse_result.unwrap_error(), ());
     /// ```
     ///
     /// ```{.should_panic}
-    /// use rtsp::proto::ParseResult;
+    /// use rtsp::protocol::ParseResult;
     ///
     /// let parse_result: ParseResult<(), ()> = ParseResult::Incomplete;
     /// parse_result.unwrap_error();
@@ -325,7 +325,7 @@ pub type RequestParseResult<T> = ParseResult<T, InvalidRequest>;
 /// use bytes::BytesMut;
 ///
 /// use rtsp::{HeaderName, Request};
-/// use rtsp::proto::RequestDecoder;
+/// use rtsp::protocol::RequestDecoder;
 ///
 /// # fn main() {
 /// let buffer =
@@ -410,7 +410,7 @@ impl RequestDecoder {
     /// use bytes::BytesMut;
     ///
     /// use rtsp::{HeaderName, Request};
-    /// use rtsp::proto::RequestDecoder;
+    /// use rtsp::protocol::RequestDecoder;
     ///
     /// # fn main() {
     /// let buffer =
@@ -443,7 +443,7 @@ impl RequestDecoder {
     /// use bytes::BytesMut;
     ///
     /// use rtsp::{HeaderName, Request};
-    /// use rtsp::proto::RequestDecoder;
+    /// use rtsp::protocol::RequestDecoder;
     ///
     /// # fn main() {
     /// let buffer = "SETUP * RTSP/2.0\r\n";
@@ -604,7 +604,7 @@ impl RequestDecoder {
     /// use bytes::BytesMut;
     ///
     /// use rtsp::{HeaderName, Request};
-    /// use rtsp::proto::{ParseState, RequestDecoder};
+    /// use rtsp::protocol::{ParseState, RequestDecoder};
     ///
     /// # fn main() {
     /// let buffer =
@@ -644,7 +644,7 @@ impl RequestDecoder {
     /// use bytes::BytesMut;
     ///
     /// use rtsp::HeaderName;
-    /// use rtsp::proto::{InvalidRequest, ParseState, RequestDecoder};
+    /// use rtsp::protocol::{InvalidRequest, ParseState, RequestDecoder};
     ///
     /// # fn main() {
     /// let buffer = "Bad Request!\r\nExtra garbage data";
@@ -693,7 +693,7 @@ impl InvalidRequest {
     /// # Examples
     ///
     /// ```
-    /// use rtsp::proto::InvalidRequest;
+    /// use rtsp::protocol::InvalidRequest;
     ///
     /// assert!(InvalidRequest::InvalidHeaderName.is_recoverable());
     /// assert!(!InvalidRequest::InvalidContentLength.is_recoverable());
@@ -767,7 +767,7 @@ pub type ResponseParseResult<T> = ParseResult<T, InvalidResponse>;
 /// use bytes::BytesMut;
 ///
 /// use rtsp::{HeaderName, Response};
-/// use rtsp::proto::ResponseDecoder;
+/// use rtsp::protocol::ResponseDecoder;
 ///
 /// # fn main() {
 /// let buffer =
@@ -845,7 +845,7 @@ impl ResponseDecoder {
     /// use bytes::BytesMut;
     ///
     /// use rtsp::{HeaderName, Response};
-    /// use rtsp::proto::ResponseDecoder;
+    /// use rtsp::protocol::ResponseDecoder;
     ///
     /// # fn main() {
     /// let buffer =
@@ -874,7 +874,7 @@ impl ResponseDecoder {
     /// use bytes::BytesMut;
     ///
     /// use rtsp::{HeaderName, Response};
-    /// use rtsp::proto::ResponseDecoder;
+    /// use rtsp::protocol::ResponseDecoder;
     ///
     /// # fn main() {
     /// let buffer = "RTSP/2.0 200 OK\r\n";
@@ -1035,7 +1035,7 @@ impl ResponseDecoder {
     /// use bytes::BytesMut;
     ///
     /// use rtsp::{HeaderName, Response};
-    /// use rtsp::proto::{ParseState, ResponseDecoder};
+    /// use rtsp::protocol::{ParseState, ResponseDecoder};
     ///
     /// # fn main() {
     /// let buffer =
@@ -1073,7 +1073,7 @@ impl ResponseDecoder {
     /// use bytes::BytesMut;
     ///
     /// use rtsp::HeaderName;
-    /// use rtsp::proto::{InvalidResponse, ParseState, ResponseDecoder};
+    /// use rtsp::protocol::{InvalidResponse, ParseState, ResponseDecoder};
     ///
     /// # fn main() {
     /// let buffer = "Bad Response!\r\nExtra garbage data";
@@ -1122,7 +1122,7 @@ impl InvalidResponse {
     /// # Examples
     ///
     /// ```
-    /// use rtsp::proto::InvalidRequest;
+    /// use rtsp::protocol::InvalidRequest;
     ///
     /// assert!(InvalidRequest::InvalidHeaderName.is_recoverable());
     /// assert!(!InvalidRequest::InvalidContentLength.is_recoverable());
