@@ -3,7 +3,7 @@
 extern crate rtsp;
 extern crate test;
 
-use rtsp::proto::{RequestDecoder, ResponseDecoder};
+use rtsp::protocol::{RequestDecoder, ResponseDecoder};
 use test::Bencher;
 
 // Decoding seems to be up to twice as slow as decoding a response. After some investigation, this

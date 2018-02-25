@@ -6,7 +6,7 @@ extern crate test;
 
 use bytes::BytesMut;
 use rtsp::{HeaderName, Request, Response};
-use rtsp::proto::{encode_request, encode_response};
+use rtsp::protocol::{encode_request, encode_response};
 use test::Bencher;
 
 // Decoding seems to be up to twice as slow as decoding a response. After some investigation, this
