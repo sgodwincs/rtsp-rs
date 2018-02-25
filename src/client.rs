@@ -9,9 +9,9 @@ use tokio_service::Service;
 
 use request::Request;
 use response::Response;
-use proto;
-use proto::Protocol;
-use proto::codec::{RequestResult, ResponseResult};
+use protocol;
+use protocol::Protocol;
+use protocol::codec::{RequestResult, ResponseResult};
 
 pub struct Client {
     protocol: Rc<Protocol>,
@@ -30,7 +30,7 @@ impl Client {
     {
         TcpStream::connect(&address).and_then(|tcp_stream| {
             let (tx_shutdown, rx_shutdown) = oneshot::channel();
-            let mut config = proto::Config::new();
+            let mut config = protocol::Config::new();
             config.set_shutdown_future(rx_shutdown.map_err(|_| ()));
             let protocol = Rc::new(Protocol::with_config(tcp_stream, config));
             let protocol_handle = protocol.clone();

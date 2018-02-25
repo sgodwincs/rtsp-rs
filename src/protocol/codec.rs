@@ -4,8 +4,8 @@ use std::convert::TryFrom;
 use std::error::Error;
 use tokio_io::codec::{Decoder, Encoder};
 
-use proto::{encode_request, encode_response, InvalidRequest, InvalidResponse, ParseResult,
-            ParseState, RequestDecoder, ResponseDecoder};
+use protocol::{encode_request, encode_response, InvalidRequest, InvalidResponse, ParseResult,
+               ParseState, RequestDecoder, ResponseDecoder};
 use request::Request;
 use response::Response;
 

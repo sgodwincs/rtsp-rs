@@ -15,7 +15,7 @@ use std::rc::Rc;
 use tokio::executor::current_thread;
 use tokio_io::{AsyncRead, AsyncWrite};
 
-use proto::codec::{Codec, InvalidMessage, Message, MessageResult, RequestResult, ResponseResult};
+use protocol::codec::{Codec, InvalidMessage, Message, MessageResult, RequestResult, ResponseResult};
 use request::Request;
 use response::Response;
 
