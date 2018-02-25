@@ -1,6 +1,7 @@
 //! RTSP Protocol
 //!
-//! This module specifies
+//! This module specifies a protocol object for managing requests and responses of an underyling
+//! IO object (presumably a TCP stream in the insecure case).
 
 use bytes::BytesMut;
 use futures::{future, Async, AsyncSink, Future, Poll, Sink, Stream};
