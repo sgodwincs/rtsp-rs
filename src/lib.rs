@@ -23,7 +23,7 @@ mod syntax;
 pub mod client;
 pub mod header;
 pub mod method;
-pub mod proto;
+pub mod protocol;
 pub mod reason;
 pub mod request;
 pub mod response;
