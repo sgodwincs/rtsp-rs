@@ -32,7 +32,8 @@ impl Client {
             let (tx_shutdown, rx_shutdown) = oneshot::channel();
             let mut config = protocol::Config::new();
             config.set_shutdown_future(rx_shutdown.map_err(|_| ()));
-            let protocol = Rc::new(Protocol::with_config(tcp_stream, config));
+            let protocol = Rc::new(Protocol::with_config(tcp_stream, config)
+                .map_err(|_| io::Error::new(io::ErrorKind::Other, "protocol task error"))?);
             let protocol_handle = protocol.clone();
 
             current_thread::spawn(protocol.for_each_request(move |request| {

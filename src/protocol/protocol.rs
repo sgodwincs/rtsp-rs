@@ -5,7 +5,7 @@
 
 use bytes::BytesMut;
 use futures::{future, Async, AsyncSink, Future, Poll, Sink, Stream};
-use futures::future::{empty, Either, IntoFuture};
+use futures::future::{empty, Either, Executor, IntoFuture};
 use futures::stream::Fuse;
 use futures::sync::mpsc::{channel, unbounded, Receiver, UnboundedSender};
 use futures::sync::oneshot;
@@ -96,7 +96,7 @@ impl Protocol {
     /// be done using the given IO object.
     ///
     /// See `with_config` for more information.
-    pub fn new<IO>(io: IO) -> Self
+    pub fn new<IO>(io: IO) -> Result<Self, ()>
     where
         IO: AsyncRead + AsyncWrite + 'static,
     {
@@ -108,11 +108,17 @@ impl Protocol {
     ///
     /// Currently, the protocol spawns three tasks using the `current_thread` executor. As a result,
     /// the protocol must be created in the context of `current_thread::run`.
-    pub fn with_config<IO>(io: IO, config: Config) -> Self
+    ///
+    /// # Errors
+    ///
+    /// An error will be returned if one of the protocol tasks were not able to be executed on the
+    /// executor.
+    pub fn with_config<IO>(io: IO, config: Config) -> Result<Self, ()>
     where
         IO: AsyncRead + AsyncWrite + 'static,
     {
-        let (requests_buffer_size, responses_buffer_size, shutdown_future) = config.into_parts();
+        let (executor, requests_buffer_size, responses_buffer_size, shutdown_future) =
+            config.into_parts();
         let (sink, stream) = io.framed(Codec::new()).split();
         let (tx_incoming_request, rx_incoming_request) = channel(requests_buffer_size);
         let (tx_incoming_response, rx_incoming_response) = channel(responses_buffer_size);
@@ -124,44 +130,50 @@ impl Protocol {
         let tx_shutdown = Rc::new(RefCell::new(Some(tx_shutdown)));
         let rx_shutdown = rx_shutdown.map_err(|_| ()).select(shutdown_future).shared();
 
-        current_thread::spawn(wrap_task(
-            SplitMessagesTask::new(
-                stream,
-                tx_incoming_request.sink_map_err(|_| ()),
-                tx_incoming_response.sink_map_err(|_| ()),
-                rx_shutdown.clone().map(|_| ()).map_err(|_| ()),
-            ),
-            tx_shutdown.clone(),
-            error.clone(),
-        ));
+        executor
+            .execute(wrap_task(
+                SplitMessagesTask::new(
+                    stream,
+                    tx_incoming_request.sink_map_err(|_| ()),
+                    tx_incoming_response.sink_map_err(|_| ()),
+                    rx_shutdown.clone().map(|_| ()).map_err(|_| ()),
+                ),
+                tx_shutdown.clone(),
+                error.clone(),
+            ))
+            .map_err(|_| ())?;
 
-        current_thread::spawn(wrap_task(
-            SendMessagesTask::new(sink, rx_outgoing_message),
-            tx_shutdown.clone(),
-            error.clone(),
-        ));
+        executor
+            .execute(wrap_task(
+                SendMessagesTask::new(sink, rx_outgoing_message),
+                tx_shutdown.clone(),
+                error.clone(),
+            ))
+            .map_err(|_| ())?;
 
-        current_thread::spawn(wrap_task(
-            rx_incoming_response
-                .zip(rx_matching_response)
-                .for_each(|(response, channel)| {
-                    channel
-                        .send(response)
-                        .expect("oneshot for matching responses should not be cancelled");
-                    Ok(())
-                })
-                .map_err(|_| panic!("response matching task should never return an error")),
-            tx_shutdown.clone(),
-            error.clone(),
-        ));
+        executor
+            .execute(wrap_task(
+                rx_incoming_response
+                    .zip(rx_matching_response)
+                    .for_each(|(response, channel)| {
+                        channel
+                            .send(response)
+                            .expect("oneshot for matching responses should not be cancelled");
+                        Ok(())
+                    })
+                    .map_err(|_| panic!("response matching task should never return an error")),
+                tx_shutdown.clone(),
+                error.clone(),
+            ))
+            .map_err(|_| ())?;
 
-        Protocol {
+        Ok(Protocol {
             error,
             message_sink: tx_outgoing_message,
             request_stream: RefCell::new(Some(rx_incoming_request)),
             response_channel_sink: tx_matching_response,
             shutdown_oneshot: tx_shutdown,
-        }
+        })
     }
 
     /// Returns any protocol error that has occured.
@@ -307,6 +319,7 @@ impl Drop for Protocol {
 }
 
 pub struct Config {
+    executor: Box<Executor<background::Background>>,
     requests_buffer_size: usize,
     responses_buffer_size: usize,
     shutdown_future: Box<Future<Item = (), Error = ()>>,
@@ -317,14 +330,34 @@ impl Config {
         Config::default()
     }
 
-    pub fn into_parts(self) -> (usize, usize, Box<Future<Item = (), Error = ()>>) {
+    pub fn into_parts(
+        self,
+    ) -> (
+        Box<Executor<background::Background>>,
+        usize,
+        usize,
+        Box<Future<Item = (), Error = ()>>,
+    ) {
         let Config {
+            executor,
             requests_buffer_size,
             responses_buffer_size,
             shutdown_future,
         } = self;
 
-        (requests_buffer_size, responses_buffer_size, shutdown_future)
+        (
+            executor,
+            requests_buffer_size,
+            responses_buffer_size,
+            shutdown_future,
+        )
+    }
+
+    pub fn set_executor<E>(&mut self, executor: E)
+    where
+        E: Executor<background::Background> + 'static,
+    {
+        self.executor = Box::new(executor);
     }
 
     pub fn set_request_buffer_size(&mut self, requests_buffer_size: usize) -> Result<(), ()> {
@@ -356,9 +389,32 @@ impl Config {
 impl Default for Config {
     fn default() -> Self {
         Config {
+            executor: Box::new(current_thread::task_executor()),
             requests_buffer_size: DEFAULT_REQUESTS_BUFFER_SIZE,
             responses_buffer_size: DEFAULT_RESPONSES_BUFFER_SIZE,
             shutdown_future: Box::new(empty()),
+        }
+    }
+}
+
+/// This is copied from Hyper.
+mod background {
+    use futures::{Future, Poll};
+
+    pub struct Background {
+        inner: Box<Future<Item = (), Error = ()>>,
+    }
+
+    pub fn bg(fut: Box<Future<Item = (), Error = ()>>) -> Background {
+        Background { inner: fut }
+    }
+
+    impl Future for Background {
+        type Item = ();
+        type Error = ();
+
+        fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+            self.inner.poll()
         }
     }
 }
@@ -607,11 +663,11 @@ fn wrap_task<TaskFuture>(
     task: TaskFuture,
     tx_shutdown: Rc<RefCell<Option<oneshot::Sender<()>>>>,
     protocol_error: Rc<RefCell<Option<Rc<io::Error>>>>,
-) -> impl Future<Item = (), Error = ()>
+) -> background::Background
 where
-    TaskFuture: Future<Item = (), Error = io::Error>,
+    TaskFuture: Future<Item = (), Error = io::Error> + 'static,
 {
-    task.then(move |result| {
+    background::bg(Box::new(task.then(move |result| {
         if let Err(error) = result {
             let mut protocol_error = protocol_error.borrow_mut();
 
@@ -625,5 +681,5 @@ where
         }
 
         Ok(())
-    })
+    })))
 }
