@@ -46,8 +46,8 @@ impl Version {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryFrom;
-    /// #
+    /// use std::convert::TryFrom;
+    ///
     /// use rtsp::Version;
     ///
     /// assert_eq!(Version::RTSP20.as_str(), "RTSP/2.0");

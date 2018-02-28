@@ -23,7 +23,7 @@ impl Session {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryFrom;
+    /// use std::convert::TryFrom;
     /// use std::time::Duration;
     ///
     /// use rtsp::SessionID;
@@ -47,7 +47,7 @@ impl Session {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryFrom;
+    /// use std::convert::TryFrom;
     /// use std::time::Duration;
     ///
     /// use rtsp::SessionID;
@@ -113,8 +113,8 @@ impl TypedHeader for Session {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryFrom;
-    /// #
+    /// use std::convert::TryFrom;
+    ///
     /// use rtsp::*;
     /// use rtsp::header::types::Session;
     ///
@@ -156,8 +156,8 @@ impl TypedHeader for Session {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryFrom;
-    /// #
+    /// use std::convert::TryFrom;
+    ///
     /// use rtsp::*;
     /// use rtsp::header::types::Session;
     ///

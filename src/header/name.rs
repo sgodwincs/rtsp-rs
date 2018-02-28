@@ -128,8 +128,8 @@ impl fmt::Display for HeaderName {
 /// ```
 /// # #![feature(try_from)]
 /// #
-/// # use std::convert::TryFrom;
-/// #
+/// use std::convert::TryFrom;
+///
 /// use rtsp::HeaderName;
 ///
 /// assert_eq!(HeaderName::try_from("eXtEnSiOn").unwrap(), *"exTENSION");
@@ -153,8 +153,8 @@ impl PartialEq<HeaderName> for str {
 /// ```
 /// # #![feature(try_from)]
 /// #
-/// # use std::convert::TryFrom;
-/// #
+/// use std::convert::TryFrom;
+///
 /// use rtsp::HeaderName;
 ///
 /// assert_eq!(HeaderName::try_from("extension").unwrap(), "extension");
@@ -225,8 +225,8 @@ impl<'a> TryFrom<&'a [u8]> for HeaderName {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryFrom;
-    /// #
+    /// use std::convert::TryFrom;
+    ///
     /// use rtsp::HeaderName;
     ///
     /// let content_length = HeaderName::try_from(&b"Content-Length"[..]).unwrap();
@@ -410,8 +410,8 @@ impl Hash for ExtensionHeaderName {
 /// ```
 /// # #![feature(try_from)]
 /// #
-/// # use std::convert::TryFrom;
-/// #
+/// use std::convert::TryFrom;
+///
 /// use rtsp::HeaderName;
 ///
 /// match HeaderName::try_from("extension").unwrap() {
@@ -433,8 +433,8 @@ impl PartialEq<str> for ExtensionHeaderName {
 /// ```
 /// # #![feature(try_from)]
 /// #
-/// # use std::convert::TryFrom;
-/// #
+/// use std::convert::TryFrom;
+///
 /// use rtsp::HeaderName;
 ///
 /// match HeaderName::try_from("extension").unwrap() {
@@ -457,8 +457,8 @@ impl ExtensionHeaderName {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryFrom;
-    /// #
+    /// use std::convert::TryFrom;
+    ///
     /// use rtsp::HeaderName;
     ///
     /// match HeaderName::try_from("ExTeNsIoN").unwrap() {
@@ -478,8 +478,8 @@ impl ExtensionHeaderName {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryFrom;
-    /// #
+    /// use std::convert::TryFrom;
+    ///
     /// use rtsp::HeaderName;
     ///
     /// match HeaderName::try_from("ExTeNsIoN").unwrap() {

@@ -1,3 +1,4 @@
+use std::convert::TryFrom;
 use std::ops::Deref;
 
 use header::{HeaderName, HeaderValue, InvalidTypedHeader, TypedHeader};
@@ -29,12 +30,12 @@ impl TypedHeader for ContentLength {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryFrom;
-    /// #
+    /// use std::convert::TryFrom;
+    ///
     /// use rtsp::*;
     /// use rtsp::header::types::ContentLength;
     ///
-    /// let typed_header = ContentLength::from(10);
+    /// let typed_header = ContentLength::try_from(10).unwrap();
     /// let raw_header = vec![HeaderValue::try_from("10").unwrap()];
     /// assert_eq!(typed_header.to_header_raw(), raw_header);
     /// ```
@@ -64,12 +65,12 @@ impl TypedHeader for ContentLength {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryFrom;
-    /// #
+    /// use std::convert::TryFrom;
+    ///
     /// use rtsp::*;
     /// use rtsp::header::types::ContentLength;
     ///
-    /// let typed_header = ContentLength::from(0);
+    /// let typed_header = ContentLength::try_from(0).unwrap();
     /// let raw_header: Vec<HeaderValue> = vec![];
     ///
     /// assert_eq!(
@@ -77,7 +78,7 @@ impl TypedHeader for ContentLength {
     ///     typed_header
     /// );
     ///
-    /// let typed_header = ContentLength::from(10);
+    /// let typed_header = ContentLength::try_from(10).unwrap();
     /// let raw_header = vec![HeaderValue::try_from("10").unwrap()];
     ///
     /// assert_eq!(
@@ -98,13 +99,7 @@ impl TypedHeader for ContentLength {
             trim_whitespace_left(header[0].as_str())
                 .parse::<usize>()
                 .map_err(|_| InvalidTypedHeader)
-                .and_then(|content_length| {
-                    if content_length as u64 > MAX_CONTENT_LENGTH {
-                        Err(InvalidTypedHeader)
-                    } else {
-                        Ok(ContentLength(content_length))
-                    }
-                })
+                .and_then(|content_length| ContentLength::try_from(content_length))
         }
     }
 }
@@ -117,8 +112,14 @@ impl Deref for ContentLength {
     }
 }
 
-impl From<usize> for ContentLength {
-    fn from(value: usize) -> ContentLength {
-        ContentLength(value)
+impl TryFrom<usize> for ContentLength {
+    type Error = InvalidTypedHeader;
+
+    fn try_from(value: usize) -> Result<Self, Self::Error> {
+        if value as u64 > MAX_CONTENT_LENGTH {
+            Err(InvalidTypedHeader)
+        } else {
+            Ok(ContentLength(value))
+        }
     }
 }

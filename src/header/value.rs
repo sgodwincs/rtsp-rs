@@ -16,8 +16,8 @@ impl HeaderValue {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryFrom;
-    /// #
+    /// use std::convert::TryFrom;
+    ///
     /// use rtsp::HeaderValue;
     ///
     /// let header_value = HeaderValue::try_from("value").unwrap();
@@ -34,8 +34,8 @@ impl HeaderValue {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryFrom;
-    /// #
+    /// use std::convert::TryFrom;
+    ///
     /// use rtsp::HeaderValue;
     ///
     /// let header_value = HeaderValue::try_from("value").unwrap();
@@ -62,8 +62,8 @@ impl HeaderValue {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryFrom;
-    /// #
+    /// use std::convert::TryFrom;
+    ///
     /// use rtsp::HeaderValue;
     ///
     /// let header_value = HeaderValue::try_from("value").unwrap();
@@ -82,8 +82,8 @@ impl HeaderValue {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryFrom;
-    /// #
+    /// use std::convert::TryFrom;
+    ///
     /// use rtsp::HeaderValue;
     ///
     /// let header_value = HeaderValue::try_from("value").unwrap();
@@ -246,8 +246,8 @@ impl<'a> TryFrom<&'a str> for HeaderValue {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryFrom;
-    /// #
+    /// use std::convert::TryFrom;
+    ///
     /// use rtsp::HeaderValue;
     ///
     /// assert_eq!(HeaderValue::try_from("test").unwrap().as_str(), "test");
@@ -318,8 +318,8 @@ impl<'a> TryFrom<&'a [u8]> for HeaderValue {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryFrom;
-    /// #
+    /// use std::convert::TryFrom;
+    ///
     /// use rtsp::HeaderValue;
     ///
     /// assert_eq!(HeaderValue::try_from(&b"test"[..]).unwrap().as_str(), "test");

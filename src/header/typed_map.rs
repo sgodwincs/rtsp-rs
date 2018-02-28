@@ -120,8 +120,8 @@ impl TypedHeaderMap {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryFrom;
-    /// #
+    /// use std::convert::TryFrom;
+    ///
     /// use rtsp::*;
     /// use rtsp::header::types::ContentLength;
     ///
@@ -139,8 +139,8 @@ impl TypedHeaderMap {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryFrom;
-    /// #
+    /// use std::convert::TryFrom;
+    ///
     /// use rtsp::*;
     /// use rtsp::header::types::ContentLength;
     ///
@@ -158,8 +158,8 @@ impl TypedHeaderMap {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryFrom;
-    /// #
+    /// use std::convert::TryFrom;
+    ///
     /// use rtsp::*;
     /// use rtsp::header::types::ContentLength;
     ///
@@ -185,8 +185,8 @@ impl TypedHeaderMap {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryFrom;
-    /// #
+    /// use std::convert::TryFrom;
+    ///
     /// use rtsp::*;
     /// use rtsp::header::types::ContentLength;
     ///
@@ -211,8 +211,8 @@ impl TypedHeaderMap {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryFrom;
-    /// #
+    /// use std::convert::TryFrom;
+    ///
     /// use rtsp::*;
     /// use rtsp::header::types::ContentLength;
     ///
@@ -241,8 +241,8 @@ impl TypedHeaderMap {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryFrom;
-    /// #
+    /// use std::convert::TryFrom;
+    ///
     /// use rtsp::*;
     /// use rtsp::header::types::ContentLength;
     ///
@@ -266,8 +266,8 @@ impl TypedHeaderMap {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryFrom;
-    /// #
+    /// use std::convert::TryFrom;
+    ///
     /// use rtsp::*;
     /// use rtsp::header::types::ContentLength;
     ///
@@ -293,8 +293,8 @@ impl TypedHeaderMap {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryFrom;
-    /// #
+    /// use std::convert::TryFrom;
+    ///
     /// use rtsp::*;
     /// use rtsp::header::types::ContentLength;
     ///
@@ -315,8 +315,8 @@ impl TypedHeaderMap {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryFrom;
-    /// #
+    /// use std::convert::TryFrom;
+    ///
     /// use rtsp::*;
     /// use rtsp::header::types::ContentLength;
     ///
@@ -336,8 +336,8 @@ impl TypedHeaderMap {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryFrom;
-    /// #
+    /// use std::convert::TryFrom;
+    ///
     /// use rtsp::*;
     /// use rtsp::header::types::ContentLength;
     ///
@@ -362,8 +362,8 @@ impl TypedHeaderMap {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryFrom;
-    /// #
+    /// use std::convert::TryFrom;
+    ///
     /// use rtsp::*;
     /// use rtsp::header::types::ContentLength;
     ///
@@ -387,8 +387,8 @@ impl TypedHeaderMap {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryFrom;
-    /// #
+    /// use std::convert::TryFrom;
+    ///
     /// use rtsp::*;
     /// use rtsp::header::types::ContentLength;
     ///
@@ -412,8 +412,8 @@ impl TypedHeaderMap {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryFrom;
-    /// #
+    /// use std::convert::TryFrom;
+    ///
     /// use rtsp::*;
     /// use rtsp::header::types::ContentLength;
     ///
@@ -438,8 +438,8 @@ impl TypedHeaderMap {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryFrom;
-    /// #
+    /// use std::convert::TryFrom;
+    ///
     /// use rtsp::*;
     /// use rtsp::header::types::ContentLength;
     ///
@@ -460,8 +460,8 @@ impl TypedHeaderMap {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryFrom;
-    /// #
+    /// use std::convert::TryFrom;
+    ///
     /// use rtsp::*;
     /// use rtsp::header::types::ContentLength;
     ///

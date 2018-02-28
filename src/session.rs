@@ -20,8 +20,8 @@ impl SessionID {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryFrom;
-    /// #
+    /// use std::convert::TryFrom;
+    ///
     /// use rtsp::SessionID;
     ///
     /// assert_eq!(
@@ -59,8 +59,8 @@ impl fmt::Display for SessionID {
 /// ```
 /// # #![feature(try_from)]
 /// #
-/// # use std::convert::TryFrom;
-/// #
+/// use std::convert::TryFrom;
+///
 /// use rtsp::SessionID;
 ///
 /// assert_eq!(SessionID::try_from("QKyjN8nt2WqbWw4tIYof52").unwrap(), "QKyjN8nt2WqbWw4tIYof52");
@@ -78,8 +78,8 @@ impl PartialEq<str> for SessionID {
 /// ```
 /// # #![feature(try_from)]
 /// #
-/// # use std::convert::TryFrom;
-/// #
+/// use std::convert::TryFrom;
+///
 /// use rtsp::SessionID;
 ///
 /// assert_eq!(SessionID::try_from("QKyjN8nt2WqbWw4tIYof52").unwrap(), "QKyjN8nt2WqbWw4tIYof52");
@@ -119,8 +119,8 @@ impl<'a> TryFrom<&'a [u8]> for SessionID {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryFrom;
-    /// #
+    /// use std::convert::TryFrom;
+    ///
     /// use rtsp::SessionID;
     ///
     /// let session_id = SessionID::try_from(&b"QKyjN8nt2WqbWw4tIYof52"[..]).unwrap();

@@ -46,7 +46,6 @@ impl URI {
         }
     }
 
-
     /// Returns whether or not the uri is `Any`.
     ///
     /// # Examples
@@ -79,8 +78,8 @@ impl URI {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryFrom;
-    /// #
+    /// use std::convert::TryFrom;
+    ///
     /// use rtsp::URI;
     ///
     /// assert!(!URI::Any.is_uri());

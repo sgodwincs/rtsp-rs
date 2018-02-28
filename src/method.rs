@@ -9,8 +9,8 @@
 //! ```
 //! # #![feature(try_from)]
 //! #
-//! # use std::convert::TryFrom;
-//! #
+//! use std::convert::TryFrom;
+//!
 //! use rtsp::Method;
 //!
 //! assert_eq!(Method::Play, Method::try_from("PLAY").unwrap());
@@ -33,8 +33,8 @@ use syntax::is_token;
 /// ```
 /// # #![feature(try_from)]
 /// #
-/// # use std::convert::TryFrom;
-/// #
+/// use std::convert::TryFrom;
+///
 /// use rtsp::Method;
 ///
 /// assert_eq!(Method::Play, Method::try_from("PLAY").unwrap());
@@ -97,8 +97,8 @@ impl Method {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryFrom;
-    /// #
+    /// use std::convert::TryFrom;
+    ///
     /// use rtsp::Method;
     ///
     /// assert_eq!(Method::Play.as_str(), "PLAY");
@@ -179,8 +179,8 @@ impl AsRef<str> for Method {
 /// ```
 /// # #![feature(try_from)]
 /// #
-/// # use std::convert::TryFrom;
-/// #
+/// use std::convert::TryFrom;
+///
 /// use rtsp::Method;
 ///
 /// assert_eq!(Method::try_from("eXtEnSiOn").unwrap(), *"exTENSION");
@@ -198,8 +198,8 @@ impl PartialEq<str> for Method {
 /// ```
 /// # #![feature(try_from)]
 /// #
-/// # use std::convert::TryFrom;
-/// #
+/// use std::convert::TryFrom;
+///
 /// use rtsp::Method;
 ///
 /// assert_eq!(Method::try_from("extension").unwrap(), "extension");
@@ -247,8 +247,8 @@ impl<'a> TryFrom<&'a [u8]> for Method {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryFrom;
-    /// #
+    /// use std::convert::TryFrom;
+    ///
     /// use rtsp::Method;
     ///
     /// let play = Method::try_from(&b"PLAY"[..]).unwrap();
@@ -334,8 +334,8 @@ impl fmt::Display for ExtensionMethod {
 /// ```
 /// # #![feature(try_from)]
 /// #
-/// # use std::convert::TryFrom;
-/// #
+/// use std::convert::TryFrom;
+///
 /// use rtsp::Method;
 ///
 /// match Method::try_from("extension").unwrap() {
@@ -356,8 +356,8 @@ impl PartialEq<str> for ExtensionMethod {
 /// ```
 /// # #![feature(try_from)]
 /// #
-/// # use std::convert::TryFrom;
-/// #
+/// use std::convert::TryFrom;
+///
 /// use rtsp::Method;
 ///
 /// match Method::try_from("extension").unwrap() {
@@ -380,8 +380,8 @@ impl ExtensionMethod {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryFrom;
-    /// #
+    /// use std::convert::TryFrom;
+    ///
     /// use rtsp::Method;
     ///
     /// match Method::try_from("extension").unwrap() {

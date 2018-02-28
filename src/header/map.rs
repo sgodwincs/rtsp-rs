@@ -26,8 +26,8 @@ pub use self::into_header_name::IntoHeaderName;
 /// ```
 /// # #![feature(try_from)]
 /// #
-/// # use std::convert::TryInto;
-/// #
+/// use std::convert::TryInto;
+///
 /// use rtsp::HeaderMap;
 /// use rtsp::HeaderName::{ContentLength, Expires, Location};
 ///
@@ -498,8 +498,8 @@ impl<T> HeaderMap<T> {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryInto;
-    /// #
+    /// use std::convert::TryInto;
+    ///
     /// use rtsp::HeaderMap;
     /// use rtsp::HeaderName::{Allow, ContentLanguage};
     ///
@@ -530,8 +530,8 @@ impl<T> HeaderMap<T> {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryInto;
-    /// #
+    /// use std::convert::TryInto;
+    ///
     /// use rtsp::HeaderMap;
     /// use rtsp::HeaderName::{Allow, ContentLanguage};
     ///
@@ -559,8 +559,8 @@ impl<T> HeaderMap<T> {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryInto;
-    /// #
+    /// use std::convert::TryInto;
+    ///
     /// use rtsp::HeaderMap;
     /// use rtsp::HeaderName::Allow;
     ///
@@ -583,8 +583,8 @@ impl<T> HeaderMap<T> {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryInto;
-    /// #
+    /// use std::convert::TryInto;
+    ///
     /// use rtsp::HeaderMap;
     /// use rtsp::HeaderName::Allow;
     ///
@@ -615,8 +615,8 @@ impl<T> HeaderMap<T> {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryInto;
-    /// #
+    /// use std::convert::TryInto;
+    ///
     /// use rtsp::HeaderMap;
     /// use rtsp::HeaderName::Allow;
     ///
@@ -648,8 +648,8 @@ impl<T> HeaderMap<T> {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryInto;
-    /// #
+    /// use std::convert::TryInto;
+    ///
     /// use rtsp::HeaderMap;
     /// # use rtsp::HeaderName::Allow;
     ///
@@ -689,8 +689,8 @@ impl<T> HeaderMap<T> {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryInto;
-    /// #
+    /// use std::convert::TryInto;
+    ///
     /// use rtsp::HeaderMap;
     /// use rtsp::HeaderName::Allow;
     ///
@@ -728,8 +728,8 @@ impl<T> HeaderMap<T> {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryInto;
-    /// #
+    /// use std::convert::TryInto;
+    ///
     /// use rtsp::HeaderMap;
     /// use rtsp::HeaderName::Allow;
     ///
@@ -765,8 +765,8 @@ impl<T> HeaderMap<T> {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryInto;
-    /// #
+    /// use std::convert::TryInto;
+    ///
     /// use rtsp::HeaderMap;
     /// use rtsp::HeaderName::Allow;
     ///
@@ -799,8 +799,8 @@ impl<T> HeaderMap<T> {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryInto;
-    /// #
+    /// use std::convert::TryInto;
+    ///
     /// use rtsp::HeaderMap;
     /// use rtsp::HeaderName::Allow;
     ///
@@ -828,8 +828,8 @@ impl<T> HeaderMap<T> {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryInto;
-    /// #
+    /// use std::convert::TryInto;
+    ///
     /// use rtsp::HeaderMap;
     /// use rtsp::HeaderName::{ContentLength, Allow};
     ///
@@ -895,8 +895,8 @@ impl<T> HeaderMap<T> {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryInto;
-    /// #
+    /// use std::convert::TryInto;
+    ///
     /// use rtsp::HeaderMap;
     /// use rtsp::HeaderName::{ContentLength, Allow};
     ///
@@ -924,8 +924,8 @@ impl<T> HeaderMap<T> {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryInto;
-    /// #
+    /// use std::convert::TryInto;
+    ///
     /// use rtsp::HeaderMap;
     /// use rtsp::HeaderName::{ContentLength, Allow};
     ///
@@ -953,8 +953,8 @@ impl<T> HeaderMap<T> {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryInto;
-    /// #
+    /// use std::convert::TryInto;
+    ///
     /// use rtsp::HeaderMap;
     /// use rtsp::HeaderName::{ContentLength, Allow};
     ///
@@ -983,8 +983,8 @@ impl<T> HeaderMap<T> {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryInto;
-    /// #
+    /// use std::convert::TryInto;
+    ///
     /// use rtsp::HeaderMap;
     /// use rtsp::HeaderName::{ContentLength, Allow};
     ///
@@ -1151,8 +1151,8 @@ impl<T> HeaderMap<T> {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryInto;
-    /// #
+    /// use std::convert::TryInto;
+    ///
     /// use rtsp::HeaderMap;
     /// use rtsp::HeaderName::Allow;
     ///
@@ -1246,8 +1246,8 @@ impl<T> HeaderMap<T> {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryInto;
-    /// #
+    /// use std::convert::TryInto;
+    ///
     /// use rtsp::HeaderMap;
     /// use rtsp::HeaderName::Allow;
     ///
@@ -1376,8 +1376,8 @@ impl<T> HeaderMap<T> {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryInto;
-    /// #
+    /// use std::convert::TryInto;
+    ///
     /// use rtsp::HeaderMap;
     /// use rtsp::HeaderName::Allow;
     ///
@@ -1766,8 +1766,8 @@ impl<T> IntoIterator for HeaderMap<T> {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryInto;
-    /// #
+    ///  use std::convert::TryInto;
+    ///
     /// use rtsp::HeaderMap;
     /// use rtsp::HeaderName::*;
     ///
@@ -1786,8 +1786,8 @@ impl<T> IntoIterator for HeaderMap<T> {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryInto;
-    /// #
+    /// use std::convert::TryInto;
+    ///
     /// use rtsp::HeaderMap;
     /// use rtsp::HeaderName::*;
     ///
@@ -1844,8 +1844,8 @@ impl<T> Extend<(Option<HeaderName>, T)> for HeaderMap<T> {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryInto;
-    /// #
+    /// use std::convert::TryInto;
+    ///
     /// use rtsp::HeaderMap;
     /// use rtsp::HeaderName::*;
     /// let mut map = HeaderMap::new();
@@ -2227,8 +2227,8 @@ impl<'a, T> Entry<'a, T> {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryInto;
-    /// #
+    /// use std::convert::TryInto;
+    ///
     /// use rtsp::HeaderMap;
     ///
     /// let mut map = HeaderMap::new();
@@ -2244,8 +2244,8 @@ impl<'a, T> Entry<'a, T> {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryInto;
-    /// #
+    /// use std::convert::TryInto;
+    ///
     /// use rtsp::HeaderMap;
     /// use rtsp::HeaderName::Allow;
     ///
@@ -2334,8 +2334,8 @@ impl<'a, T> VacantEntry<'a, T> {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryInto;
-    /// #
+    /// use std::convert::TryInto;
+    ///
     /// use rtsp::header::{Entry, HeaderMap};
     ///
     /// let mut map = HeaderMap::new();
@@ -2365,8 +2365,8 @@ impl<'a, T> VacantEntry<'a, T> {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryInto;
-    /// #
+    /// use std::convert::TryInto;
+    ///
     /// use rtsp::header::{Entry, HeaderMap};
     ///
     /// let mut map = HeaderMap::new();
@@ -2392,7 +2392,6 @@ impl<'a, T> VacantEntry<'a, T> {
     }
 }
 
-
 // ===== impl GetAll =====
 
 impl<'a, T: 'a> GetAll<'a, T> {
@@ -2405,8 +2404,8 @@ impl<'a, T: 'a> GetAll<'a, T> {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryInto;
-    /// #
+    /// use std::convert::TryInto;
+    ///
     /// use rtsp::HeaderMap;
     /// use rtsp::HeaderName::Allow;
     ///
@@ -2462,7 +2461,6 @@ impl<'a, T: 'a> Iterator for ValueIter<'a, T> {
     fn next(&mut self) -> Option<Self::Item> {
         use self::Cursor::*;
 
-
         match self.front {
             Some(Head) => {
                 let entry = &self.map.entries[self.index];
@@ -2505,7 +2503,6 @@ impl<'a, T: 'a> Iterator for ValueIter<'a, T> {
 impl<'a, T: 'a> DoubleEndedIterator for ValueIter<'a, T> {
     fn next_back(&mut self) -> Option<Self::Item> {
         use self::Cursor::*;
-
 
         match self.back {
             Some(Head) => {
@@ -2666,8 +2663,8 @@ impl<'a, T> OccupiedEntry<'a, T> {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryInto;
-    /// #
+    /// use std::convert::TryInto;
+    ///
     /// use rtsp::header::{Entry, HeaderMap};
     /// use rtsp::HeaderName::Allow;
     ///
@@ -2695,8 +2692,8 @@ impl<'a, T> OccupiedEntry<'a, T> {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryInto;
-    /// #
+    /// use std::convert::TryInto;
+    ///
     /// use rtsp::header::{Entry, HeaderMap};
     /// use rtsp::HeaderName::Allow;
     ///
@@ -2779,8 +2776,8 @@ impl<'a, T> OccupiedEntry<'a, T> {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryInto;
-    /// #
+    /// use std::convert::TryInto;
+    ///
     /// use rtsp::header::{Entry, HeaderMap};
     /// use rtsp::HeaderName::Allow;
     ///
@@ -2808,8 +2805,8 @@ impl<'a, T> OccupiedEntry<'a, T> {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryInto;
-    /// #
+    /// use std::convert::TryInto;
+    ///
     /// use rtsp::header::{Entry, HeaderMap};
     /// use rtsp::HeaderName::Allow;
     ///
@@ -2840,8 +2837,8 @@ impl<'a, T> OccupiedEntry<'a, T> {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryInto;
-    /// #
+    /// use std::convert::TryInto;
+    ///
     /// use rtsp::header::{Entry, HeaderMap};
     /// use rtsp::HeaderName::Allow;
     ///
@@ -2873,8 +2870,8 @@ impl<'a, T> OccupiedEntry<'a, T> {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryInto;
-    /// #
+    /// use std::convert::TryInto;
+    ///
     /// use rtsp::header::{Entry, HeaderMap};
     /// use rtsp::HeaderName::Allow;
     ///
@@ -2902,8 +2899,8 @@ impl<'a, T> OccupiedEntry<'a, T> {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryInto;
-    /// #
+    /// use std::convert::TryInto;
+    ///
     /// use rtsp::header::{Entry, HeaderMap};
     /// use rtsp::HeaderName::Allow;
     ///
@@ -2952,8 +2949,8 @@ impl<'a, T> OccupiedEntry<'a, T> {
     /// ```
     /// # #![feature(try_from)]
     /// #
-    /// # use std::convert::TryInto;
-    /// #
+    /// use std::convert::TryInto;
+    ///
     /// use rtsp::header::{Entry, HeaderMap};
     /// use rtsp::HeaderName::Allow;
     ///
@@ -3190,7 +3187,6 @@ where
  * ===== impl IntoHeaderName / AsHeaderName =====
  *
  */
-
 
 mod into_header_name {
     use std::convert::TryFrom;
