@@ -418,12 +418,16 @@ impl Builder<TypedHeaderMap> {
     /// # Examples
     ///
     /// ```
+    /// # #![feature(try_from)]
+    /// #
+    /// use std::convert::TryFrom;
+    ///
     /// use rtsp::*;
     /// use rtsp::header::types::*;
     ///
     /// let response = Response::typed_builder()
     ///     .status_code(StatusCode::OK)
-    ///     .header(ContentLength::from(5))
+    ///     .header(ContentLength::try_from(5).unwrap())
     ///     .build(())
     ///     .unwrap();
     /// ```

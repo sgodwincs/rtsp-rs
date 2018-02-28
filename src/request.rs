@@ -531,13 +531,17 @@ impl Builder<TypedHeaderMap> {
     /// # Examples
     ///
     /// ```
+    /// # #![feature(try_from)]
+    /// #
+    /// use std::convert::TryFrom;
+    ///
     /// use rtsp::*;
     /// use rtsp::header::types::*;
     ///
     /// let request = Request::typed_builder()
     ///     .method(Method::Play)
     ///     .uri("rtsp://server.com")
-    ///     .header(ContentLength::from(5))
+    ///     .header(ContentLength::try_from(5).unwrap())
     ///     .build(())
     ///     .unwrap();
     /// ```

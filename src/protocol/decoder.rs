@@ -360,7 +360,7 @@ impl RequestDecoder {
         RequestDecoder {
             body: None,
             builder: RequestBuilder::new(),
-            content_length: ContentLength::from(0),
+            content_length: ContentLength::default(),
             state: ParseState::InfoLine,
         }
     }
@@ -666,7 +666,7 @@ impl RequestDecoder {
     pub fn reset(&mut self) {
         self.body = None;
         self.builder = RequestBuilder::new();
-        self.content_length = ContentLength::from(0);
+        self.content_length = ContentLength::default();
         self.state = ParseState::InfoLine;
     }
 }
@@ -799,7 +799,7 @@ impl ResponseDecoder {
         ResponseDecoder {
             body: None,
             builder: ResponseBuilder::new(),
-            content_length: ContentLength::from(0),
+            content_length: ContentLength::default(),
             state: ParseState::InfoLine,
         }
     }
@@ -1095,7 +1095,7 @@ impl ResponseDecoder {
     pub fn reset(&mut self) {
         self.body = None;
         self.builder = ResponseBuilder::new();
-        self.content_length = ContentLength::from(0);
+        self.content_length = ContentLength::default();
         self.state = ParseState::InfoLine;
     }
 }
@@ -1203,7 +1203,7 @@ fn get_content_length(header_entry: Entry<HeaderValue>) -> Result<ContentLength,
             let header_values = &entry.iter().cloned().collect::<Vec<HeaderValue>>();
             ContentLength::try_from_header_raw(header_values).map_err(|_| ())
         },
-        Entry::Vacant(_) => Ok(ContentLength::from(0)),
+        Entry::Vacant(_) => Ok(ContentLength::default()),
     }
 }
 
