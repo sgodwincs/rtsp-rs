@@ -187,11 +187,6 @@ impl TypedHeader for Session {
         }
 
         let parts = header[0].as_str().splitn(2, ';').collect::<Vec<&str>>();
-
-        if parts.len() > 2 {
-            return Err(InvalidTypedHeader);
-        }
-
         let id = SessionID::try_from(trim_whitespace(parts[0])).map_err(|_| InvalidTypedHeader)?;
 
         if parts.len() == 1 {
