@@ -4,7 +4,7 @@ use std::ops::Deref;
 use header::{HeaderName, HeaderValue, InvalidTypedHeader, TypedHeader};
 use syntax::trim_whitespace_left;
 
-pub const MAX_CSEQ_LENGTH: u32 = 999_999_999;
+pub const MAX_CSEQ: u32 = 999_999_999;
 
 /// The `CSeq` typed header as described by
 /// [RFC7826](https://tools.ietf.org/html/rfc7826#section-18.20).
@@ -95,7 +95,7 @@ impl TryFrom<u32> for CSeq {
     type Error = InvalidTypedHeader;
 
     fn try_from(value: u32) -> Result<Self, Self::Error> {
-        if value > MAX_CSEQ_LENGTH {
+        if value > MAX_CSEQ {
             Err(InvalidTypedHeader)
         } else {
             Ok(CSeq(value))
