@@ -116,7 +116,7 @@ pub struct IntoIter<T> {
 /// Each header name is yielded only once, even if it has more than one associated value.
 #[derive(Debug)]
 pub struct Keys<'a, T: 'a> {
-    inner: Iter<'a, T>,
+    inner: ::std::slice::Iter<'a, Bucket<T>>,
 }
 
 /// `HeaderMap` value iterator.
@@ -911,7 +911,9 @@ impl<T> HeaderMap<T> {
     /// }
     /// ```
     pub fn keys(&self) -> Keys<T> {
-        Keys { inner: self.iter() }
+        Keys {
+            inner: self.entries.iter(),
+        }
     }
 
     /// An iterator visiting all values.
@@ -2100,7 +2102,7 @@ impl<'a, T> Iterator for Keys<'a, T> {
     type Item = &'a HeaderName;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.inner.next().map(|(n, _)| n)
+        self.inner.next().map(|b| &b.key)
     }
 }
 
@@ -3374,22 +3376,38 @@ mod as_header_name {
     impl<'a> AsHeaderName for &'a String {}
 }
 
-#[test]
-fn test_bounds() {
-    fn check_bounds<T: Send + Send>() {}
+#[cfg(test)]
+mod tests {
+    use std::convert::TryInto;
 
-    check_bounds::<HeaderMap<()>>();
-    check_bounds::<Iter<'static, ()>>();
-    check_bounds::<IterMut<'static, ()>>();
-    check_bounds::<Keys<'static, ()>>();
-    check_bounds::<Values<'static, ()>>();
-    check_bounds::<ValuesMut<'static, ()>>();
-    check_bounds::<Drain<'static, ()>>();
-    check_bounds::<GetAll<'static, ()>>();
-    check_bounds::<Entry<'static, ()>>();
-    check_bounds::<VacantEntry<'static, ()>>();
-    check_bounds::<OccupiedEntry<'static, ()>>();
-    check_bounds::<ValueIter<'static, ()>>();
-    check_bounds::<ValueIterMut<'static, ()>>();
-    check_bounds::<ValueDrain<'static, ()>>();
+    use super::*;
+    use header::HeaderName::{Allow, ContentLength};
+
+    #[test]
+    fn test_skip_duplicates_during_key_iteration() {
+        let mut map = HeaderMap::new();
+        map.append(Allow, "DESCRIBE".try_into().unwrap());
+        map.append(ContentLength, "123".try_into().unwrap());
+        assert_eq!(map.keys().count(), map.keys_len());
+    }
+
+    #[test]
+    fn test_bounds() {
+        fn check_bounds<T: Send + Send>() {}
+
+        check_bounds::<HeaderMap<()>>();
+        check_bounds::<Iter<'static, ()>>();
+        check_bounds::<IterMut<'static, ()>>();
+        check_bounds::<Keys<'static, ()>>();
+        check_bounds::<Values<'static, ()>>();
+        check_bounds::<ValuesMut<'static, ()>>();
+        check_bounds::<Drain<'static, ()>>();
+        check_bounds::<GetAll<'static, ()>>();
+        check_bounds::<Entry<'static, ()>>();
+        check_bounds::<VacantEntry<'static, ()>>();
+        check_bounds::<OccupiedEntry<'static, ()>>();
+        check_bounds::<ValueIter<'static, ()>>();
+        check_bounds::<ValueIterMut<'static, ()>>();
+        check_bounds::<ValueDrain<'static, ()>>();
+    }
 }
