@@ -14,7 +14,7 @@ pub const MAX_CONTENT_LENGTH: u64 = 9_999_999_999_999_999_999;
 /// type `usize`, this cannot be guaranteed on all platforms.
 ///
 /// The default value for this header is 0.
-#[derive(Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct ContentLength(usize);
 
 impl TypedHeader for ContentLength {
