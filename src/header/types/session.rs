@@ -3,8 +3,8 @@ use std::convert::TryFrom;
 use std::time::Duration;
 
 use header::{HeaderName, HeaderValue, InvalidTypedHeader, TypedHeader};
-use session::{ExpiredSession, InvalidSessionID, SessionID, DEFAULT_TIMEOUT, MAX_TIMEOUT};
 use session::Session as SessionData;
+use session::{ExpiredSession, InvalidSessionID, SessionID, DEFAULT_TIMEOUT, MAX_TIMEOUT};
 use syntax::trim_whitespace;
 
 /// The `Session` typed header as described by

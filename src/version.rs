@@ -20,8 +20,8 @@
 //! ```
 //!
 
-use std::{error, fmt};
 use std::convert::TryFrom;
+use std::{error, fmt};
 
 /// Represents a version of the RTSP spec.
 #[derive(Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd)]

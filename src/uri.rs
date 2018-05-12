@@ -6,9 +6,9 @@
 //! of valid URIs that are allowed in the request line, specifically, the URIs must contain an
 //! authority part.
 
-use std::{fmt, str};
 use std::convert::TryFrom;
 use std::error::Error;
+use std::{fmt, str};
 use url::Url;
 
 /// The main type of this module. Represents either a valid URI or a URI of the form `'*'`.

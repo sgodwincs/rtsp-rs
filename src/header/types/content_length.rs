@@ -40,9 +40,7 @@ impl TypedHeader for ContentLength {
     /// assert_eq!(typed_header.to_header_raw(), raw_header);
     /// ```
     fn to_header_raw(&self) -> Vec<HeaderValue> {
-        vec![
-            unsafe { HeaderValue::from_str_unchecked(self.0.to_string().as_str()) },
-        ]
+        vec![unsafe { HeaderValue::from_str_unchecked(self.0.to_string().as_str()) }]
     }
 
     /// Converts the raw header values to the `ContentLength` header type. Based on the syntax

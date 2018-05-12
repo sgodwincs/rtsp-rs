@@ -4,9 +4,9 @@
 //! itself. Typically, you will import the `rtsp::ReasonPhrase` type rather than reaching into this
 //! module itself.
 
-use std::{fmt, str};
 use std::convert::TryFrom;
 use std::error::Error;
+use std::{fmt, str};
 
 /// A wrapper type used to avoid users creating invalid reason phrases for the `Response` type.
 #[derive(Clone, Eq, Hash, PartialEq)]

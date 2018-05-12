@@ -1,9 +1,9 @@
 //!
 
 use chrono::{offset, DateTime, Duration, Utc};
-use std::{fmt, str};
 use std::convert::TryFrom;
 use std::error::Error;
+use std::{fmt, str};
 
 pub const DEFAULT_TIMEOUT: u64 = 60;
 pub const MAX_TIMEOUT: u64 = 9_999_999_999_999_999_999;
