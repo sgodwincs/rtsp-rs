@@ -361,15 +361,16 @@ fn create_request_handler_task(
                     Err(_) => {
                         // Either no `CSeq` header was found, or parsing of the header failed.
                         //
-                        // To handle this, we send a `400 Bad Request`, but we do not specify a `CSeq`
-                        // in the response. Unfortunately, it is not likely the client will even do
-                        // anything with this response, since it too does not have a `CSeq`. For
-                        // example, if a client using this implementation managed to send a request with
-                        // no `CSeq` and received a response with no `CSeq`, it would just ignore it.
+                        // To handle this, we send a `400 Bad Request`, but we do not specify a
+                        // `CSeq` in the response. Unfortunately, it is not likely the client will
+                        // even do anything with this response, since it too does not have a `CSeq`.
+                        // For example, if a client using this implementation managed to send a
+                        // request with no `CSeq` and received a response with no `CSeq`, it would
+                        // just ignore it.
                         //
-                        // Also, this message is immediately queued and may not necessarily be the order
-                        // in which a client would expect the response, but there is no avoiding this.
-                        // `CSeq` must be given in order to demultiplex.
+                        // Also, this message is immediately queued and may not necessarily be the
+                        // order in which a client would expect the response, but there is no
+                        // avoiding this. `CSeq` must be given in order to demultiplex.
 
                         if lock_state(&state).write_state().responses_allowed() {
                             let response = Response::builder()
@@ -384,7 +385,7 @@ fn create_request_handler_task(
 
                 // If the receiver for outgoing messages has been dropped, then we can no longer
                 // send any messages. So forwarding ordered requests from this task is no longer
-                // meaningfully, since they cannot be responded to.
+                // meaningful, since they cannot be responded to.
 
                 if tx_outgoing_message.is_none() {
                     return Err(());
