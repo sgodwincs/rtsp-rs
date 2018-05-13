@@ -8,7 +8,7 @@ use tokio_executor::{DefaultExecutor, Executor, SpawnError};
 use tokio_io::{AsyncRead, AsyncWrite};
 use tokio_timer::Delay;
 
-use protocol::{Codec, CodecEvent, Error, Message, MessageResult};
+use protocol::{Codec, CodecEvent, Error, InvalidMessage, Message, MessageResult};
 use request::Request;
 use response::Response;
 use status::StatusCode;
@@ -279,6 +279,31 @@ fn create_decoding_timer_task(
     )
 }
 
+/// Constructs a task that splits incoming messages into either request or response streams.
+///
+/// Currently, the given request and response sinks are bounded channels, and this task will block
+/// on sending any requests or responses to those sinks. Because of this, it is necessary to ensure
+/// that the corresponding receivers are being read frequently enough to avoid blocking when the
+/// channel is full.
+///
+/// This task will end in one of three situations:
+///
+/// * The incoming message stream has ended.
+/// * There was an irrecoverable error during message decoding that produced an error in the message
+///   stream.
+/// * A protocol state change was detected in which reading is no longer necessary or possible.
+///
+/// # Arguments
+///
+/// * `state` - A reference to the protocol state.
+/// * `rx_state_change` - A stream of [`ReadWriteStatePair`] protocol state changes.
+/// * `stream` - The stream of incoming messages.
+/// * `tx_incoming_request` - The sink where requests extracted from the message stream will be
+///   sent.
+/// * `tx_incoming_response` - The sink where responses extracted from the message stream will be
+///   sent.
+/// * `tx_outgoing_message` - A sink where messages to be sent to the connected host are sent. This
+///   is needed in order to send `400 Bad Request` responses in response to invalid messages.
 fn create_split_messages_task<S>(
     state: Arc<Mutex<ProtocolState>>,
     rx_state_change: UnboundedReceiver<ReadWriteStatePair>,
@@ -382,8 +407,8 @@ where
                                             ),
                                         );
                                     }
-                                    Err(_) => {
-                                        // We received a message that was invalid, but it still was
+                                    Err(InvalidMessage::InvalidRequest(_)) => {
+                                        // We received a request that was invalid, but it still was
                                         // able to be decoded. We send a `400 Bad Request` to deal
                                         // with this. This is one situation, however, in which the
                                         // order that requests are handled is not based on `CSeq`.
@@ -407,6 +432,10 @@ where
                                                 Message::Response(response),
                                             );
                                         }
+                                    }
+                                    Err(InvalidMessage::InvalidResponse(_)) => {
+                                        // Received an invalid response, but the only appropriate
+                                        // action here is to just ignore it.
                                     }
                                 }
                             }
