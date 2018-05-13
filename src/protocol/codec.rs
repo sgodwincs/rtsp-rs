@@ -1,5 +1,5 @@
 use bytes::BytesMut;
-use futures::{Future, Sink};
+use futures::sync::mpsc::UnboundedSender;
 use std::convert::TryFrom;
 use std::error::Error as ErrorTrait;
 use std::{fmt, io};
@@ -30,22 +30,19 @@ pub type ResponseResult = Result<Response<BytesMut>, RecoverableInvalidResponse>
 /// servers and clients can both send requests and receive responses, this codec is shared by the
 /// two (as well as proxies).
 #[derive(Debug)]
-pub struct Codec<EventSink> {
+pub struct Codec {
     /// The request decoder that maintains partial parsing state.
     request_decoder: RequestDecoder,
 
     /// The response decoder that maintains partial parsing state.
     response_decoder: ResponseDecoder,
 
-    /// An event sink that is sent [CodecEvent]s. For example, whenever decoding startings, an event
+    /// An event sink that is sent [CodecEvent]s. For example, whenever decoding starts, an event
     /// will be sent for that.
-    tx_event: Option<EventSink>,
+    tx_event: Option<UnboundedSender<CodecEvent>>,
 }
 
-impl<EventSink> Codec<EventSink>
-where
-    EventSink: Sink<SinkItem = CodecEvent, SinkError = ()>,
-{
+impl Codec {
     /// Constructs a new codec without an event sink.
     pub fn new() -> Self {
         Codec::default()
@@ -55,28 +52,27 @@ where
     ///
     /// # Arguments
     ///
-    /// * `event_sink` - The sink that will be sent any [`CodecEvent`] that occur.
-    pub fn with_events(event_sink: EventSink) -> Self {
+    /// * `tx_event` - The sink that will be sent any [`CodecEvent`] that occur.
+    pub fn with_events(tx_event: UnboundedSender<CodecEvent>) -> Self {
         Codec {
             request_decoder: RequestDecoder::new(),
             response_decoder: ResponseDecoder::new(),
-            tx_event: Some(event_sink),
+            tx_event: Some(tx_event),
         }
     }
 
     /// Sends a [`CodecEvent`] through the internal event sink.
     ///
-    /// This is a blocking operation, so the type of sink used should be fast (e.g. an unbounded
-    /// channel). If an error is encountered while sending the codec event, then no more events will
-    /// be sent for the duration of this codec's lifetime.
+    /// If an error is encountered while sending the codec event, then no more events will be sent
+    /// for the duration of this codec's lifetime.
     ///
     /// # Arguments
     ///
     /// * `event` - The event to send through the sink.
     fn send_codec_event(&mut self, event: CodecEvent) {
-        if let Some(tx_event) = self.tx_event.take() {
-            self.tx_event = tx_event.send(event).wait().ok();
-        }
+        self.tx_event = self.tx_event
+            .take()
+            .and_then(|tx_event| tx_event.unbounded_send(event).ok().map(|_| tx_event));
     }
 
     /// Decodes a request.
@@ -186,10 +182,7 @@ where
     }
 }
 
-impl<EventSink> Decoder for Codec<EventSink>
-where
-    EventSink: Sink<SinkItem = CodecEvent, SinkError = ()>,
-{
+impl Decoder for Codec {
     type Item = MessageResult;
     type Error = Error;
 
@@ -271,10 +264,7 @@ where
     }
 }
 
-impl<EventSink> Default for Codec<EventSink>
-where
-    EventSink: Sink<SinkItem = CodecEvent, SinkError = ()>,
-{
+impl Default for Codec {
     fn default() -> Self {
         Codec {
             request_decoder: RequestDecoder::new(),
@@ -284,10 +274,7 @@ where
     }
 }
 
-impl<EventSink> Encoder for Codec<EventSink>
-where
-    EventSink: Sink<SinkItem = CodecEvent, SinkError = ()>,
-{
+impl Encoder for Codec {
     type Item = Message;
     type Error = Error;
 
@@ -606,5 +593,110 @@ impl TryFrom<InvalidResponse> for RecoverableInvalidResponse {
             InvalidResponse::InvalidStatusCode => Ok(InvalidStatusCode),
             _ => Err(()),
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use futures::sync::mpsc::unbounded;
+    use futures::{Future, Stream};
+    use tokio::runtime::current_thread::Runtime;
+
+    use super::*;
+    use header::HeaderName;
+
+    #[test]
+    fn test_codec_decoding() {
+        let mut codec = Codec::new();
+        let mut buffer = BytesMut::from(
+            "SETUP * RTSP/2.0\r\n\
+             Content-Length: 4\r\n\
+             \r\n\
+             Body",
+        );
+        let expected_request = Request::builder()
+            .method("SETUP")
+            .uri("*")
+            .header(HeaderName::ContentLength, " 4")
+            .build(BytesMut::from("Body".as_bytes()))
+            .unwrap();
+
+        assert_eq!(
+            codec.decode(&mut buffer).unwrap().unwrap().unwrap(),
+            Message::Request(expected_request)
+        );
+
+        let mut buffer = BytesMut::from("RTSP/2.0 200 OK\r\n");
+        assert_eq!(codec.decode(&mut buffer).unwrap(), None);
+
+        let mut buffer = BytesMut::from("\r\n\r\n");
+        assert_eq!(
+            codec.decode(&mut buffer).unwrap().unwrap().unwrap(),
+            Message::Response(Response::builder().build("".into()).unwrap())
+        );
+    }
+
+    #[test]
+    fn test_codec_encoding() {
+        let mut codec = Codec::new();
+        let mut buffer = BytesMut::new();
+        let request = Request::builder()
+            .method("SETUP")
+            .uri("*")
+            .header(HeaderName::ContentLength, " 4")
+            .build(BytesMut::from("Body".as_bytes()))
+            .unwrap();
+        let expected_buffer = BytesMut::from(
+            "SETUP * RTSP/2.0\r\n\
+             Content-Length: 4\r\n\
+             \r\n\
+             Body",
+        );
+
+        codec
+            .encode(Message::Request(request), &mut buffer)
+            .unwrap();
+        assert_eq!(buffer, expected_buffer);
+    }
+
+    #[test]
+    fn test_codec_events() {
+        let (tx_event, rx_event) = unbounded();
+
+        {
+            let mut codec = Codec::with_events(tx_event);
+            let mut buffer = BytesMut::new();
+            let response = Response::builder().build("".into()).unwrap();
+            codec
+                .encode(Message::Response(response), &mut buffer)
+                .unwrap();
+
+            let mut buffer = BytesMut::from("SETUP * RTSP/2.0\r\n");
+            assert!(codec.decode(&mut buffer).is_ok());
+
+            let mut buffer = BytesMut::new();
+            let response = Response::builder().build("".into()).unwrap();
+            codec
+                .encode(Message::Response(response), &mut buffer)
+                .unwrap();
+
+            let mut buffer = BytesMut::from("\r\n\r\n");
+            assert!(codec.decode(&mut buffer).is_ok());
+        }
+
+        let mut runtime = Runtime::new().unwrap();
+        let events = runtime.block_on(rx_event.collect()).unwrap();
+
+        assert_eq!(
+            events,
+            vec![
+                CodecEvent::EncodingStarted,
+                CodecEvent::EncodingEnded,
+                CodecEvent::DecodingStarted,
+                CodecEvent::EncodingStarted,
+                CodecEvent::EncodingEnded,
+                CodecEvent::DecodingEnded,
+            ]
+        );
     }
 }
