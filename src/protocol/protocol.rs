@@ -306,7 +306,7 @@ where
                         locked_state.update_read_state(new_read_state);
                     }
 
-                    if let Some(new_write_state) = error_state.0 {
+                    if let Some(new_write_state) = error_state.1 {
                         locked_state.update_write_state(new_write_state);
                     }
 
@@ -331,8 +331,8 @@ where
     loop_fn(
         (
             state,
-            rx_state_change,
-            stream,
+            rx_state_change.into_future(),
+            stream.into_future(),
             Some(tx_incoming_request),
             Some(tx_incoming_response),
             Some(tx_outgoing_message),
@@ -345,135 +345,129 @@ where
             mut tx_incoming_response,
             mut tx_outgoing_message,
         )| {
-            stream
-                .into_future()
-                .select2(rx_state_change.into_future())
-                .then(move |result| {
-                    Ok(match result {
-                        Ok(Either::A(((item, stream), rx_state_change))) => {
-                            match item {
-                                Some(result) => {
-                                    match result {
-                                        Ok(Message::Request(request)) => {
-                                            // Forward the request to the request stream. If an
-                                            // error occurs (implying that the request stream has
-                                            // been dropped), then we can only read responses from
-                                            // now on. We do not change the write state, since even
-                                            // though no new responses will be made, there still may
-                                            // be responses pending from previous requests.
+            stream.select2(rx_state_change).then(move |result| {
+                Ok(match result {
+                    Ok(Either::A(((item, stream), rx_state_change))) => {
+                        match item {
+                            Some(result) => {
+                                match result {
+                                    Ok(Message::Request(request)) => {
+                                        // Forward the request to the request stream. If an
+                                        // error occurs (implying that the request stream has
+                                        // been dropped), then we can only read responses from
+                                        // now on. We do not change the write state, since even
+                                        // though no new responses will be made, there still may
+                                        // be responses pending from previous requests.
 
-                                            tx_incoming_request = forward_message(
-                                                tx_incoming_request,
-                                                request,
-                                                &state,
-                                                (Some(ReadWriteState::Response), None),
-                                            );
-                                        }
-                                        Ok(Message::Response(response)) => {
-                                            // Forward the response to the response stream. If an
-                                            // error occurs (implying that the response stream has
-                                            // been dropped), then we can only read requests and
-                                            // send responses.
+                                        tx_incoming_request = forward_message(
+                                            tx_incoming_request,
+                                            request,
+                                            &state,
+                                            (Some(ReadWriteState::Response), None),
+                                        );
+                                    }
+                                    Ok(Message::Response(response)) => {
+                                        // Forward the response to the response stream. If an
+                                        // error occurs (implying that the response stream has
+                                        // been dropped), then we can only read requests and
+                                        // send responses.
 
-                                            tx_incoming_response = forward_message(
-                                                tx_incoming_response,
-                                                response,
-                                                state,
-                                                (
-                                                    Some(ReadWriteState::Request),
-                                                    Some(ReadWriteState::Response),
-                                                ),
-                                            );
-                                        }
-                                        Err(_) => {
-                                            // We received a message that was invalid, but it still
-                                            // was able to be decoded. We send a `400 Bad Request`
-                                            // to deal with this. This is one situation, however, in
-                                            // which the order that requests are handled is not
-                                            // based on `CSeq`. Even if the message had a valid
-                                            // `CSeq` header, it will not be inspected, since at
-                                            // least one part of the message was syntactically
-                                            // incorrect. As a result, the receiving agent has to
-                                            // manage mapping a response with no `CSeq` to its
-                                            // respective request. This is unlikely, and in general
-                                            // not possible if proxies are involved, since responses
-                                            // can be received out of order.
+                                        tx_incoming_response = forward_message(
+                                            tx_incoming_response,
+                                            response,
+                                            &state,
+                                            (
+                                                Some(ReadWriteState::Request),
+                                                Some(ReadWriteState::Response),
+                                            ),
+                                        );
+                                    }
+                                    Err(_) => {
+                                        // We received a message that was invalid, but it still
+                                        // was able to be decoded. We send a `400 Bad Request`
+                                        // to deal with this. This is one situation, however, in
+                                        // which the order that requests are handled is not
+                                        // based on `CSeq`. Even if the message had a valid
+                                        // `CSeq` header, it will not be inspected, since at
+                                        // least one part of the message was syntactically
+                                        // incorrect. As a result, the receiving agent has to
+                                        // manage mapping a response with no `CSeq` to its
+                                        // respective request. This is unlikely, and in general
+                                        // not possible if proxies are involved, since responses
+                                        // can be received out of order.
 
-                                            if lock_state(&state).write_state().responses_allowed()
-                                            {
-                                                let response = Response::builder()
-                                                    .status_code(StatusCode::BadRequest)
-                                                    .build(BytesMut::new())
-                                                    .expect("bad request response should not be invalid");
-                                                tx_outgoing_message = try_send_message(
-                                                    tx_outgoing_message,
-                                                    Message::Response(response),
+                                        if lock_state(&state).write_state().responses_allowed() {
+                                            let response = Response::builder()
+                                                .status_code(StatusCode::BadRequest)
+                                                .build(BytesMut::new())
+                                                .expect(
+                                                    "bad request response should not be invalid",
                                                 );
-                                            }
+                                            tx_outgoing_message = try_send_message(
+                                                tx_outgoing_message,
+                                                Message::Response(response),
+                                            );
                                         }
                                     }
                                 }
-                                None => {
-                                    // The incoming message stream has ended. We can only write
-                                    // responses from this point forward.
-
-                                    lock_state(&state).update_state(
-                                        ReadWriteState::None,
-                                        ReadWriteState::Response,
-                                    );
-                                    return Loop::Break(());
-                                }
                             }
+                            None => {
+                                // The incoming message stream has ended. We can only write
+                                // responses from this point forward.
 
-                            Loop::Continue((
-                                state,
-                                rx_state_change,
-                                stream,
-                                tx_incoming_request,
-                                tx_incoming_response,
-                                tx_outgoing_message,
-                            ))
-                        }
-                        Ok(Either::B(((new_state, rx_state_change), stream))) => {
-                            match new_state.expect("state change receiver should not end") {
-                                // We can no longer read anything
-                                (ReadWriteState::None, _) | (ReadWriteState::Error(_), _) => {
-                                    return Loop::Break(())
-                                }
-                                // We can no longer read responses
-                                (ReadWriteState::Request,) => tx_incoming_response = None,
-                                // We can no longer read requests
-                                (ReadWriteState::Response, _)
-                                | (_, ReadWriteState::None)
-                                | (_, ReadWriteState::Error(_))
-                                | (_, ReadWriteState::Response) => tx_incoming_request = None,
-                                _ => (),
+                                lock_state(&state)
+                                    .update_state(ReadWriteState::None, ReadWriteState::Response);
+                                return Ok(Loop::Break(()));
                             }
-
-                            Loop::Continue((
-                                state,
-                                rx_state_change,
-                                stream,
-                                tx_incoming_request,
-                                tx_incoming_response,
-                                tx_outgoing_message,
-                            ))
                         }
-                        Err(Either::A(((error, _), _))) => {
-                            // There was an error reading from the message stream that was
-                            // irrecoverable. We can no longer read anything, but we may be able to
-                            // still write responses. Requests cannot be written, since we would not be
-                            // able to read their responses.
 
-                            lock_state(&state).update_state(
-                                ReadWriteState::Error(error),
-                                ReadWriteState::Response,
-                            );
-                            Loop::Break(())
+                        Loop::Continue((
+                            state,
+                            rx_state_change,
+                            stream.into_future(),
+                            tx_incoming_request,
+                            tx_incoming_response,
+                            tx_outgoing_message,
+                        ))
+                    }
+                    Ok(Either::B(((new_state, rx_state_change), stream))) => {
+                        match new_state.expect("state change receiver should not end") {
+                            // We can no longer read anything
+                            (ReadWriteState::None, _) | (ReadWriteState::Error(_), _) => {
+                                return Ok(Loop::Break(()));
+                            }
+                            // We can no longer read responses
+                            (ReadWriteState::Request, _) => tx_incoming_response = None,
+                            // We can no longer read requests
+                            (ReadWriteState::Response, _)
+                            | (_, ReadWriteState::None)
+                            | (_, ReadWriteState::Error(_))
+                            | (_, ReadWriteState::Response) => tx_incoming_request = None,
+                            _ => (),
                         }
-                        Err(Either::B(_)) => panic!("state change receiver should not error"),
-                    })
+
+                        Loop::Continue((
+                            state,
+                            rx_state_change.into_future(),
+                            stream,
+                            tx_incoming_request,
+                            tx_incoming_response,
+                            tx_outgoing_message,
+                        ))
+                    }
+                    Err(Either::A(((error, _), _))) => {
+                        // There was an error reading from the message stream that was
+                        // irrecoverable. We can no longer read anything, but we may be able to
+                        // still write responses. Requests cannot be written, since we would not be
+                        // able to read their responses.
+
+                        lock_state(&state)
+                            .update_state(ReadWriteState::Error(error), ReadWriteState::Response);
+                        Loop::Break(())
+                    }
+                    Err(Either::B(_)) => panic!("state change receiver should not error"),
                 })
+            })
         },
     )
 }
