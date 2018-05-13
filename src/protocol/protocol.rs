@@ -352,12 +352,12 @@ where
                             Some(result) => {
                                 match result {
                                     Ok(Message::Request(request)) => {
-                                        // Forward the request to the request stream. If an
-                                        // error occurs (implying that the request stream has
-                                        // been dropped), then we can only read responses from
-                                        // now on. We do not change the write state, since even
-                                        // though no new responses will be made, there still may
-                                        // be responses pending from previous requests.
+                                        // Forward the request to the request stream. If an error
+                                        // occurs (implying that the request stream has been
+                                        // dropped), then we can only read responses from now on. We
+                                        // do not change the write state, since even though no new
+                                        // responses will be made, there still may be responses
+                                        // pending from previous requests.
 
                                         tx_incoming_request = forward_message(
                                             tx_incoming_request,
@@ -367,10 +367,10 @@ where
                                         );
                                     }
                                     Ok(Message::Response(response)) => {
-                                        // Forward the response to the response stream. If an
-                                        // error occurs (implying that the response stream has
-                                        // been dropped), then we can only read requests and
-                                        // send responses.
+                                        // Forward the response to the response stream. If an error
+                                        // occurs (implying that the response stream has been
+                                        // dropped), then we can only read requests and send
+                                        // responses.
 
                                         tx_incoming_response = forward_message(
                                             tx_incoming_response,
@@ -383,18 +383,17 @@ where
                                         );
                                     }
                                     Err(_) => {
-                                        // We received a message that was invalid, but it still
-                                        // was able to be decoded. We send a `400 Bad Request`
-                                        // to deal with this. This is one situation, however, in
-                                        // which the order that requests are handled is not
-                                        // based on `CSeq`. Even if the message had a valid
-                                        // `CSeq` header, it will not be inspected, since at
-                                        // least one part of the message was syntactically
-                                        // incorrect. As a result, the receiving agent has to
-                                        // manage mapping a response with no `CSeq` to its
-                                        // respective request. This is unlikely, and in general
-                                        // not possible if proxies are involved, since responses
-                                        // can be received out of order.
+                                        // We received a message that was invalid, but it still was
+                                        // able to be decoded. We send a `400 Bad Request` to deal
+                                        // with this. This is one situation, however, in which the
+                                        // order that requests are handled is not based on `CSeq`.
+                                        // Even if the message had a valid `CSeq` header, it will
+                                        // not be inspected, since at least one part of the message
+                                        // was syntactically incorrect. As a result, the receiving
+                                        // agent has to manage mapping a response with no `CSeq` to
+                                        // its respective request. This is unlikely, and in general
+                                        // not possible if proxies are involved, since responses can
+                                        // be received out of order.
 
                                         if lock_state(&state).write_state().responses_allowed() {
                                             let response = Response::builder()
