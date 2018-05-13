@@ -67,12 +67,12 @@
 //! ```
 
 use bytes::BytesMut;
-use std::{error, fmt};
 use std::convert::TryFrom;
 use std::mem::replace;
+use std::{error, fmt};
 
-use header::{Entry, HeaderName, HeaderValue, TypedHeader};
 use header::types::ContentLength;
+use header::{Entry, HeaderName, HeaderValue, TypedHeader};
 use request::{Builder as RequestBuilder, BuilderError as RequestBuilderError, Request};
 use response::{Builder as ResponseBuilder, BuilderError as ResponseBuilderError, Response};
 
