@@ -6,8 +6,10 @@ use std::sync::Arc;
 use std::{fmt, io};
 use tokio_io::codec::{Decoder, Encoder};
 
-use protocol::{encode_request, encode_response, InvalidRequest, InvalidResponse, ParseResult,
-               ParseState, RequestDecoder, ResponseDecoder};
+use protocol::{
+    encode_request, encode_response, InvalidRequest, InvalidResponse, ParseResult, ParseState,
+    RequestDecoder, ResponseDecoder,
+};
 use request::Request;
 use response::Response;
 
@@ -88,16 +90,16 @@ impl Codec {
     ///
     /// # Return Value
     ///
-    /// The return value of this function can be divided into four parts.
+    /// The return value of this function can be divided into four parts:
     ///
     /// * If there was enough data provided to successfully decode a request, then
-    /// `Ok(Some(Ok(`[`Message`]`)))` will be returned.
+    ///   `Ok(Some(Ok(`[`Message`]`)))` will be returned.
     /// * If there was not enough data but no error
-    /// occurred, then `Ok(None)` will be returned indicating that more data is needed.
+    ///   occurred, then `Ok(None)` will be returned indicating that more data is needed.
     /// * If the decoder encountered an error while decoding that was irrecoverable, then
-    /// `Err(`[`Error`]`)` will be returned.
+    ///   `Err(`[`Error`]`)` will be returned.
     /// * If the decoder encountered an error while decoding that was recoverable, then
-    /// `Ok(Some(Err(`[`InvalidMessage`]`)))` will be returned.
+    ///   `Ok(Some(Err(`[`InvalidMessage`]`)))` will be returned.
     fn decode_request(
         &mut self,
         buffer: &mut BytesMut,
@@ -141,16 +143,16 @@ impl Codec {
     ///
     /// # Return Value
     ///
-    /// The return value of this function can be divided into four parts.
+    /// The return value of this function can be divided into four parts:
     ///
     /// * If there was enough data provided to successfully decode a response, then
-    /// `Ok(Some(Ok(`[`Message`]`)))` will be returned.
+    ///   `Ok(Some(Ok(`[`Message`]`)))` will be returned.
     /// * If there was not enough data but no error
-    /// occurred, then `Ok(None)` will be returned indicating that more data is needed.
+    ///   occurred, then `Ok(None)` will be returned indicating that more data is needed.
     /// * If the decoder encountered an error while decoding that was irrecoverable, then
-    /// `Err(`[`Error`]`)` will be returned.
+    ///   `Err(`[`Error`]`)` will be returned.
     /// * If the decoder encountered an error while decoding that was recoverable, then
-    /// `Ok(Some(Err(`[`InvalidMessage`]`)))` will be returned.
+    ///   `Ok(Some(Err(`[`InvalidMessage`]`)))` will be returned.
     fn decode_response(
         &mut self,
         buffer: &mut BytesMut,
@@ -200,16 +202,16 @@ impl Decoder for Codec {
     ///
     /// # Return Value
     ///
-    /// The return value of this function can be divided into four parts.
+    /// The return value of this function can be divided into four parts:
     ///
     /// * If there was enough data provided to successfully decode a message, then
-    /// `Ok(Some(Ok(`[`Message`]`)))` will be returned.
+    ///   `Ok(Some(Ok(`[`Message`]`)))` will be returned.
     /// * If there was not enough data but no error
-    /// occurred, then `Ok(None)` will be returned indicating that more data is needed.
+    ///   occurred, then `Ok(None)` will be returned indicating that more data is needed.
     /// * If the decoder encountered an error that was irrecoverable, then
-    /// `Err(`[`Error`]`)` will be returned.
+    ///   `Err(`[`Error`]`)` will be returned.
     /// * If the decoder encountered an error that was recoverable, then
-    /// `Ok(Some(Err(`[`InvalidMessage`]`)))` will be returned.
+    ///   `Ok(Some(Err(`[`InvalidMessage`]`)))` will be returned.
     fn decode(&mut self, buffer: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         // Need to determine whether we are trying to decode a request or response. If either of the
         // internal decoder states are past their starting states, then we continue off of that.
