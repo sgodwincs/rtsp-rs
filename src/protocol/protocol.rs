@@ -317,6 +317,10 @@ fn create_request_handler_task(
 
                 match CSeq::try_from_header_raw(&header_values) {
                     Ok(cseq) => {
+                        // The initial sequence number is defined by the client's first request. So,
+                        // if we do not currently have a sequence number yet, the one in the request
+                        // will be used.
+
                         let mut request_sequence_number = incoming_sequence_number.unwrap_or(cseq);
 
                         if *(cseq - request_sequence_number) > DEFAULT_REQUESTS_BUFFER_SIZE as u32 {
@@ -348,6 +352,9 @@ fn create_request_handler_task(
                             while let Some(request) =
                                 pending_requests.remove(&request_sequence_number)
                             {
+                                // An error here means that the receiver for the channel has been
+                                // dropped, so we no longer will handle anymore requests.
+
                                 if tx_ordered_incoming_request.unbounded_send(request).is_err() {
                                     return Err(());
                                 }
