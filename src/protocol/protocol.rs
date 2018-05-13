@@ -13,6 +13,8 @@ use request::Request;
 use response::Response;
 use status::StatusCode;
 
+pub const DEFAULT_DECODE_TIMEOUT_DURATION: Duration = Duration::from_secs(10);
+
 #[derive(Debug)]
 pub struct Protocol {
     state: Arc<Mutex<ProtocolState>>,
@@ -264,7 +266,7 @@ fn create_decoding_timer_task(
                         }
                         Either::B(((Some(event), rx_codec_event), timer)) => match event {
                             CodecEvent::DecodingStarted => {
-                                let expire_time = Instant::now() + Duration::from_secs(10);
+                                let expire_time = Instant::now() + DEFAULT_DECODE_TIMEOUT_DURATION;
                                 let timer = Either::B(Delay::new(expire_time));
                                 Loop::Continue((state, rx_codec_event, timer))
                             }
@@ -291,7 +293,10 @@ fn create_decoding_timer_task(
 /// * The incoming message stream has ended.
 /// * There was an irrecoverable error during message decoding that produced an error in the message
 ///   stream.
-/// * A protocol state change was detected in which reading is no longer necessary or possible.
+/// * A protocol state change was detected in which reading is no longer necessary or possible. This
+///   can happen from external causes or from within the function. Specifically, if the request and
+///   response channel receivers are dropped, this will implicitly cause the corresponding state
+///   change thus forcing this task to end.
 ///
 /// # Arguments
 ///
