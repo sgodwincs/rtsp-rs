@@ -1,19 +1,23 @@
 use bytes::BytesMut;
-use futures::future::{empty, loop_fn, Either, Empty, Loop};
+use futures::future::{empty, loop_fn, Either, Loop};
 use futures::prelude::*;
-use futures::sync::mpsc::{channel, unbounded, Sender, UnboundedReceiver, UnboundedSender};
+use futures::sync::mpsc::{unbounded, Receiver, Sender, UnboundedReceiver, UnboundedSender};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 use tokio_executor::{DefaultExecutor, Executor, SpawnError};
 use tokio_io::{AsyncRead, AsyncWrite};
 use tokio_timer::Delay;
 
+use header::types::CSeq;
+use header::{HeaderName, HeaderValue, TypedHeader};
 use protocol::{Codec, CodecEvent, Error, InvalidMessage, Message, MessageResult};
 use request::Request;
 use response::Response;
 use status::StatusCode;
 
 pub const DEFAULT_DECODE_TIMEOUT_DURATION: Duration = Duration::from_secs(10);
+pub const DEFAULT_REQUESTS_BUFFER_SIZE: usize = 10;
 
 #[derive(Debug)]
 pub struct Protocol {
@@ -281,6 +285,124 @@ fn create_decoding_timer_task(
     )
 }
 
+fn create_request_handler_task(
+    state: Arc<Mutex<ProtocolState>>,
+    rx_incoming_request: Receiver<Request<BytesMut>>,
+    tx_ordered_incoming_request: UnboundedSender<Request<BytesMut>>,
+    tx_outgoing_message: UnboundedSender<Message>,
+) -> impl Future<Item = (), Error = ()> {
+    rx_incoming_request
+        .fold(
+            (
+                state,
+                tx_ordered_incoming_request,
+                Some(tx_outgoing_message),
+                None,
+                HashMap::with_capacity(DEFAULT_REQUESTS_BUFFER_SIZE),
+            ),
+            |(
+                state,
+                tx_ordered_incoming_request,
+                mut tx_outgoing_message,
+                mut incoming_sequence_number,
+                mut pending_requests,
+            ),
+             request| {
+                let header_values = request
+                    .headers()
+                    .get_all(HeaderName::CSeq)
+                    .iter()
+                    .cloned()
+                    .collect::<Vec<HeaderValue>>();
+
+                match CSeq::try_from_header_raw(&header_values) {
+                    Ok(cseq) => {
+                        let mut request_sequence_number = incoming_sequence_number.unwrap_or(cseq);
+
+                        if *(cseq - request_sequence_number) > DEFAULT_REQUESTS_BUFFER_SIZE as u32 {
+                            // We received a request with a valid `CSeq` header, but the sequence
+                            // number referenced is too far out from the current sequence number.
+                            //
+                            // This is actually a bit of a break from the specification. The
+                            // specification states that requests must be handled in the order of
+                            // their `CSeq`, but this is not practical here and opens up possible
+                            // resource exhaustion attacks. For example, the protocol will only
+                            // process the next expected `CSeq` to abide by the specification. All
+                            // other requests will simply be buffered until the next one with the
+                            // next `CSeq` has arrived. But the range of possible `CSeq`s is way too
+                            // large to buffer per agent, so we only buffer a small amount.
+
+                            if lock_state(&state).write_state().responses_allowed() {
+                                let response = Response::builder()
+                                    .status_code(StatusCode::ServiceUnavailable)
+                                    .build(BytesMut::new())
+                                    .expect("service unavailable response should not be invalid");
+                                tx_outgoing_message = try_send_message(
+                                    tx_outgoing_message,
+                                    Message::Response(response),
+                                );
+                            }
+                        } else {
+                            pending_requests.insert(cseq, request);
+
+                            while let Some(request) =
+                                pending_requests.remove(&request_sequence_number)
+                            {
+                                if tx_ordered_incoming_request.unbounded_send(request).is_err() {
+                                    return Err(());
+                                }
+
+                                request_sequence_number = request_sequence_number.increment();
+                            }
+                        }
+
+                        incoming_sequence_number = Some(request_sequence_number);
+                    }
+                    Err(_) => {
+                        // Either no `CSeq` header was found, or parsing of the header failed.
+                        //
+                        // To handle this, we send a `400 Bad Request`, but we do not specify a `CSeq`
+                        // in the response. Unfortunately, it is not likely the client will even do
+                        // anything with this response, since it too does not have a `CSeq`. For
+                        // example, if a client using this implementation managed to send a request with
+                        // no `CSeq` and received a response with no `CSeq`, it would just ignore it.
+                        //
+                        // Also, this message is immediately queued and may not necessarily be the order
+                        // in which a client would expect the response, but there is no avoiding this.
+                        // `CSeq` must be given in order to demultiplex.
+
+                        if lock_state(&state).write_state().responses_allowed() {
+                            let response = Response::builder()
+                                .status_code(StatusCode::BadRequest)
+                                .build(BytesMut::new())
+                                .expect("bad request response should not be invalid");
+                            tx_outgoing_message =
+                                try_send_message(tx_outgoing_message, Message::Response(response));
+                        }
+                    }
+                }
+
+                // If the receiver for outgoing messages has been dropped, then we can no longer
+                // send any messages. So forwarding ordered requests from this task is no longer
+                // meaningfully, since they cannot be responded to.
+
+                if tx_outgoing_message.is_none() {
+                    return Err(());
+                }
+
+                Ok((
+                    state,
+                    tx_ordered_incoming_request,
+                    tx_outgoing_message,
+                    incoming_sequence_number,
+                    pending_requests,
+                ))
+            },
+        )
+        .map(|_| ())
+        .map_err(|_| ())
+}
+
 /// Constructs a task that splits incoming messages into either request or response streams.
 ///
 /// Currently, the given request and response sinks are bounded channels, and this task will block
@@ -343,18 +465,6 @@ where
                     None
                 }
             }
-        })
-    }
-
-    fn try_send_message(
-        tx_outgoing_message: Option<UnboundedSender<Message>>,
-        message: Message,
-    ) -> Option<UnboundedSender<Message>> {
-        tx_outgoing_message.and_then(|tx_outgoing_message| {
-            tx_outgoing_message
-                .unbounded_send(message)
-                .ok()
-                .map(|_| tx_outgoing_message)
         })
     }
 
@@ -503,4 +613,16 @@ where
             })
         },
     )
+}
+
+fn try_send_message(
+    tx_outgoing_message: Option<UnboundedSender<Message>>,
+    message: Message,
+) -> Option<UnboundedSender<Message>> {
+    tx_outgoing_message.and_then(|tx_outgoing_message| {
+        tx_outgoing_message
+            .unbounded_send(message)
+            .ok()
+            .map(|_| tx_outgoing_message)
+    })
 }
