@@ -2,6 +2,7 @@ use bytes::BytesMut;
 use futures::sync::mpsc::UnboundedSender;
 use std::convert::TryFrom;
 use std::error::Error as ErrorTrait;
+use std::sync::Arc;
 use std::{fmt, io};
 use tokio_io::codec::{Decoder, Encoder};
 
@@ -333,7 +334,7 @@ pub enum Message {
 }
 
 /// A generic error type for any RTSP networking related errors.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 #[non_exhaustive]
 pub enum Error {
     /// An error that occurs when too much time has passed from the start of message decoding. The
@@ -342,7 +343,7 @@ pub enum Error {
     DecodingTimedOut,
 
     /// An underlying I/O error occurred either in the stream or sink.
-    IO(io::Error),
+    IO(Arc<io::Error>),
 
     /// An irrecoverable error was encountered while decoding a request.
     InvalidRequest(IrrecoverableInvalidRequest),
@@ -381,7 +382,7 @@ impl ErrorTrait for Error {
 
 impl From<io::Error> for Error {
     fn from(value: io::Error) -> Error {
-        Error::IO(value)
+        Error::IO(Arc::new(value))
     }
 }
 
