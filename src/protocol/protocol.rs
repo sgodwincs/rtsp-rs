@@ -63,6 +63,8 @@ pub enum ReadWriteState {
     None,
 }
 
+pub type ReadWriteStatePair = (ReadWriteState, ReadWriteState);
+
 impl ReadWriteState {
     pub fn is_all(&self) -> bool {
         match *self {
@@ -165,12 +167,12 @@ fn try_update_state(current: &mut ReadWriteState, new: ReadWriteState) -> bool {
 #[derive(Debug)]
 pub struct ProtocolState {
     read_state: ReadWriteState,
-    tx_state_change: UnboundedSender<(ReadWriteState, ReadWriteState)>,
+    tx_state_change: UnboundedSender<ReadWriteStatePair>,
     write_state: ReadWriteState,
 }
 
 impl ProtocolState {
-    pub fn new(tx_state_change: UnboundedSender<(ReadWriteState, ReadWriteState)>) -> Self {
+    pub fn new(tx_state_change: UnboundedSender<ReadWriteStatePair>) -> Self {
         ProtocolState {
             read_state: ReadWriteState::All,
             tx_state_change,
@@ -182,7 +184,7 @@ impl ProtocolState {
         self.read_state.clone()
     }
 
-    pub fn state(&self) -> (ReadWriteState, ReadWriteState) {
+    pub fn state(&self) -> ReadWriteStatePair {
         (self.read_state(), self.write_state())
     }
 
@@ -231,8 +233,8 @@ fn create_decoding_timer_task(
     rx_codec_event: UnboundedReceiver<CodecEvent>,
 ) -> impl Future<Item = (), Error = ()> {
     loop_fn(
-        (Either::A(empty()), rx_codec_event, state),
-        |(timer, rx_codec_event, state)| {
+        (state, rx_codec_event, Either::A(empty())),
+        |(state, rx_codec_event, timer)| {
             timer
                 .select2(rx_codec_event.into_future())
                 .map_err(|_| panic!("decode timer and codec event receivers should not error"))
@@ -264,13 +266,212 @@ fn create_decoding_timer_task(
                             CodecEvent::DecodingStarted => {
                                 let expire_time = Instant::now() + Duration::from_secs(10);
                                 let timer = Either::B(Delay::new(expire_time));
-                                Loop::Continue((timer, rx_codec_event, state))
+                                Loop::Continue((state, rx_codec_event, timer))
                             }
                             CodecEvent::DecodingEnded => {
-                                Loop::Continue((Either::A(empty()), rx_codec_event, state))
+                                Loop::Continue((state, rx_codec_event, Either::A(empty())))
                             }
-                            _ => Loop::Continue((timer, rx_codec_event, state)),
+                            _ => Loop::Continue((state, rx_codec_event, timer)),
                         },
+                    })
+                })
+        },
+    )
+}
+
+fn create_split_messages_task<S>(
+    state: Arc<Mutex<ProtocolState>>,
+    rx_state_change: UnboundedReceiver<ReadWriteStatePair>,
+    stream: S,
+    tx_incoming_request: Sender<Request<BytesMut>>,
+    tx_incoming_response: Sender<Response<BytesMut>>,
+    tx_outgoing_message: UnboundedSender<Message>,
+) -> impl Future<Item = (), Error = ()>
+where
+    S: Stream<Item = MessageResult, Error = Error>,
+{
+    fn forward_message<M>(
+        tx_incoming_message: Option<Sender<M>>,
+        message: M,
+        state: &Arc<Mutex<ProtocolState>>,
+        error_state: (Option<ReadWriteState>, Option<ReadWriteState>),
+    ) -> Option<Sender<M>> {
+        tx_incoming_message.and_then(|tx_incoming_message| {
+            match tx_incoming_message.send(message).wait() {
+                Ok(tx_incoming_message) => Some(tx_incoming_message),
+                Err(_) => {
+                    let mut locked_state = lock_state(state);
+
+                    if let Some(new_read_state) = error_state.0 {
+                        locked_state.update_read_state(new_read_state);
+                    }
+
+                    if let Some(new_write_state) = error_state.0 {
+                        locked_state.update_write_state(new_write_state);
+                    }
+
+                    None
+                }
+            }
+        })
+    }
+
+    fn try_send_message(
+        tx_outgoing_message: Option<UnboundedSender<Message>>,
+        message: Message,
+    ) -> Option<UnboundedSender<Message>> {
+        tx_outgoing_message.and_then(|tx_outgoing_message| {
+            tx_outgoing_message
+                .unbounded_send(message)
+                .ok()
+                .map(|_| tx_outgoing_message)
+        })
+    }
+
+    loop_fn(
+        (
+            state,
+            rx_state_change,
+            stream,
+            Some(tx_incoming_request),
+            Some(tx_incoming_response),
+            Some(tx_outgoing_message),
+        ),
+        |(
+            state,
+            rx_state_change,
+            stream,
+            mut tx_incoming_request,
+            mut tx_incoming_response,
+            mut tx_outgoing_message,
+        )| {
+            stream
+                .into_future()
+                .select2(rx_state_change.into_future())
+                .then(move |result| {
+                    Ok(match result {
+                        Ok(Either::A(((item, stream), rx_state_change))) => {
+                            match item {
+                                Some(result) => {
+                                    match result {
+                                        Ok(Message::Request(request)) => {
+                                            // Forward the request to the request stream. If an
+                                            // error occurs (implying that the request stream has
+                                            // been dropped), then we can only read responses from
+                                            // now on. We do not change the write state, since even
+                                            // though no new responses will be made, there still may
+                                            // be responses pending from previous requests.
+
+                                            tx_incoming_request = forward_message(
+                                                tx_incoming_request,
+                                                request,
+                                                &state,
+                                                (Some(ReadWriteState::Response), None),
+                                            );
+                                        }
+                                        Ok(Message::Response(response)) => {
+                                            // Forward the response to the response stream. If an
+                                            // error occurs (implying that the response stream has
+                                            // been dropped), then we can only read requests and
+                                            // send responses.
+
+                                            tx_incoming_response = forward_message(
+                                                tx_incoming_response,
+                                                response,
+                                                state,
+                                                (
+                                                    Some(ReadWriteState::Request),
+                                                    Some(ReadWriteState::Response),
+                                                ),
+                                            );
+                                        }
+                                        Err(_) => {
+                                            // We received a message that was invalid, but it still
+                                            // was able to be decoded. We send a `400 Bad Request`
+                                            // to deal with this. This is one situation, however, in
+                                            // which the order that requests are handled is not
+                                            // based on `CSeq`. Even if the message had a valid
+                                            // `CSeq` header, it will not be inspected, since at
+                                            // least one part of the message was syntactically
+                                            // incorrect. As a result, the receiving agent has to
+                                            // manage mapping a response with no `CSeq` to its
+                                            // respective request. This is unlikely, and in general
+                                            // not possible if proxies are involved, since responses
+                                            // can be received out of order.
+
+                                            if lock_state(&state).write_state().responses_allowed()
+                                            {
+                                                let response = Response::builder()
+                                                    .status_code(StatusCode::BadRequest)
+                                                    .build(BytesMut::new())
+                                                    .expect("bad request response should not be invalid");
+                                                tx_outgoing_message = try_send_message(
+                                                    tx_outgoing_message,
+                                                    Message::Response(response),
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
+                                None => {
+                                    // The incoming message stream has ended. We can only write
+                                    // responses from this point forward.
+
+                                    lock_state(&state).update_state(
+                                        ReadWriteState::None,
+                                        ReadWriteState::Response,
+                                    );
+                                    return Loop::Break(());
+                                }
+                            }
+
+                            Loop::Continue((
+                                state,
+                                rx_state_change,
+                                stream,
+                                tx_incoming_request,
+                                tx_incoming_response,
+                                tx_outgoing_message,
+                            ))
+                        }
+                        Ok(Either::B(((new_state, rx_state_change), stream))) => {
+                            match new_state.expect("state change receiver should not end") {
+                                // We can no longer read anything
+                                (ReadWriteState::None, _) | (ReadWriteState::Error(_), _) => {
+                                    return Loop::Break(())
+                                }
+                                // We can no longer read responses
+                                (ReadWriteState::Request,) => tx_incoming_response = None,
+                                // We can no longer read requests
+                                (ReadWriteState::Response, _)
+                                | (_, ReadWriteState::None)
+                                | (_, ReadWriteState::Error(_))
+                                | (_, ReadWriteState::Response) => tx_incoming_request = None,
+                                _ => (),
+                            }
+
+                            Loop::Continue((
+                                state,
+                                rx_state_change,
+                                stream,
+                                tx_incoming_request,
+                                tx_incoming_response,
+                                tx_outgoing_message,
+                            ))
+                        }
+                        Err(Either::A(((error, _), _))) => {
+                            // There was an error reading from the message stream that was
+                            // irrecoverable. We can no longer read anything, but we may be able to
+                            // still write responses. Requests cannot be written, since we would not be
+                            // able to read their responses.
+
+                            lock_state(&state).update_state(
+                                ReadWriteState::Error(error),
+                                ReadWriteState::Response,
+                            );
+                            Loop::Break(())
+                        }
+                        Err(Either::B(_)) => panic!("state change receiver should not error"),
                     })
                 })
         },
