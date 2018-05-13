@@ -10,6 +10,8 @@ extern crate futures;
 extern crate lazy_static;
 extern crate linked_hash_map;
 extern crate regex;
+#[cfg(test)]
+extern crate tokio;
 extern crate tokio_executor;
 extern crate tokio_io;
 extern crate tokio_timer;
