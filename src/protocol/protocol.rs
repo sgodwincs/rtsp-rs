@@ -440,6 +440,13 @@ fn create_request_handler_task(
         .map_err(|_| ())
 }
 
+/// Constructs a task that maps incoming responses to pending requests based on the `CSeq` header.
+/// 
+/// # Arguments
+/// 
+/// * `rx_incoming_response` - A stream of [`Response`]s that are to be mapped to pending requests.
+/// * `rx_pending_request` - A stream of [`PendingRequestUpdate`]s that add and remove pending
+///   requests that are waiting to be mapped responses.
 fn create_response_handler_task(
     rx_incoming_response: Receiver<Response<BytesMut>>,
     rx_pending_request: UnboundedReceiver<PendingRequestUpdate>,
