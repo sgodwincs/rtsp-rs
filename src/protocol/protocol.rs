@@ -1,8 +1,8 @@
 use bytes::BytesMut;
-use futures::future::{empty, loop_fn, Either, Loop};
-use futures::prelude::*;
+use futures::future::{self, loop_fn, Either, Loop};
 use futures::sync::mpsc::{unbounded, Receiver, Sender, UnboundedReceiver, UnboundedSender};
 use futures::sync::oneshot;
+use futures::{stream, Future, Poll, Sink, Stream};
 use linked_hash_map::LinkedHashMap;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -227,6 +227,54 @@ fn lock_state(state: &Arc<Mutex<ProtocolState>>) -> MutexGuard<ProtocolState> {
     state.lock().expect("acquiring state lock should not fail")
 }
 
+pub fn select_all<I, T, E>(streams: I) -> Box<Stream<Item = T, Error = E>>
+where
+    I: IntoIterator,
+    I::Item: Stream<Item = T, Error = E> + 'static,
+    T: 'static,
+    E: 'static,
+{
+    struct Level<T, E> {
+        height: usize,
+        stream: Box<Stream<Item = T, Error = E>>,
+    }
+
+    let mut stack: Vec<Level<T, E>> = Vec::new();
+
+    for stream in streams {
+        let mut new_level = Level {
+            height: 0,
+            stream: Box::new(stream),
+        };
+
+        while stack
+            .last()
+            .map(|level| new_level.height == level.height)
+            .unwrap_or(false)
+        {
+            let old_level = stack.pop().unwrap();
+
+            new_level = Level {
+                height: old_level.height + 1,
+                stream: Box::new(old_level.stream.select(new_level.stream)),
+            }
+        }
+        stack.push(new_level);
+    }
+
+    if let Some(level) = stack.pop() {
+        let mut tree = level.stream;
+
+        while let Some(node) = stack.pop() {
+            tree = Box::new(tree.select(node.stream))
+        }
+
+        tree
+    } else {
+        Box::new(stream::empty())
+    }
+}
+
 fn try_send_message(
     tx_outgoing_message: Option<UnboundedSender<Message>>,
     message: Message,
@@ -258,7 +306,7 @@ fn create_decoding_timer_task(
     rx_codec_event: UnboundedReceiver<CodecEvent>,
 ) -> impl Future<Item = (), Error = ()> {
     loop_fn(
-        (state, rx_codec_event, Either::A(empty())),
+        (state, rx_codec_event, Either::A(future::empty())),
         |(state, rx_codec_event, timer)| {
             timer
                 .select2(rx_codec_event.into_future())
@@ -294,7 +342,7 @@ fn create_decoding_timer_task(
                                 Loop::Continue((state, rx_codec_event, timer))
                             }
                             CodecEvent::DecodingEnded => {
-                                Loop::Continue((state, rx_codec_event, Either::A(empty())))
+                                Loop::Continue((state, rx_codec_event, Either::A(future::empty())))
                             }
                             _ => Loop::Continue((state, rx_codec_event, timer)),
                         },
@@ -441,9 +489,9 @@ fn create_request_handler_task(
 }
 
 /// Constructs a task that maps incoming responses to pending requests based on the `CSeq` header.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `rx_incoming_response` - A stream of [`Response`]s that are to be mapped to pending requests.
 /// * `rx_pending_request` - A stream of [`PendingRequestUpdate`]s that add and remove pending
 ///   requests that are waiting to be mapped responses.
@@ -593,6 +641,18 @@ fn create_response_handler_task(
             }
         },
     )
+}
+
+fn create_send_messages_task<S>(
+    sink: S,
+    outgoing_messages: Vec<UnboundedReceiver<Message>>,
+) -> impl Future<Item = (), Error = ()>
+where
+    S: Sink<SinkItem = Message, SinkError = Error>,
+{
+    sink.sink_map_err(|_| ())
+        .send_all(select_all(outgoing_messages))
+        .map(|_| ())
 }
 
 /// Constructs a task that splits incoming messages into either request or response streams.
