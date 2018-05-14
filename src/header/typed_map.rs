@@ -1,4 +1,4 @@
-//! RTSP Method
+//! RTSP Typed Header Map
 //!
 //! This module contains structs to allow usage of typed headers instead of their raw counterparts.
 //! The logic in this module is primarily based on the typed header usage defined by the
