@@ -227,6 +227,18 @@ fn lock_state(state: &Arc<Mutex<ProtocolState>>) -> MutexGuard<ProtocolState> {
     state.lock().expect("acquiring state lock should not fail")
 }
 
+fn try_send_message(
+    tx_outgoing_message: Option<UnboundedSender<Message>>,
+    message: Message,
+) -> Option<UnboundedSender<Message>> {
+    tx_outgoing_message.and_then(|tx_outgoing_message| {
+        tx_outgoing_message
+            .unbounded_send(message)
+            .ok()
+            .map(|_| tx_outgoing_message)
+    })
+}
+
 /// Constructs a task that manages the timer for decoding messages.
 ///
 /// If the timer expires, then messages can no longer be read from the connection. But writing
@@ -786,16 +798,4 @@ where
             })
         },
     )
-}
-
-fn try_send_message(
-    tx_outgoing_message: Option<UnboundedSender<Message>>,
-    message: Message,
-) -> Option<UnboundedSender<Message>> {
-    tx_outgoing_message.and_then(|tx_outgoing_message| {
-        tx_outgoing_message
-            .unbounded_send(message)
-            .ok()
-            .map(|_| tx_outgoing_message)
-    })
 }
