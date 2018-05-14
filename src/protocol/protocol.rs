@@ -359,11 +359,11 @@ fn create_request_handler_task(
                             // This is actually a bit of a break from the specification. The
                             // specification states that requests must be handled in the order of
                             // their `CSeq`, but this is not practical here and opens up possible
-                            // resource exhaustion attacks. For example, the protocol will only
-                            // process the next expected `CSeq` to abide by the specification. All
-                            // other requests will simply be buffered until the next one with the
-                            // next `CSeq` has arrived. But the range of possible `CSeq`s is way too
-                            // large to buffer per agent, so we only buffer a small amount.
+                            // resource exhaustion attacks. The protocol will only process the next
+                            // expected `CSeq` to abide by the specification. All other requests
+                            // will simply be buffered until the next one with the next `CSeq` has
+                            // arrived. But the range of possible `CSeq`s is way too large to buffer
+                            // per agent, so we only buffer a small amount.
 
                             if lock_state(&state).write_state().responses_allowed() {
                                 let response = Response::builder()
