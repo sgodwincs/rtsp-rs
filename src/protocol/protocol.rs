@@ -2,6 +2,8 @@ use bytes::BytesMut;
 use futures::future::{empty, loop_fn, Either, Loop};
 use futures::prelude::*;
 use futures::sync::mpsc::{unbounded, Receiver, Sender, UnboundedReceiver, UnboundedSender};
+use futures::sync::oneshot;
+use linked_hash_map::LinkedHashMap;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
@@ -216,6 +218,11 @@ impl ProtocolState {
     }
 }
 
+enum PendingRequestUpdate {
+    AddPendingRequest((CSeq, oneshot::Sender<Option<Response<BytesMut>>>)),
+    RemovePendingRequest(CSeq),
+}
+
 fn lock_state(state: &Arc<Mutex<ProtocolState>>) -> MutexGuard<ProtocolState> {
     state.lock().expect("acquiring state lock should not fail")
 }
@@ -419,6 +426,154 @@ fn create_request_handler_task(
         )
         .map(|_| ())
         .map_err(|_| ())
+}
+
+fn create_response_handler_task(
+    rx_incoming_response: Receiver<Response<BytesMut>>,
+    rx_pending_request: UnboundedReceiver<PendingRequestUpdate>,
+) -> impl Future<Item = (), Error = ()> {
+    fn handle_response(
+        response: Option<Response<BytesMut>>,
+        pending_requests: &mut LinkedHashMap<
+            CSeq,
+            Option<oneshot::Sender<Option<Response<BytesMut>>>>,
+        >,
+    ) -> bool {
+        match response {
+            Some(response) => {
+                let header_values = response
+                    .headers()
+                    .get_all(HeaderName::CSeq)
+                    .iter()
+                    .cloned()
+                    .collect::<Vec<HeaderValue>>();
+                let cseq = CSeq::try_from_header_raw(&header_values);
+
+                // Make sure the `CSeq` was valid (and that there was only one) and that a request
+                // is pending with the given value.
+
+                if let Ok(cseq) = cseq {
+                    let pending_request = pending_requests.remove(&cseq);
+
+                    if let Some(mut pending_request) = pending_request {
+                        // We do not really care if this fails. If would only fail in the case where
+                        // the receiver has been dropped, but either way, we can get rid of the
+                        // pending request.
+
+                        pending_request.take().unwrap().send(Some(response)).ok();
+                    }
+                }
+
+                true
+            }
+            None => {
+                // The incoming response stream has ended, so all currently pending requests will
+                // not be responded to. Instead of sending a response to them, we will just send
+                // `None` indicating that no response will be coming.
+
+                for (_, tx_pending_request) in pending_requests.iter_mut() {
+                    // Even though the value type for the linked hash map is an `Option<T>`, it will
+                    // never be `None` at this point. It is only done this way because the oneshot
+                    // channel `send` requires ownership and so we are unable to deal without the
+                    // option. If `LinkedHashMap` had a `drain` function, we could, but it does not.
+                    //
+                    // We also do not really care if this fails. If would only fail in the case
+                    // where the receiver has been dropped, but either way, we can get rid of the
+                    // pending request.
+
+                    tx_pending_request.take().unwrap().send(None).ok();
+                }
+
+                false
+            }
+        }
+    }
+
+    loop_fn(
+        (
+            rx_incoming_response.into_future(),
+            Some(rx_pending_request.into_future()),
+            LinkedHashMap::new(),
+        ),
+        |(rx_incoming_response, rx_pending_request, mut pending_requests)| {
+            if let Some(rx_pending_request) = rx_pending_request {
+                Either::A(
+                    rx_incoming_response
+                        .select2(rx_pending_request)
+                        .and_then(|item| match item {
+                            Either::A(((response, rx_incoming_response), rx_pending_request)) => {
+                                if handle_response(response, &mut pending_requests) {
+                                    Ok(Loop::Continue((
+                                        rx_incoming_response.into_future(),
+                                        None,
+                                        pending_requests,
+                                    )))
+                                } else {
+                                    Ok(Loop::Break(()))
+                                }
+                            }
+                            Either::B(((update, rx_pending_request), rx_incoming_response)) => {
+                                if let Some(update) = update {
+                                    match update {
+                                        // A new request has been made that is waiting for a
+                                        // response. When the response has been received, the given
+                                        // oneshot channel will be used to forward the response.
+                                        PendingRequestUpdate::AddPendingRequest((
+                                            cseq,
+                                            tx_pending_request,
+                                        )) => {
+                                            pending_requests.insert(cseq, Some(tx_pending_request));
+                                        }
+                                        // A previous pending request has determined that it will no
+                                        // longer wait for a response. This will typically happen if
+                                        // there is a timeout for the request.
+                                        PendingRequestUpdate::RemovePendingRequest(cseq) => {
+                                            pending_requests.remove(&cseq);
+                                        }
+                                    }
+
+                                    Ok(Loop::Continue((
+                                        rx_incoming_response,
+                                        Some(rx_pending_request.into_future()),
+                                        pending_requests,
+                                    )))
+                                } else if pending_requests.is_empty() {
+                                    // The update stream has ended, and there are no pending
+                                    // requests, so this task can end.
+
+                                    Ok(Loop::Break(()))
+                                } else {
+                                    Ok(Loop::Continue((
+                                        rx_incoming_response,
+                                        None,
+                                        pending_requests,
+                                    )))
+                                }
+                            }
+                        })
+                        .map_err(|_| ()),
+                )
+            } else {
+                Either::B(
+                    rx_incoming_response
+                        .and_then(|(response, rx_incoming_response)| {
+                            if !handle_response(response, &mut pending_requests)
+                                || pending_requests.is_empty()
+                            {
+                                Ok(Loop::Break(()))
+                            } else {
+                                Ok(Loop::Continue((
+                                    rx_incoming_response.into_future(),
+                                    None,
+                                    pending_requests,
+                                )))
+                            }
+                        })
+                        .map_err(|_| ()),
+                )
+            }
+        },
+    )
 }
 
 /// Constructs a task that splits incoming messages into either request or response streams.
