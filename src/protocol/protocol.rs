@@ -285,6 +285,16 @@ fn create_decoding_timer_task(
     )
 }
 
+/// Constructs a task that orders incoming requests based on their `CSeq` header.
+///
+/// # Arguments
+///
+/// * `state` - A reference to the protocol state.
+/// * `rx_incoming_request` - A stream of [`Request`]s that are to be ordered.
+/// * `tx_incoming_response` - The sink where [`Request`]s will be sent in order based on their
+///   `CSeq` header.
+/// * `tx_outgoing_message` - A sink where messages to be sent to the connected host are sent. This
+///   is needed in order to send `400 Bad Request` and `503 Service Unavailable` responses.
 fn create_request_handler_task(
     state: Arc<Mutex<ProtocolState>>,
     rx_incoming_request: Receiver<Request<BytesMut>>,
