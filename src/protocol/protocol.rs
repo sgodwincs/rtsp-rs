@@ -220,8 +220,14 @@ impl ProtocolState {
     }
 }
 
+enum PendingRequestResponse {
+    Continue(oneshot::Receiver<PendingRequestResponse>),
+    None,
+    Response(Response<BytesMut>),
+}
+
 enum PendingRequestUpdate {
-    AddPendingRequest((CSeq, oneshot::Sender<Option<Response<BytesMut>>>)),
+    AddPendingRequest((CSeq, oneshot::Sender<PendingRequestResponse>)),
     RemovePendingRequest(CSeq),
 }
 
@@ -505,10 +511,7 @@ fn create_response_handler_task(
 ) -> impl Future<Item = (), Error = ()> {
     fn handle_response(
         response: Option<Response<BytesMut>>,
-        pending_requests: &mut LinkedHashMap<
-            CSeq,
-            Option<oneshot::Sender<Option<Response<BytesMut>>>>,
-        >,
+        pending_requests: &mut LinkedHashMap<CSeq, Option<oneshot::Sender<PendingRequestResponse>>>,
     ) -> bool {
         match response {
             Some(response) => {
@@ -524,14 +527,57 @@ fn create_response_handler_task(
                 // is pending with the given value.
 
                 if let Ok(cseq) = cseq {
-                    let pending_request = pending_requests.remove(&cseq);
+                    if response.status_code() == StatusCode::Continue {
+                        // Received a `100 Continue` response meaning we should expect the actual
+                        // response a bit later. But we want to make sure that any timers for the
+                        // request do not timeout, so we notify them of the continue.
+                        //
+                        // TODO: When NLL is stable, restructure this.
 
-                    if let Some(mut pending_request) = pending_request {
-                        // We do not really care if this fails. If would only fail in the case where
-                        // the receiver has been dropped, but either way, we can get rid of the
-                        // pending request.
+                        let mut remove_pending_request = false;
 
-                        pending_request.take().unwrap().send(Some(response)).ok();
+                        {
+                            let pending_request = pending_requests.get_mut(&cseq);
+
+                            if let Some(pending_request) = pending_request {
+                                // Since we are using oneshots here, we need to create a new channel
+                                // to be used and send it as well.
+
+                                let (tx_pending_request, rx_pending_request) = oneshot::channel();
+                                let result = pending_request
+                                    .take()
+                                    .unwrap()
+                                    .send(PendingRequestResponse::Continue(rx_pending_request));
+
+                                // We do care if it fails here, since if it fails, we need to remove
+                                // the pending request from the hashmap.
+
+                                match result {
+                                    Ok(_) => *pending_request = Some(tx_pending_request),
+                                    Err(_) => remove_pending_request = true,
+                                }
+                            }
+                        }
+
+                        if remove_pending_request {
+                            pending_requests.remove(&cseq);
+                        }
+                    } else {
+                        // Received a final response.
+
+                        let pending_request = pending_requests.remove(&cseq);
+
+                        if let Some(mut pending_request) = pending_request {
+                            // We do not really care if this fails. If would only fail in the case where
+                            // the receiver has been dropped, but either way, we can get rid of the
+                            // pending request.
+
+                            pending_request
+                                .take()
+                                .unwrap()
+                                .send(PendingRequestResponse::Response(response))
+                                .ok();
+                        }
                     }
                 }
 
@@ -540,7 +586,7 @@ fn create_response_handler_task(
             None => {
                 // The incoming response stream has ended, so all currently pending requests will
                 // not be responded to. Instead of sending a response to them, we will just send
-                // `None` indicating that no response will be coming.
+                // `PendingRequestResponse::None` indicating that no response will be coming.
 
                 for (_, tx_pending_request) in pending_requests.iter_mut() {
                     // Even though the value type for the linked hash map is an `Option<T>`, it will
@@ -552,7 +598,11 @@ fn create_response_handler_task(
                     // where the receiver has been dropped, but either way, we can get rid of the
                     // pending request.
 
-                    tx_pending_request.take().unwrap().send(None).ok();
+                    tx_pending_request
+                        .take()
+                        .unwrap()
+                        .send(PendingRequestResponse::None)
+                        .ok();
                 }
 
                 false
