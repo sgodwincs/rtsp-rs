@@ -19,7 +19,7 @@ extern crate url;
 
 mod syntax;
 
-pub mod client;
+//pub mod client;
 pub mod header;
 pub mod method;
 pub mod protocol;
