@@ -303,7 +303,13 @@ fn try_send_message(
 /// Since the timer is managed via events from the codec, if the stream of the events end, then it
 /// is implied that the connection is completely closed.
 ///
-/// This task will only end if the timer expires or if the codec is dropped.
+/// This task will only end if the timer expires or if the codec is dropped. The codec will be
+/// dropped when both the message splitting and sending tasks have ended.
+///
+/// TODO: We really do not have to wait for the codec to have been dropped to end this task. The
+/// weaker condition of having the message splitting task ending would work as well. This can be
+/// done by watching for state changes. I am currently not adding this as it is not strictly
+/// necessary and also complicates the code more.
 ///
 /// # Arguments
 ///
