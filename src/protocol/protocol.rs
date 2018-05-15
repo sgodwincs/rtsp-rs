@@ -648,6 +648,8 @@ fn create_response_handler_task(
 ///
 /// # Arguments
 ///
+/// * `state` - A reference to the protocol state.
+/// * `rx_state_change` - A stream of [`ReadWriteStatePair`] protocol state changes.
 /// * `sink` - The sink which all messages are forwarded to.
 /// * `outgoing_messages` - A list of message channel receivers from different sources. All of the
 ///   messages sent to these receivers will be forwarded to the given sink as they arrive.
