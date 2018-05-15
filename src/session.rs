@@ -138,7 +138,7 @@ impl<'a> TryFrom<&'a str> for SessionID {
     type Error = InvalidSessionID;
 
     fn try_from(value: &'a str) -> Result<Self, Self::Error> {
-        if value.is_empty() || value.len() > 256 {
+        if value.len() < 8 || value.len() > 256 {
             return Err(InvalidSessionID);
         }
 
