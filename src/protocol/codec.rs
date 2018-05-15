@@ -602,7 +602,7 @@ impl TryFrom<InvalidResponse> for RecoverableInvalidResponse {
 #[cfg(test)]
 mod test {
     use futures::sync::mpsc::unbounded;
-    use futures::{Future, Stream};
+    use futures::Stream;
     use tokio::runtime::current_thread::Runtime;
 
     use super::*;
