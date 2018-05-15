@@ -48,6 +48,7 @@ impl Protocol {
         executor.spawn(Box::new(create_decoding_timer_task(
             state.clone(),
             rx_codec_event,
+            DEFAULT_DECODE_TIMEOUT_DURATION,
         )))?;
 
         Ok(Protocol { state })
@@ -302,17 +303,19 @@ fn try_send_message(
 ///
 /// * `state` - A reference to the protocol state.
 /// * `rx_codec_event` - A stream of [`CodecEvent`]s.
+/// * `decode_timeout_duration` - The duration of time that must pass for decoding to timeout.
 fn create_decoding_timer_task(
     state: Arc<Mutex<ProtocolState>>,
     rx_codec_event: UnboundedReceiver<CodecEvent>,
+    decode_timeout_duration: Duration,
 ) -> impl Future<Item = (), Error = ()> {
     loop_fn(
         (state, rx_codec_event, Either::A(future::empty())),
-        |(state, rx_codec_event, timer)| {
+        move |(state, rx_codec_event, timer)| {
             timer
                 .select2(rx_codec_event.into_future())
                 .map_err(|_| panic!("decode timer and codec event receivers should not error"))
-                .and_then(|item| {
+                .and_then(move |item| {
                     Ok(match item {
                         Either::A(_) => {
                             // Decoding timer has expired. At this point, we consider any reads from
@@ -338,7 +341,7 @@ fn create_decoding_timer_task(
                         }
                         Either::B(((Some(event), rx_codec_event), timer)) => match event {
                             CodecEvent::DecodingStarted => {
-                                let expire_time = Instant::now() + DEFAULT_DECODE_TIMEOUT_DURATION;
+                                let expire_time = Instant::now() + decode_timeout_duration;
                                 let timer = Either::B(Delay::new(expire_time));
                                 Loop::Continue((state, rx_codec_event, timer))
                             }
