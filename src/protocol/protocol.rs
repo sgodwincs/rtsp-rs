@@ -2,9 +2,10 @@ use bytes::BytesMut;
 use futures::future::{self, loop_fn, Either, Loop};
 use futures::sync::mpsc::{unbounded, Receiver, Sender, UnboundedReceiver, UnboundedSender};
 use futures::sync::oneshot;
-use futures::{stream, Future, Poll, Sink, Stream};
+use futures::{stream, Future, Sink, Stream};
 use linked_hash_map::LinkedHashMap;
 use std::collections::HashMap;
+use std::io;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 use tokio_executor::{DefaultExecutor, Executor, SpawnError};
@@ -572,7 +573,7 @@ fn create_response_handler_task(
                                 if handle_response(response, &mut pending_requests) {
                                     Ok(Loop::Continue((
                                         rx_incoming_response.into_future(),
-                                        None,
+                                        Some(rx_pending_request),
                                         pending_requests,
                                     )))
                                 } else {
@@ -643,16 +644,88 @@ fn create_response_handler_task(
     )
 }
 
+/// Constructs a task that forwards all outgoing messages into a sink.
+///
+/// # Arguments
+///
+/// * `sink` - The sink which all messages are forwarded to.
+/// * `outgoing_messages` - A list of message channel receivers from different sources. All of the
+///   messages sent to these receivers will be forwarded to the given sink as they arrive.
 fn create_send_messages_task<S>(
+    state: Arc<Mutex<ProtocolState>>,
+    rx_state_change: UnboundedReceiver<ReadWriteStatePair>,
     sink: S,
     outgoing_messages: Vec<UnboundedReceiver<Message>>,
 ) -> impl Future<Item = (), Error = ()>
 where
     S: Sink<SinkItem = Message, SinkError = Error>,
 {
-    sink.sink_map_err(|_| ())
-        .send_all(select_all(outgoing_messages))
-        .map(|_| ())
+    let state_clone = state.clone();
+    let stream = select_all(outgoing_messages)
+        .filter(move |message| {
+            // Only allow writing of messages that are allowed by the current write state. This is
+            // here just to ensure something else in the protocol does not obey the write state. But
+            // if everything does, then this is a waste of time. Until everything has been tested
+            // extensively, this will remain.
+
+            match message {
+                Message::Request(_) => lock_state(&state).write_state().requests_allowed(),
+                Message::Response(_) => lock_state(&state).write_state().responses_allowed(),
+            }
+        })
+        .map_err(|_| {
+            // We have to match the error type that the sink generates, and since we do not want to
+            // change the sink's error type in order to catch any errors that occur, we must change the
+            // error here. This is a bit weird, since this is not even possible due to channel receivers
+            // not being able to error.
+            //
+            // I think this may be able to be fixed once `futures` starts using the `!` type.
+
+            Error::IO(Arc::new(io::Error::new(
+                io::ErrorKind::Other,
+                "outgoing message stream error",
+            )))
+        });
+
+    loop_fn(
+        (
+            state_clone,
+            rx_state_change.into_future(),
+            sink.send_all(stream),
+        ),
+        |(state, rx_state_change, send_messages)| {
+            rx_state_change.select2(send_messages).then(|result| {
+                Ok(match result {
+                    Ok(Either::A(((new_state, rx_state_change), send_messages))) => match new_state
+                        .expect("state change receiver should not end")
+                    {
+                        // We can no longer write any messages.
+                        (_, ReadWriteState::None) | (_, ReadWriteState::Error(_)) => {
+                            Loop::Break(())
+                        }
+                        _ => Loop::Continue((state, rx_state_change.into_future(), send_messages)),
+                    },
+                    Ok(Either::B(_)) => {
+                        // All of the messages of the stream defined above have been finished
+                        // meaning no more messages will be sent, so the task can end.
+
+                        lock_state(&state)
+                            .update_state(ReadWriteState::Response, ReadWriteState::None);
+                        Loop::Break(())
+                    }
+                    Err(Either::A(_)) => panic!("state change receiver should not error"),
+                    Err(Either::B((error, _))) => {
+                        // There was an error while trying to send a message through the sink. Save
+                        // the error to the write state and end the task.
+
+                        lock_state(&state)
+                            .update_state(ReadWriteState::Request, ReadWriteState::Error(error));
+                        Loop::Break(())
+                    }
+                })
+            })
+        },
+    )
 }
 
 /// Constructs a task that splits incoming messages into either request or response streams.
@@ -827,13 +900,13 @@ where
                     }
                     Ok(Either::B(((new_state, rx_state_change), stream))) => {
                         match new_state.expect("state change receiver should not end") {
-                            // We can no longer read anything
+                            // We can no longer read anything.
                             (ReadWriteState::None, _) | (ReadWriteState::Error(_), _) => {
                                 return Ok(Loop::Break(()));
                             }
-                            // We can no longer read responses
+                            // We can no longer read responses.
                             (ReadWriteState::Request, _) => tx_incoming_response = None,
-                            // We can no longer read requests
+                            // We can no longer read requests.
                             (ReadWriteState::Response, _)
                             | (_, ReadWriteState::None)
                             | (_, ReadWriteState::Error(_))
