@@ -592,6 +592,7 @@ fn create_response_handler_task(
                                         )) => {
                                             pending_requests.insert(cseq, Some(tx_pending_request));
                                         }
+
                                         // A previous pending request has determined that it will no
                                         // longer wait for a response. This will typically happen if
                                         // there is a timeout for the request.
@@ -906,8 +907,10 @@ where
                             (ReadWriteState::None, _) | (ReadWriteState::Error(_), _) => {
                                 return Ok(Loop::Break(()));
                             }
+
                             // We can no longer read responses.
                             (ReadWriteState::Request, _) => tx_incoming_response = None,
+
                             // We can no longer read requests.
                             (ReadWriteState::Response, _)
                             | (_, ReadWriteState::None)
