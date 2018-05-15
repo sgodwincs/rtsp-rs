@@ -947,3 +947,123 @@ where
         },
     )
 }
+
+#[cfg(test)]
+mod test {
+    use std::mem;
+    use tokio::runtime::current_thread;
+    use tokio::runtime::Runtime;
+
+    use super::*;
+
+    #[test]
+    fn test_decoding_timer_task_event_handling() {
+        let (tx_state_change, _) = unbounded();
+        let (tx_codec_event, rx_codec_event) = unbounded();
+        let protocol_state = Arc::new(Mutex::new(ProtocolState::new(tx_state_change)));
+        let task = create_decoding_timer_task(
+            protocol_state.clone(),
+            rx_codec_event,
+            Duration::from_millis(50),
+        );
+
+        // Simulate codec encoding and decoding.
+
+        tx_codec_event
+            .unbounded_send(CodecEvent::DecodingStarted)
+            .unwrap();
+        tx_codec_event
+            .unbounded_send(CodecEvent::EncodingStarted)
+            .unwrap();
+        tx_codec_event
+            .unbounded_send(CodecEvent::EncodingEnded)
+            .unwrap();
+        tx_codec_event
+            .unbounded_send(CodecEvent::DecodingEnded)
+            .unwrap();
+
+        let mut runtime = Runtime::new().unwrap();
+
+        // Simulate dropping codec event. We wait to do it here, so the task will handle the above
+        // events. Also make sure the delay here is longer than the timeout duration to test whether
+        // the `CodecEvent::DecodingEnded` successfully stops the timer.
+
+        runtime.spawn(
+            Delay::new(Instant::now() + Duration::from_millis(100)).then(|_| {
+                mem::drop(tx_codec_event);
+                Ok(())
+            }),
+        );
+
+        // Wait for task to end.
+
+        runtime.spawn(task);
+        runtime.shutdown_on_idle().wait().unwrap();
+
+        assert_eq!(
+            lock_state(&protocol_state).state(),
+            (ReadWriteState::None, ReadWriteState::None)
+        );
+    }
+
+    #[test]
+    fn test_decoding_timer_task_codec_dropped() {
+        let (tx_state_change, _) = unbounded();
+        let (tx_codec_event, rx_codec_event) = unbounded();
+        let protocol_state = Arc::new(Mutex::new(ProtocolState::new(tx_state_change)));
+        let task = create_decoding_timer_task(
+            protocol_state.clone(),
+            rx_codec_event,
+            DEFAULT_DECODE_TIMEOUT_DURATION,
+        );
+
+        // Simulate the dropping of the codec (meaning the sender has been dropped as well).
+
+        mem::drop(tx_codec_event);
+
+        // Wait for task to end.
+
+        current_thread::Runtime::new()
+            .unwrap()
+            .block_on(task)
+            .unwrap();
+
+        assert_eq!(
+            lock_state(&protocol_state).state(),
+            (ReadWriteState::None, ReadWriteState::None)
+        );
+    }
+
+    #[test]
+    fn test_decoding_timer_task_expired() {
+        let (tx_state_change, _) = unbounded();
+        let (tx_codec_event, rx_codec_event) = unbounded();
+        let protocol_state = Arc::new(Mutex::new(ProtocolState::new(tx_state_change)));
+        let task = create_decoding_timer_task(
+            protocol_state.clone(),
+            rx_codec_event,
+            Duration::from_millis(1),
+        );
+
+        // Simulate the decoding of a message that timeouts.
+
+        tx_codec_event
+            .unbounded_send(CodecEvent::DecodingStarted)
+            .unwrap();
+
+        // Wait for task to end.
+
+        current_thread::Runtime::new()
+            .unwrap()
+            .block_on(task)
+            .unwrap();
+
+        assert_eq!(
+            lock_state(&protocol_state).state(),
+            (
+                ReadWriteState::Error(Error::DecodingTimedOut),
+                ReadWriteState::Response
+            )
+        );
+    }
+}
