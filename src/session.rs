@@ -138,6 +138,11 @@ impl<'a> TryFrom<&'a str> for SessionID {
     type Error = InvalidSessionID;
 
     fn try_from(value: &'a str) -> Result<Self, Self::Error> {
+        // Although the syntax in the specification allows session IDs of length 1, it also states
+        // earlier in the specfication that "Session identifiers are strings of a length between
+        // 8-128 characters." Obviously, there is some disconnect here, so I will go with the more
+        // secure approach.
+
         if value.len() < 8 || value.len() > 256 {
             return Err(InvalidSessionID);
         }
