@@ -443,6 +443,12 @@ fn create_request_handler_task(
                                 );
                             }
                         } else {
+                            // Make sure we are processing requests in the order of their `CSeq`
+                            // headers. This is actually redundant if an reliable transport is used
+                            // (e.g. TCP), but the specification states that implementations must do
+                            // so in case support for unreliable or out-of-order transports are to
+                            // be added.
+
                             pending_requests.insert(cseq, request);
 
                             while let Some(request) =
@@ -960,11 +966,19 @@ where
                         match new_state.expect("state change receiver should not end") {
                             // We can no longer read anything.
                             (ReadWriteState::None, _) | (ReadWriteState::Error(_), _) => {
+                                // Make sure write state is set correctly.
+
+                                lock_state(&state).update_write_state(ReadWriteState::Response);
                                 return Ok(Loop::Break(()));
                             }
 
                             // We can no longer read responses.
-                            (ReadWriteState::Request, _) => tx_incoming_response = None,
+                            (ReadWriteState::Request, _) => {
+                                // Make sure write state is set correctly.
+
+                                lock_state(&state).update_write_state(ReadWriteState::Response);
+                                tx_incoming_response = None;
+                            }
 
                             // We can no longer read requests.
                             (ReadWriteState::Response, _)
@@ -1002,11 +1016,16 @@ where
 
 #[cfg(test)]
 mod test {
+    // TODO: Maybe try to cleanup this testing so that the setup is not so repetitive?
+
     use std::mem;
     use tokio::runtime::current_thread;
     use tokio::runtime::Runtime;
 
     use super::*;
+    use method::Method;
+    use protocol::RecoverableInvalidRequest;
+    use uri::URI;
 
     #[test]
     fn test_decoding_timer_task_event_handling() {
@@ -1114,6 +1133,597 @@ mod test {
             lock_state(&protocol_state).state(),
             (
                 ReadWriteState::Error(Error::DecodingTimedOut),
+                ReadWriteState::Response
+            )
+        );
+    }
+
+    #[test]
+    fn test_split_messages_task_forward_request_error() {
+        let (tx_state_change, rx_state_change) = unbounded();
+        let (tx_message, rx_message) = unbounded();
+        let (tx_incoming_request, _) = channel(DEFAULT_REQUESTS_BUFFER_SIZE);
+        let (tx_incoming_response, _) = channel(DEFAULT_RESPONSES_BUFFER_SIZE);
+        let (tx_outgoing_message, _) = unbounded();
+
+        let protocol_state = Arc::new(Mutex::new(ProtocolState::new(tx_state_change)));
+        let task = create_split_messages_task(
+            protocol_state.clone(),
+            rx_state_change,
+            rx_message.map_err(|_| {
+                Error::IO(Arc::new(io::Error::new(
+                    io::ErrorKind::Other,
+                    "dummy error",
+                )))
+            }),
+            tx_incoming_request,
+            tx_incoming_response,
+            tx_outgoing_message,
+        );
+
+        // Simulate sending a request.
+
+        let request = Request::builder()
+            .method(Method::Options)
+            .uri(URI::Any)
+            .build("".into())
+            .unwrap();
+
+        tx_message
+            .unbounded_send(Ok(Message::Request(request)))
+            .unwrap();
+
+        let mut runtime = Runtime::new().unwrap();
+
+        // Simulate ending the stream, but wait to do it so that the protocol state can be checked
+        // after the task has handled a forwarding request error.
+
+        let protocol_state_cloned = protocol_state.clone();
+
+        runtime.spawn(
+            Delay::new(Instant::now() + Duration::from_millis(100)).then(move |_| {
+                assert_eq!(
+                    lock_state(&protocol_state_cloned).state(),
+                    (ReadWriteState::Response, ReadWriteState::All)
+                );
+
+                mem::drop(tx_message);
+                Ok(())
+            }),
+        );
+
+        // Wait for task to end.
+
+        runtime.spawn(task);
+        runtime.shutdown_on_idle().wait().unwrap();
+
+        assert_eq!(
+            lock_state(&protocol_state).state(),
+            (ReadWriteState::None, ReadWriteState::Response)
+        );
+    }
+
+    #[test]
+    fn test_split_messages_task_forward_response_error() {
+        let (tx_state_change, rx_state_change) = unbounded();
+        let (tx_message, rx_message) = unbounded();
+        let (tx_incoming_request, _) = channel(DEFAULT_REQUESTS_BUFFER_SIZE);
+        let (tx_incoming_response, _) = channel(DEFAULT_RESPONSES_BUFFER_SIZE);
+        let (tx_outgoing_message, _) = unbounded();
+
+        let protocol_state = Arc::new(Mutex::new(ProtocolState::new(tx_state_change)));
+        let task = create_split_messages_task(
+            protocol_state.clone(),
+            rx_state_change,
+            rx_message.map_err(|_| {
+                Error::IO(Arc::new(io::Error::new(
+                    io::ErrorKind::Other,
+                    "dummy error",
+                )))
+            }),
+            tx_incoming_request,
+            tx_incoming_response,
+            tx_outgoing_message,
+        );
+
+        // Simulate sending a response.
+
+        let response = Response::builder().build("".into()).unwrap();
+        tx_message
+            .unbounded_send(Ok(Message::Response(response)))
+            .unwrap();
+
+        let mut runtime = Runtime::new().unwrap();
+
+        // Simulate ending the stream, but wait to do it so that the protocol state can be checked
+        // after the task has handled a forwarding request error.
+
+        let protocol_state_cloned = protocol_state.clone();
+
+        runtime.spawn(
+            Delay::new(Instant::now() + Duration::from_millis(100)).then(move |_| {
+                assert_eq!(
+                    lock_state(&protocol_state_cloned).state(),
+                    (ReadWriteState::Request, ReadWriteState::Response)
+                );
+
+                mem::drop(tx_message);
+                Ok(())
+            }),
+        );
+
+        // Wait for task to end.
+
+        runtime.spawn(task);
+        runtime.shutdown_on_idle().wait().unwrap();
+
+        assert_eq!(
+            lock_state(&protocol_state).state(),
+            (ReadWriteState::None, ReadWriteState::Response)
+        );
+    }
+
+    #[test]
+    fn test_split_messages_task_forward_success() {
+        let (tx_state_change, rx_state_change) = unbounded();
+        let (tx_message, rx_message) = unbounded();
+        let (tx_incoming_request, rx_incoming_request) = channel(DEFAULT_REQUESTS_BUFFER_SIZE);
+        let (tx_incoming_response, rx_incoming_response) = channel(DEFAULT_RESPONSES_BUFFER_SIZE);
+        let (tx_outgoing_message, _) = unbounded();
+
+        let protocol_state = Arc::new(Mutex::new(ProtocolState::new(tx_state_change)));
+        let task = create_split_messages_task(
+            protocol_state.clone(),
+            rx_state_change,
+            rx_message.map_err(|_| {
+                Error::IO(Arc::new(io::Error::new(
+                    io::ErrorKind::Other,
+                    "dummy error",
+                )))
+            }),
+            tx_incoming_request,
+            tx_incoming_response,
+            tx_outgoing_message,
+        );
+
+        // Simulate sending a request and response.
+
+        let request = Request::builder()
+            .method(Method::Options)
+            .uri(URI::Any)
+            .build("".into())
+            .unwrap();
+
+        tx_message
+            .unbounded_send(Ok(Message::Request(request.clone())))
+            .unwrap();
+
+        let response = Response::builder().build("".into()).unwrap();
+        tx_message
+            .unbounded_send(Ok(Message::Response(response.clone())))
+            .unwrap();
+
+        // Simulate ending the stream.
+
+        mem::drop(tx_message);
+
+        // Wait for task to end.
+
+        let mut runtime = current_thread::Runtime::new().unwrap();
+
+        runtime.block_on(task).unwrap();
+        let incoming_requests = runtime.block_on(rx_incoming_request.collect()).unwrap();
+        let incoming_responses = runtime.block_on(rx_incoming_response.collect()).unwrap();
+
+        assert_eq!(
+            lock_state(&protocol_state).state(),
+            (ReadWriteState::None, ReadWriteState::Response)
+        );
+        assert_eq!(incoming_requests, vec![request]);
+        assert_eq!(incoming_responses, vec![response]);
+    }
+
+    #[test]
+    fn test_split_messages_task_invalid_request_responses_not_allowed() {
+        let (tx_state_change, rx_state_change) = unbounded();
+        let (tx_message, rx_message) = unbounded();
+        let (tx_incoming_request, _) = channel(DEFAULT_REQUESTS_BUFFER_SIZE);
+        let (tx_incoming_response, _) = channel(DEFAULT_RESPONSES_BUFFER_SIZE);
+        let (tx_outgoing_message, rx_outgoing_message) = unbounded();
+
+        let protocol_state = Arc::new(Mutex::new(ProtocolState::new(tx_state_change)));
+
+        {
+            lock_state(&protocol_state).update_write_state(ReadWriteState::None);
+        }
+
+        let task = create_split_messages_task(
+            protocol_state.clone(),
+            rx_state_change,
+            rx_message.map_err(|_| {
+                Error::IO(Arc::new(io::Error::new(
+                    io::ErrorKind::Other,
+                    "dummy error",
+                )))
+            }),
+            tx_incoming_request,
+            tx_incoming_response,
+            tx_outgoing_message,
+        );
+
+        // Simulate sending an invalid request.
+
+        tx_message
+            .unbounded_send(Err(InvalidMessage::InvalidRequest(
+                RecoverableInvalidRequest::InvalidURI,
+            )))
+            .unwrap();
+
+        // Simulate ending the stream.
+
+        mem::drop(tx_message);
+
+        // Wait for task to end.
+
+        let mut runtime = current_thread::Runtime::new().unwrap();
+
+        runtime.block_on(task).unwrap();
+        let outgoing_messages = runtime.block_on(rx_outgoing_message.collect()).unwrap();
+
+        assert_eq!(
+            lock_state(&protocol_state).state(),
+            (ReadWriteState::None, ReadWriteState::None)
+        );
+        assert_eq!(outgoing_messages, vec![]);
+    }
+
+    #[test]
+    fn test_split_messages_task_invalid_request_responses_allowed() {
+        let (tx_state_change, rx_state_change) = unbounded();
+        let (tx_message, rx_message) = unbounded();
+        let (tx_incoming_request, _) = channel(DEFAULT_REQUESTS_BUFFER_SIZE);
+        let (tx_incoming_response, _) = channel(DEFAULT_RESPONSES_BUFFER_SIZE);
+        let (tx_outgoing_message, rx_outgoing_message) = unbounded();
+
+        let protocol_state = Arc::new(Mutex::new(ProtocolState::new(tx_state_change)));
+        let task = create_split_messages_task(
+            protocol_state.clone(),
+            rx_state_change,
+            rx_message.map_err(|_| {
+                Error::IO(Arc::new(io::Error::new(
+                    io::ErrorKind::Other,
+                    "dummy error",
+                )))
+            }),
+            tx_incoming_request,
+            tx_incoming_response,
+            tx_outgoing_message,
+        );
+
+        // Simulate sending an invalid request.
+
+        tx_message
+            .unbounded_send(Err(InvalidMessage::InvalidRequest(
+                RecoverableInvalidRequest::InvalidURI,
+            )))
+            .unwrap();
+
+        // Simulate ending the stream.
+
+        mem::drop(tx_message);
+
+        // Wait for task to end.
+
+        let mut runtime = current_thread::Runtime::new().unwrap();
+
+        runtime.block_on(task).unwrap();
+        let outgoing_messages = runtime.block_on(rx_outgoing_message.collect()).unwrap();
+
+        assert_eq!(
+            lock_state(&protocol_state).state(),
+            (ReadWriteState::None, ReadWriteState::Response)
+        );
+
+        let expected_message = Message::Response(
+            Response::builder()
+                .status_code(StatusCode::BadRequest)
+                .build("".into())
+                .unwrap(),
+        );
+
+        assert_eq!(outgoing_messages, vec![expected_message]);
+    }
+
+    #[test]
+    fn test_split_messages_task_state_change_no_reads() {
+        let dummy_error = Error::IO(Arc::new(io::Error::new(
+            io::ErrorKind::Other,
+            "dummy error",
+        )));
+
+        for new_read_state in [ReadWriteState::None, ReadWriteState::Error(dummy_error)].iter() {
+            let (tx_state_change, rx_state_change) = unbounded();
+            let (tx_message, rx_message) = unbounded();
+            let (tx_incoming_request, _) = channel(DEFAULT_REQUESTS_BUFFER_SIZE);
+            let (tx_incoming_response, _) = channel(DEFAULT_RESPONSES_BUFFER_SIZE);
+            let (tx_outgoing_message, _) = unbounded();
+
+            let protocol_state = Arc::new(Mutex::new(ProtocolState::new(tx_state_change)));
+
+            {
+                lock_state(&protocol_state).update_read_state(new_read_state.clone());
+            }
+
+            let task = create_split_messages_task(
+                protocol_state.clone(),
+                rx_state_change,
+                rx_message.map_err(|_| {
+                    Error::IO(Arc::new(io::Error::new(
+                        io::ErrorKind::Other,
+                        "dummy error",
+                    )))
+                }),
+                tx_incoming_request,
+                tx_incoming_response,
+                tx_outgoing_message,
+            );
+
+            // Wait for task to end.
+
+            current_thread::Runtime::new()
+                .unwrap()
+                .block_on(task)
+                .unwrap();
+
+            assert_eq!(
+                lock_state(&protocol_state).state(),
+                (new_read_state.clone(), ReadWriteState::Response)
+            );
+        }
+    }
+
+    #[test]
+    fn test_split_messages_task_state_change_no_requests() {
+        let dummy_error = Error::IO(Arc::new(io::Error::new(
+            io::ErrorKind::Other,
+            "dummy error",
+        )));
+
+        let mut new_states = [
+            (Some(ReadWriteState::Response), None),
+            (None, Some(ReadWriteState::None)),
+            (None, Some(ReadWriteState::Error(dummy_error))),
+            (None, Some(ReadWriteState::Response)),
+        ];
+
+        for new_state in new_states.iter_mut() {
+            let (tx_state_change, rx_state_change) = unbounded();
+            let (tx_message, rx_message) = unbounded();
+            let (tx_incoming_request, rx_incoming_request) = channel(DEFAULT_REQUESTS_BUFFER_SIZE);
+            let (tx_incoming_response, _) = channel(DEFAULT_RESPONSES_BUFFER_SIZE);
+            let (tx_outgoing_message, _) = unbounded();
+
+            let protocol_state = Arc::new(Mutex::new(ProtocolState::new(tx_state_change)));
+            let mut write_state = new_state.1.clone();
+
+            {
+                if let Some(new_read_state) = new_state.0.take() {
+                    lock_state(&protocol_state).update_read_state(new_read_state);
+                }
+
+                if let Some(new_write_state) = new_state.1.take() {
+                    lock_state(&protocol_state).update_write_state(new_write_state);
+                }
+            }
+
+            let task = create_split_messages_task(
+                protocol_state.clone(),
+                rx_state_change,
+                rx_message.map_err(|_| {
+                    Error::IO(Arc::new(io::Error::new(
+                        io::ErrorKind::Other,
+                        "dummy error",
+                    )))
+                }),
+                tx_incoming_request,
+                tx_incoming_response,
+                tx_outgoing_message,
+            );
+
+            let mut runtime = Runtime::new().unwrap();
+
+            // Simulate sending a request but wait to do it so that the protocol state change can be
+            // handled first.
+
+            runtime.spawn(
+                Delay::new(Instant::now() + Duration::from_millis(100)).then(move |_| {
+                    let request = Request::builder()
+                        .method(Method::Options)
+                        .uri(URI::Any)
+                        .build("".into())
+                        .unwrap();
+
+                    tx_message
+                        .unbounded_send(Ok(Message::Request(request)))
+                        .unwrap();
+                    Ok(())
+                }),
+            );
+
+            // Wait for task to end.
+
+            runtime.spawn(task);
+            runtime.shutdown_on_idle().wait().unwrap();
+
+            let incoming_requests = current_thread::Runtime::new()
+                .unwrap()
+                .block_on(rx_incoming_request.collect())
+                .unwrap();
+
+            let expected_write_state = if let Some(new_write_state) = write_state.take() {
+                new_write_state
+            } else {
+                ReadWriteState::Response
+            };
+
+            assert_eq!(
+                lock_state(&protocol_state).state(),
+                (ReadWriteState::None, expected_write_state)
+            );
+            assert!(incoming_requests.is_empty());
+        }
+    }
+
+    #[test]
+    fn test_split_messages_task_state_change_no_responses() {
+        let (tx_state_change, rx_state_change) = unbounded();
+        let (tx_message, rx_message) = unbounded();
+        let (tx_incoming_request, _) = channel(DEFAULT_REQUESTS_BUFFER_SIZE);
+        let (tx_incoming_response, rx_incoming_response) = channel(DEFAULT_RESPONSES_BUFFER_SIZE);
+        let (tx_outgoing_message, _) = unbounded();
+
+        let protocol_state = Arc::new(Mutex::new(ProtocolState::new(tx_state_change)));
+
+        {
+            lock_state(&protocol_state).update_read_state(ReadWriteState::Request);
+        }
+
+        let task = create_split_messages_task(
+            protocol_state.clone(),
+            rx_state_change,
+            rx_message.map_err(|_| {
+                Error::IO(Arc::new(io::Error::new(
+                    io::ErrorKind::Other,
+                    "dummy error",
+                )))
+            }),
+            tx_incoming_request,
+            tx_incoming_response,
+            tx_outgoing_message,
+        );
+
+        let mut runtime = Runtime::new().unwrap();
+
+        // Simulate sending a response but wait to do it so that the protocol state change can be
+        // handled first.
+
+        let protocol_state_cloned = protocol_state.clone();
+
+        runtime.spawn(
+            Delay::new(Instant::now() + Duration::from_millis(100)).then(move |_| {
+                assert_eq!(
+                    lock_state(&protocol_state_cloned).state(),
+                    (ReadWriteState::Request, ReadWriteState::Response)
+                );
+
+                let response = Response::builder().build("".into()).unwrap();
+                tx_message
+                    .unbounded_send(Ok(Message::Response(response)))
+                    .unwrap();
+                Ok(())
+            }),
+        );
+
+        // Wait for task to end.
+
+        runtime.spawn(task);
+        runtime.shutdown_on_idle().wait().unwrap();
+
+        let incoming_responses = current_thread::Runtime::new()
+            .unwrap()
+            .block_on(rx_incoming_response.collect())
+            .unwrap();
+
+        assert_eq!(
+            lock_state(&protocol_state).state(),
+            (ReadWriteState::None, ReadWriteState::Response)
+        );
+        assert!(incoming_responses.is_empty());
+    }
+
+    #[test]
+    fn test_split_messages_task_stream_ends() {
+        let (tx_state_change, rx_state_change) = unbounded();
+        let (tx_message, rx_message) = unbounded();
+        let (tx_incoming_request, _) = channel(DEFAULT_REQUESTS_BUFFER_SIZE);
+        let (tx_incoming_response, _) = channel(DEFAULT_RESPONSES_BUFFER_SIZE);
+        let (tx_outgoing_message, _) = unbounded();
+
+        let protocol_state = Arc::new(Mutex::new(ProtocolState::new(tx_state_change)));
+        let task = create_split_messages_task(
+            protocol_state.clone(),
+            rx_state_change,
+            rx_message.map_err(|_| {
+                Error::IO(Arc::new(io::Error::new(
+                    io::ErrorKind::Other,
+                    "dummy error",
+                )))
+            }),
+            tx_incoming_request,
+            tx_incoming_response,
+            tx_outgoing_message,
+        );
+
+        // Simulate ending the stream.
+
+        mem::drop(tx_message);
+
+        // Wait for task to end.
+
+        current_thread::Runtime::new()
+            .unwrap()
+            .block_on(task)
+            .unwrap();
+
+        assert_eq!(
+            lock_state(&protocol_state).state(),
+            (ReadWriteState::None, ReadWriteState::Response)
+        );
+    }
+
+    #[test]
+    fn test_split_messages_task_stream_error() {
+        let (tx_state_change, rx_state_change) = unbounded();
+        let (tx_message, rx_message) = unbounded();
+        let (tx_incoming_request, _) = channel(DEFAULT_REQUESTS_BUFFER_SIZE);
+        let (tx_incoming_response, _) = channel(DEFAULT_RESPONSES_BUFFER_SIZE);
+        let (tx_outgoing_message, _) = unbounded();
+
+        let protocol_state = Arc::new(Mutex::new(ProtocolState::new(tx_state_change)));
+        let task = create_split_messages_task(
+            protocol_state.clone(),
+            rx_state_change,
+            rx_message.then(|_: Result<Result<Message, InvalidMessage>, ()>| {
+                Err(Error::IO(Arc::new(io::Error::new(
+                    io::ErrorKind::Other,
+                    "dummy error",
+                ))))
+            }),
+            tx_incoming_request,
+            tx_incoming_response,
+            tx_outgoing_message,
+        );
+
+        // Simulate sending an error. Since we cannot actually send an error, we send whatever here
+        // and use the `then` combinator to force an error.
+
+        let message = Message::Response(Response::builder().build("".into()).unwrap());
+        tx_message.unbounded_send(Ok(message)).unwrap();
+
+        // Wait for the task to end.
+
+        current_thread::Runtime::new()
+            .unwrap()
+            .block_on(task)
+            .unwrap();
+
+        assert_eq!(
+            lock_state(&protocol_state).state(),
+            (
+                ReadWriteState::Error(Error::IO(Arc::new(io::Error::new(
+                    io::ErrorKind::Other,
+                    "dummy error",
+                )))),
                 ReadWriteState::Response
             )
         );
