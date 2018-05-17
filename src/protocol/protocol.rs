@@ -774,6 +774,10 @@ where
                     {
                         // We can no longer write any messages.
                         (_, ReadWriteState::None) | (_, ReadWriteState::Error(_)) => {
+                            // Make sure read state is set correctly. This should have already
+                            // happened, but just in case.
+
+                            lock_state(&state).update_read_state(ReadWriteState::Response);
                             Loop::Break(())
                         }
                         _ => Loop::Continue((state, rx_state_change.into_future(), send_messages)),
@@ -792,7 +796,7 @@ where
                         // the error to the write state and end the task.
 
                         lock_state(&state)
-                            .update_state(ReadWriteState::Request, ReadWriteState::Error(error));
+                            .update_state(ReadWriteState::Response, ReadWriteState::Error(error));
                         Loop::Break(())
                     }
                 })
@@ -1149,6 +1153,129 @@ mod test {
     }
 
     #[test]
+    fn test_send_messages_task_sink_error() {
+        let (tx_state_change, rx_state_change) = unbounded();
+        let (tx_message, _) = unbounded();
+        let (tx_outgoing_message, rx_outgoing_message) = unbounded();
+        let outgoing_messages = vec![rx_outgoing_message];
+
+        let protocol_state = Arc::new(Mutex::new(ProtocolState::new(tx_state_change)));
+        let task = create_send_messages_task(
+            protocol_state.clone(),
+            rx_state_change,
+            tx_message.sink_map_err(|_| {
+                Error::IO(Arc::new(io::Error::new(
+                    io::ErrorKind::Other,
+                    "dummy error",
+                )))
+            }),
+            outgoing_messages,
+        );
+
+        // Simulate sending a response.
+
+        let response = Response::builder().build("".into()).unwrap();
+        tx_outgoing_message
+            .unbounded_send(Message::Response(response))
+            .unwrap();
+
+        // Wait for the task to end.
+
+        current_thread::Runtime::new()
+            .unwrap()
+            .block_on(task)
+            .unwrap();
+
+        assert_eq!(
+            lock_state(&protocol_state).state(),
+            (
+                ReadWriteState::Response,
+                ReadWriteState::Error(Error::IO(Arc::new(io::Error::new(
+                    io::ErrorKind::Other,
+                    "dummy error",
+                ))))
+            )
+        );
+    }
+
+    #[test]
+    fn test_send_messages_task_state_change_no_writes() {
+        let dummy_error = Error::IO(Arc::new(io::Error::new(
+            io::ErrorKind::Other,
+            "dummy error",
+        )));
+
+        for new_write_state in [ReadWriteState::None, ReadWriteState::Error(dummy_error)].iter() {
+            let (tx_state_change, rx_state_change) = unbounded();
+            let (tx_message, _rx_message) = unbounded();
+            let (_tx_outgoing_message, rx_outgoing_message) = unbounded();
+            let outgoing_messages = vec![rx_outgoing_message];
+
+            let protocol_state = Arc::new(Mutex::new(ProtocolState::new(tx_state_change)));
+
+            {
+                lock_state(&protocol_state).update_write_state(new_write_state.clone());
+            }
+
+            let task = create_send_messages_task(
+                protocol_state.clone(),
+                rx_state_change,
+                tx_message.sink_map_err(|_| {
+                    Error::IO(Arc::new(io::Error::new(
+                        io::ErrorKind::Other,
+                        "dummy error",
+                    )))
+                }),
+                outgoing_messages,
+            );
+
+            // Wait for the task to end.
+
+            current_thread::Runtime::new()
+                .unwrap()
+                .block_on(task)
+                .unwrap();
+
+            assert_eq!(
+                lock_state(&protocol_state).state(),
+                (ReadWriteState::Response, new_write_state.clone())
+            );
+        }
+    }
+
+    #[test]
+    fn test_send_messages_task_stream_ends() {
+        let (tx_state_change, rx_state_change) = unbounded();
+        let (tx_message, _rx_message) = unbounded();
+        let outgoing_messages = vec![];
+
+        let protocol_state = Arc::new(Mutex::new(ProtocolState::new(tx_state_change)));
+        let task = create_send_messages_task(
+            protocol_state.clone(),
+            rx_state_change,
+            tx_message.sink_map_err(|_| {
+                Error::IO(Arc::new(io::Error::new(
+                    io::ErrorKind::Other,
+                    "dummy error",
+                )))
+            }),
+            outgoing_messages,
+        );
+
+        // Wait for the task to end.
+
+        current_thread::Runtime::new()
+            .unwrap()
+            .block_on(task)
+            .unwrap();
+
+        assert_eq!(
+            lock_state(&protocol_state).state(),
+            (ReadWriteState::Response, ReadWriteState::None)
+        );
+    }
+
+    #[test]
     fn test_split_messages_task_forward_request_error() {
         let (tx_state_change, rx_state_change) = unbounded();
         let (tx_message, rx_message) = unbounded();
@@ -1453,7 +1580,7 @@ mod test {
 
         for new_read_state in [ReadWriteState::None, ReadWriteState::Error(dummy_error)].iter() {
             let (tx_state_change, rx_state_change) = unbounded();
-            let (tx_message, rx_message) = unbounded();
+            let (_tx_message, rx_message) = unbounded();
             let (tx_incoming_request, _) = channel(DEFAULT_REQUESTS_BUFFER_SIZE);
             let (tx_incoming_response, _) = channel(DEFAULT_RESPONSES_BUFFER_SIZE);
             let (tx_outgoing_message, _) = unbounded();
