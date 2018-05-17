@@ -67,133 +67,140 @@ impl Config {
     }
 }
 
-#[derive(Clone, Debug)]
-pub enum ReadWriteState {
-    All,
-    Error(Error),
-    Request,
-    Response,
-    None,
+macro_rules! state_type {
+    ($(#[$docs:meta])* $type_name:ident) => {
+        #[derive(Clone, Debug)]
+        pub enum $type_name {
+            All,
+            Error(Error),
+            Request,
+            Response,
+            None,
+        }
+
+        impl $type_name {
+            pub fn try_update_state(&mut self, new: $type_name) -> bool {
+                use self::$type_name::*;
+
+                match new {
+                    All => false,
+                    Request => if self.is_all() {
+                        *self = Request;
+                        true
+                    } else if self.is_response() {
+                        *self = None;
+                        true
+                    } else {
+                        false
+                    },
+                    Response => if self.is_all() {
+                        *self = Response;
+                        true
+                    } else if self.is_request() {
+                        *self = None;
+                        true
+                    } else {
+                        false
+                    },
+                    None => if !self.is_none() && !self.is_error() {
+                        *self = None;
+                        true
+                    } else {
+                        false
+                    },
+                    Error(error) => if !self.is_error() {
+                        *self = Error(error);
+                        true
+                    } else {
+                        false
+                    },
+                }
+            }
+
+            pub fn is_all(&self) -> bool {
+                match *self {
+                    $type_name::All => true,
+                    _ => false,
+                }
+            }
+
+            pub fn is_request(&self) -> bool {
+                match *self {
+                    $type_name::Request => true,
+                    _ => false,
+                }
+            }
+
+            pub fn is_response(&self) -> bool {
+                match *self {
+                    $type_name::Response => true,
+                    _ => false,
+                }
+            }
+
+            pub fn is_none(&self) -> bool {
+                match *self {
+                    $type_name::None => true,
+                    _ => false,
+                }
+            }
+
+            pub fn is_error(&self) -> bool {
+                match *self {
+                    $type_name::Error(_) => true,
+                    _ => false,
+                }
+            }
+
+            pub fn requests_allowed(&self) -> bool {
+                self.is_all() || self.is_request()
+            }
+
+            pub fn responses_allowed(&self) -> bool {
+                self.is_all() || self.is_response()
+            }
+        }
+
+        impl Eq for $type_name {}
+
+        impl PartialEq for $type_name {
+            fn eq(&self, other: &$type_name) -> bool {
+                use self::$type_name::*;
+
+                match *self {
+                    All => other.is_all(),
+                    Request => other.is_request(),
+                    Response => other.is_response(),
+                    None => other.is_none(),
+                    Error(_) => other.is_error(),
+                }
+            }
+        }
+    };
 }
 
-pub type ReadWriteStatePair = (ReadWriteState, ReadWriteState);
+state_type!(ReadState);
+state_type!(WriteState);
 
-impl ReadWriteState {
-    pub fn is_all(&self) -> bool {
-        match *self {
-            ReadWriteState::All => true,
-            _ => false,
-        }
-    }
-
-    pub fn is_request(&self) -> bool {
-        match *self {
-            ReadWriteState::Request => true,
-            _ => false,
-        }
-    }
-
-    pub fn is_response(&self) -> bool {
-        match *self {
-            ReadWriteState::Response => true,
-            _ => false,
-        }
-    }
-
-    pub fn is_none(&self) -> bool {
-        match *self {
-            ReadWriteState::None => true,
-            _ => false,
-        }
-    }
-
-    pub fn is_error(&self) -> bool {
-        match *self {
-            ReadWriteState::Error(_) => true,
-            _ => false,
-        }
-    }
-
-    pub fn requests_allowed(&self) -> bool {
-        self.is_all() || self.is_request()
-    }
-
-    pub fn responses_allowed(&self) -> bool {
-        self.is_all() || self.is_response()
-    }
-}
-
-impl Eq for ReadWriteState {}
-
-impl PartialEq for ReadWriteState {
-    fn eq(&self, other: &ReadWriteState) -> bool {
-        use self::ReadWriteState::*;
-
-        match *self {
-            All => other.is_all(),
-            Request => other.is_request(),
-            Response => other.is_response(),
-            None => other.is_none(),
-            Error(_) => other.is_error(),
-        }
-    }
-}
-
-fn try_update_state(current: &mut ReadWriteState, new: ReadWriteState) -> bool {
-    use self::ReadWriteState::*;
-
-    match new {
-        All => false,
-        Request => if current.is_all() {
-            *current = ReadWriteState::Request;
-            true
-        } else if current.is_response() {
-            *current = ReadWriteState::None;
-            true
-        } else {
-            false
-        },
-        Response => if current.is_all() {
-            *current = ReadWriteState::Response;
-            true
-        } else if current.is_request() {
-            *current = ReadWriteState::None;
-            true
-        } else {
-            false
-        },
-        None => if !current.is_none() && !current.is_error() {
-            *current = ReadWriteState::None;
-            true
-        } else {
-            false
-        },
-        Error(error) => if !current.is_error() {
-            *current = ReadWriteState::Error(error);
-            true
-        } else {
-            false
-        },
-    }
-}
+pub type ReadWriteStatePair = (ReadState, WriteState);
 
 #[derive(Debug)]
 pub struct ProtocolState {
-    read_state: ReadWriteState,
+    read_state: ReadState,
     tx_state_change: UnboundedSender<ReadWriteStatePair>,
-    write_state: ReadWriteState,
+    write_state: WriteState,
 }
 
 impl ProtocolState {
     pub fn new(tx_state_change: UnboundedSender<ReadWriteStatePair>) -> Self {
         ProtocolState {
-            read_state: ReadWriteState::All,
+            read_state: ReadState::All,
             tx_state_change,
-            write_state: ReadWriteState::All,
+            write_state: WriteState::All,
         }
     }
 
-    pub fn read_state(&self) -> ReadWriteState {
+    pub fn read_state(&self) -> ReadState {
         self.read_state.clone()
     }
 
@@ -201,24 +208,24 @@ impl ProtocolState {
         (self.read_state(), self.write_state())
     }
 
-    pub fn update_read_state(&mut self, read_state: ReadWriteState) {
-        if try_update_state(&mut self.read_state, read_state) {
+    pub fn update_read_state(&mut self, read_state: ReadState) {
+        if self.read_state.try_update_state(read_state) {
             self.tx_state_change.unbounded_send(self.state()).ok();
         }
     }
 
-    pub fn update_state(&mut self, read_state: ReadWriteState, write_state: ReadWriteState) {
+    pub fn update_state(&mut self, read_state: ReadState, write_state: WriteState) {
         self.update_read_state(read_state);
         self.update_write_state(write_state);
     }
 
-    pub fn update_write_state(&mut self, write_state: ReadWriteState) {
-        if try_update_state(&mut self.write_state, write_state) {
+    pub fn update_write_state(&mut self, write_state: WriteState) {
+        if self.write_state.try_update_state(write_state) {
             self.tx_state_change.unbounded_send(self.state()).ok();
         }
     }
 
-    pub fn write_state(&self) -> ReadWriteState {
+    pub fn write_state(&self) -> WriteState {
         self.write_state.clone()
     }
 }
@@ -339,8 +346,8 @@ fn create_decoding_timer_task(
                             // back for any requests we were to send.
 
                             lock_state(&state).update_state(
-                                ReadWriteState::Error(Error::DecodingTimedOut),
-                                ReadWriteState::Response,
+                                ReadState::Error(Error::DecodingTimedOut),
+                                WriteState::Response,
                             );
                             Loop::Break(())
                         }
@@ -350,8 +357,7 @@ fn create_decoding_timer_task(
                             // the protocol state has already been updated by this point, but we do
                             // it just in case, since this is the final protocol state.
 
-                            lock_state(&state)
-                                .update_state(ReadWriteState::None, ReadWriteState::None);
+                            lock_state(&state).update_state(ReadState::None, WriteState::None);
                             Loop::Break(())
                         }
                         Either::B(((Some(event), rx_codec_event), timer)) => match event {
@@ -773,11 +779,11 @@ where
                         .expect("state change receiver should not end")
                     {
                         // We can no longer write any messages.
-                        (_, ReadWriteState::None) | (_, ReadWriteState::Error(_)) => {
+                        (_, WriteState::None) | (_, WriteState::Error(_)) => {
                             // Make sure read state is set correctly. This should have already
                             // happened, but just in case.
 
-                            lock_state(&state).update_read_state(ReadWriteState::Response);
+                            lock_state(&state).update_read_state(ReadState::Response);
                             Loop::Break(())
                         }
                         _ => Loop::Continue((state, rx_state_change.into_future(), send_messages)),
@@ -786,8 +792,7 @@ where
                         // All of the messages of the stream defined above have been finished
                         // meaning no more messages will be sent, so the task can end.
 
-                        lock_state(&state)
-                            .update_state(ReadWriteState::Response, ReadWriteState::None);
+                        lock_state(&state).update_state(ReadState::Response, WriteState::None);
                         Loop::Break(())
                     }
                     Err(Either::A(_)) => panic!("state change receiver should not error"),
@@ -796,7 +801,7 @@ where
                         // the error to the write state and end the task.
 
                         lock_state(&state)
-                            .update_state(ReadWriteState::Response, ReadWriteState::Error(error));
+                            .update_state(ReadState::Response, WriteState::Error(error));
                         Loop::Break(())
                     }
                 })
@@ -854,7 +859,7 @@ where
         tx_incoming_message: Option<Sender<M>>,
         message: M,
         state: &Arc<Mutex<ProtocolState>>,
-        error_state: (Option<ReadWriteState>, Option<ReadWriteState>),
+        error_state: (Option<ReadState>, Option<WriteState>),
     ) -> Option<Sender<M>> {
         tx_incoming_message.and_then(|tx_incoming_message| {
             match tx_incoming_message.send(message).wait() {
@@ -910,7 +915,7 @@ where
                                     tx_incoming_request,
                                     request,
                                     &state,
-                                    (Some(ReadWriteState::Response), None),
+                                    (Some(ReadState::Response), None),
                                 );
                             }
                             Ok(Message::Response(response)) => {
@@ -922,10 +927,7 @@ where
                                     tx_incoming_response,
                                     response,
                                     &state,
-                                    (
-                                        Some(ReadWriteState::Request),
-                                        Some(ReadWriteState::Response),
-                                    ),
+                                    (Some(ReadState::Request), Some(WriteState::Response)),
                                 );
                             }
                             Err(InvalidMessage::InvalidRequest(_)) => {
@@ -970,35 +972,34 @@ where
                         // The incoming message stream has ended. We can only write responses from
                         // this point forward.
 
-                        lock_state(&state)
-                            .update_state(ReadWriteState::None, ReadWriteState::Response);
+                        lock_state(&state).update_state(ReadState::None, WriteState::Response);
                         Loop::Break(())
                     }
                     Ok(Either::B(((new_state, rx_state_change), stream))) => {
                         match new_state.expect("state change receiver should not end") {
                             // We can no longer read anything.
-                            (ReadWriteState::None, _) | (ReadWriteState::Error(_), _) => {
+                            (ReadState::None, _) | (ReadState::Error(_), _) => {
                                 // Make sure write state is set correctly. This should have already
                                 // happened, but just in case.
 
-                                lock_state(&state).update_write_state(ReadWriteState::Response);
+                                lock_state(&state).update_write_state(WriteState::Response);
                                 return Ok(Loop::Break(()));
                             }
 
                             // We can no longer read responses.
-                            (ReadWriteState::Request, _) => {
+                            (ReadState::Request, _) => {
                                 // Make sure write state is set correctly. This should have already
                                 // happened, but just in case.
 
-                                lock_state(&state).update_write_state(ReadWriteState::Response);
+                                lock_state(&state).update_write_state(WriteState::Response);
                                 tx_incoming_response = None;
                             }
 
                             // We can no longer read requests.
-                            (ReadWriteState::Response, _)
-                            | (_, ReadWriteState::None)
-                            | (_, ReadWriteState::Error(_))
-                            | (_, ReadWriteState::Response) => tx_incoming_request = None,
+                            (ReadState::Response, _)
+                            | (_, WriteState::None)
+                            | (_, WriteState::Error(_))
+                            | (_, WriteState::Response) => tx_incoming_request = None,
                             _ => (),
                         }
 
@@ -1018,7 +1019,7 @@ where
                         // able to read their responses.
 
                         lock_state(&state)
-                            .update_state(ReadWriteState::Error(error), ReadWriteState::Response);
+                            .update_state(ReadState::Error(error), WriteState::Response);
                         Loop::Break(())
                     }
                     Err(Either::B(_)) => panic!("state change receiver should not error"),
@@ -1087,7 +1088,7 @@ mod test {
 
         assert_eq!(
             lock_state(&protocol_state).state(),
-            (ReadWriteState::None, ReadWriteState::None)
+            (ReadState::None, WriteState::None)
         );
     }
 
@@ -1115,7 +1116,7 @@ mod test {
 
         assert_eq!(
             lock_state(&protocol_state).state(),
-            (ReadWriteState::None, ReadWriteState::None)
+            (ReadState::None, WriteState::None)
         );
     }
 
@@ -1146,8 +1147,8 @@ mod test {
         assert_eq!(
             lock_state(&protocol_state).state(),
             (
-                ReadWriteState::Error(Error::DecodingTimedOut),
-                ReadWriteState::Response
+                ReadState::Error(Error::DecodingTimedOut),
+                WriteState::Response
             )
         );
     }
@@ -1189,8 +1190,8 @@ mod test {
         assert_eq!(
             lock_state(&protocol_state).state(),
             (
-                ReadWriteState::Response,
-                ReadWriteState::Error(Error::IO(Arc::new(io::Error::new(
+                ReadState::Response,
+                WriteState::Error(Error::IO(Arc::new(io::Error::new(
                     io::ErrorKind::Other,
                     "dummy error",
                 ))))
@@ -1205,7 +1206,7 @@ mod test {
             "dummy error",
         )));
 
-        for new_write_state in [ReadWriteState::None, ReadWriteState::Error(dummy_error)].iter() {
+        for new_write_state in [WriteState::None, WriteState::Error(dummy_error)].iter() {
             let (tx_state_change, rx_state_change) = unbounded();
             let (tx_message, _rx_message) = unbounded();
             let (_tx_outgoing_message, rx_outgoing_message) = unbounded();
@@ -1238,7 +1239,7 @@ mod test {
 
             assert_eq!(
                 lock_state(&protocol_state).state(),
-                (ReadWriteState::Response, new_write_state.clone())
+                (ReadState::Response, new_write_state.clone())
             );
         }
     }
@@ -1271,7 +1272,7 @@ mod test {
 
         assert_eq!(
             lock_state(&protocol_state).state(),
-            (ReadWriteState::Response, ReadWriteState::None)
+            (ReadState::Response, WriteState::None)
         );
     }
 
@@ -1321,7 +1322,7 @@ mod test {
             Delay::new(Instant::now() + Duration::from_millis(100)).then(move |_| {
                 assert_eq!(
                     lock_state(&protocol_state_cloned).state(),
-                    (ReadWriteState::Response, ReadWriteState::All)
+                    (ReadState::Response, WriteState::All)
                 );
 
                 mem::drop(tx_message);
@@ -1336,7 +1337,7 @@ mod test {
 
         assert_eq!(
             lock_state(&protocol_state).state(),
-            (ReadWriteState::None, ReadWriteState::Response)
+            (ReadState::None, WriteState::Response)
         );
     }
 
@@ -1381,7 +1382,7 @@ mod test {
             Delay::new(Instant::now() + Duration::from_millis(100)).then(move |_| {
                 assert_eq!(
                     lock_state(&protocol_state_cloned).state(),
-                    (ReadWriteState::Request, ReadWriteState::Response)
+                    (ReadState::Request, WriteState::Response)
                 );
 
                 mem::drop(tx_message);
@@ -1396,7 +1397,7 @@ mod test {
 
         assert_eq!(
             lock_state(&protocol_state).state(),
-            (ReadWriteState::None, ReadWriteState::Response)
+            (ReadState::None, WriteState::Response)
         );
     }
 
@@ -1454,7 +1455,7 @@ mod test {
 
         assert_eq!(
             lock_state(&protocol_state).state(),
-            (ReadWriteState::None, ReadWriteState::Response)
+            (ReadState::None, WriteState::Response)
         );
         assert_eq!(incoming_requests, vec![request]);
         assert_eq!(incoming_responses, vec![response]);
@@ -1471,7 +1472,7 @@ mod test {
         let protocol_state = Arc::new(Mutex::new(ProtocolState::new(tx_state_change)));
 
         {
-            lock_state(&protocol_state).update_write_state(ReadWriteState::None);
+            lock_state(&protocol_state).update_write_state(WriteState::None);
         }
 
         let task = create_split_messages_task(
@@ -1509,7 +1510,7 @@ mod test {
 
         assert_eq!(
             lock_state(&protocol_state).state(),
-            (ReadWriteState::None, ReadWriteState::None)
+            (ReadState::None, WriteState::None)
         );
         assert_eq!(outgoing_messages, vec![]);
     }
@@ -1558,7 +1559,7 @@ mod test {
 
         assert_eq!(
             lock_state(&protocol_state).state(),
-            (ReadWriteState::None, ReadWriteState::Response)
+            (ReadState::None, WriteState::Response)
         );
 
         let expected_message = Message::Response(
@@ -1578,7 +1579,7 @@ mod test {
             "dummy error",
         )));
 
-        for new_read_state in [ReadWriteState::None, ReadWriteState::Error(dummy_error)].iter() {
+        for new_read_state in [ReadState::None, ReadState::Error(dummy_error)].iter() {
             let (tx_state_change, rx_state_change) = unbounded();
             let (_tx_message, rx_message) = unbounded();
             let (tx_incoming_request, _) = channel(DEFAULT_REQUESTS_BUFFER_SIZE);
@@ -1614,7 +1615,7 @@ mod test {
 
             assert_eq!(
                 lock_state(&protocol_state).state(),
-                (new_read_state.clone(), ReadWriteState::Response)
+                (new_read_state.clone(), WriteState::Response)
             );
         }
     }
@@ -1627,10 +1628,10 @@ mod test {
         )));
 
         let mut new_states = [
-            (Some(ReadWriteState::Response), None),
-            (None, Some(ReadWriteState::None)),
-            (None, Some(ReadWriteState::Error(dummy_error))),
-            (None, Some(ReadWriteState::Response)),
+            (Some(ReadState::Response), None),
+            (None, Some(WriteState::None)),
+            (None, Some(WriteState::Error(dummy_error))),
+            (None, Some(WriteState::Response)),
         ];
 
         for new_state in new_states.iter_mut() {
@@ -1700,12 +1701,12 @@ mod test {
             let expected_write_state = if let Some(new_write_state) = write_state.take() {
                 new_write_state
             } else {
-                ReadWriteState::Response
+                WriteState::Response
             };
 
             assert_eq!(
                 lock_state(&protocol_state).state(),
-                (ReadWriteState::None, expected_write_state)
+                (ReadState::None, expected_write_state)
             );
             assert!(incoming_requests.is_empty());
         }
@@ -1722,7 +1723,7 @@ mod test {
         let protocol_state = Arc::new(Mutex::new(ProtocolState::new(tx_state_change)));
 
         {
-            lock_state(&protocol_state).update_read_state(ReadWriteState::Request);
+            lock_state(&protocol_state).update_read_state(ReadState::Request);
         }
 
         let task = create_split_messages_task(
@@ -1750,7 +1751,7 @@ mod test {
             Delay::new(Instant::now() + Duration::from_millis(100)).then(move |_| {
                 assert_eq!(
                     lock_state(&protocol_state_cloned).state(),
-                    (ReadWriteState::Request, ReadWriteState::Response)
+                    (ReadState::Request, WriteState::Response)
                 );
 
                 let response = Response::builder().build("".into()).unwrap();
@@ -1773,7 +1774,7 @@ mod test {
 
         assert_eq!(
             lock_state(&protocol_state).state(),
-            (ReadWriteState::None, ReadWriteState::Response)
+            (ReadState::None, WriteState::Response)
         );
         assert!(incoming_responses.is_empty());
     }
@@ -1814,7 +1815,7 @@ mod test {
 
         assert_eq!(
             lock_state(&protocol_state).state(),
-            (ReadWriteState::None, ReadWriteState::Response)
+            (ReadState::None, WriteState::Response)
         );
     }
 
@@ -1857,11 +1858,11 @@ mod test {
         assert_eq!(
             lock_state(&protocol_state).state(),
             (
-                ReadWriteState::Error(Error::IO(Arc::new(io::Error::new(
+                ReadState::Error(Error::IO(Arc::new(io::Error::new(
                     io::ErrorKind::Other,
                     "dummy error",
                 )))),
-                ReadWriteState::Response
+                WriteState::Response
             )
         );
     }
