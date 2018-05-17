@@ -69,6 +69,7 @@ impl Config {
 
 macro_rules! state_type {
     ($(#[$docs:meta])* $type_name:ident) => {
+        $(#[$docs])*
         #[derive(Clone, Debug)]
         pub enum $type_name {
             All,
