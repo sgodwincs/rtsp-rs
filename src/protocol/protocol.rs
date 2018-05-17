@@ -735,9 +735,11 @@ where
     let stream = select_all(outgoing_messages)
         .filter(move |message| {
             // Only allow writing of messages that are allowed by the current write state. This is
-            // here just to ensure something else in the protocol does not obey the write state. But
+            // here just in case something else in the protocol does not obey the write state. But
             // if everything does, then this is a waste of time. Until everything has been tested
             // extensively, this will remain.
+            //
+            // TODO: Remove this after testing all tasks extensively.
 
             match message {
                 Message::Request(_) => lock_state(&state).write_state().requests_allowed(),
@@ -746,11 +748,11 @@ where
         })
         .map_err(|_| {
             // We have to match the error type that the sink generates, and since we do not want to
-            // change the sink's error type in order to catch any errors that occur, we must change the
-            // error here. This is a bit weird, since this is not even possible due to channel receivers
-            // not being able to error.
+            // change the sink's error type in order to catch any errors that occur, we must change
+            // the error here. This is a bit weird, since this is not even possible due to channel
+            // receivers not being able to error.
             //
-            // I think this may be able to be fixed once `futures` starts using the `!` type.
+            // TODO: I think this may be able to be fixed once `futures` starts using the `!` type.
 
             Error::IO(Arc::new(io::Error::new(
                 io::ErrorKind::Other,
@@ -815,6 +817,12 @@ where
 ///   can happen from external causes or from within the function. Specifically, if the request and
 ///   response channel receivers are dropped, this will implicitly cause the corresponding state
 ///   change thus forcing this task to end.
+///
+/// In order for this task to end properly in all cases, we have to make sure that the dropping of
+/// either of the incoming channel receivers implies a state change. Otherwise, it could be that
+/// both of the incoming channels are no longer functional and thus this task cannot perform any
+/// work. But it will not be able to detect that, so a state change must occur so the task can
+/// handle any changes.
 ///
 /// # Arguments
 ///
@@ -966,7 +974,8 @@ where
                         match new_state.expect("state change receiver should not end") {
                             // We can no longer read anything.
                             (ReadWriteState::None, _) | (ReadWriteState::Error(_), _) => {
-                                // Make sure write state is set correctly.
+                                // Make sure write state is set correctly. This should have already
+                                // happened, but just in case.
 
                                 lock_state(&state).update_write_state(ReadWriteState::Response);
                                 return Ok(Loop::Break(()));
@@ -974,7 +983,8 @@ where
 
                             // We can no longer read responses.
                             (ReadWriteState::Request, _) => {
-                                // Make sure write state is set correctly.
+                                // Make sure write state is set correctly. This should have already
+                                // happened, but just in case.
 
                                 lock_state(&state).update_write_state(ReadWriteState::Response);
                                 tx_incoming_response = None;
