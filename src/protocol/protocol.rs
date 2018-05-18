@@ -722,6 +722,15 @@ fn create_response_handler_task(
 
 /// Constructs a task that forwards all outgoing messages into a sink.
 ///
+/// While the write state should be obeyed, this task will not allow sending of requests or
+/// responses that are not allowed by the current write state.
+///
+/// This task will end in one of three situations:
+///
+/// * The vector of receivers all end, so no more messages will be sent through the sink.
+/// * While trying to send a message through the sink, an error occurs.
+/// * A protocol state change was detected in which writing is no longer necessary or possible.
+///
 /// # Arguments
 ///
 /// * `state` - A reference to the protocol state.
@@ -1045,7 +1054,7 @@ mod test {
 
     #[test]
     fn test_decoding_timer_task_event_handling() {
-        let (tx_state_change, _) = unbounded();
+        let (tx_state_change, _rx_state_change) = unbounded();
         let (tx_codec_event, rx_codec_event) = unbounded();
         let protocol_state = Arc::new(Mutex::new(ProtocolState::new(tx_state_change)));
         let task = create_decoding_timer_task(
@@ -1095,7 +1104,7 @@ mod test {
 
     #[test]
     fn test_decoding_timer_task_codec_dropped() {
-        let (tx_state_change, _) = unbounded();
+        let (tx_state_change, _rx_state_change) = unbounded();
         let (tx_codec_event, rx_codec_event) = unbounded();
         let protocol_state = Arc::new(Mutex::new(ProtocolState::new(tx_state_change)));
         let task = create_decoding_timer_task(
@@ -1123,7 +1132,7 @@ mod test {
 
     #[test]
     fn test_decoding_timer_task_expired() {
-        let (tx_state_change, _) = unbounded();
+        let (tx_state_change, _rx_state_change) = unbounded();
         let (tx_codec_event, rx_codec_event) = unbounded();
         let protocol_state = Arc::new(Mutex::new(ProtocolState::new(tx_state_change)));
         let task = create_decoding_timer_task(
@@ -1155,9 +1164,36 @@ mod test {
     }
 
     #[test]
+    fn test_request_handler_task_stream_ends() {
+        let (tx_state_change, rx_state_change) = unbounded();
+        let (tx_incoming_request, rx_incoming_request) = channel(DEFAULT_REQUESTS_BUFFER_SIZE);
+        let (tx_ordered_incoming_request, _rx_ordered_incoming_request) = unbounded();
+        let (tx_outgoing_message, _rx_outgoing_message) = unbounded();
+
+        let protocol_state = Arc::new(Mutex::new(ProtocolState::new(tx_state_change)));
+        let task = create_request_handler_task(
+            protocol_state.clone(),
+            rx_incoming_request,
+            tx_ordered_incoming_request,
+            tx_outgoing_message,
+        );
+
+        // Simulate ending incoming requests.
+
+        mem::drop(tx_incoming_request);
+
+        // Wait for the task to end.
+
+        current_thread::Runtime::new()
+            .unwrap()
+            .block_on(task)
+            .unwrap();
+    }
+
+    #[test]
     fn test_send_messages_task_sink_error() {
         let (tx_state_change, rx_state_change) = unbounded();
-        let (tx_message, _) = unbounded();
+        let (tx_message, rx_message) = unbounded();
         let (tx_outgoing_message, rx_outgoing_message) = unbounded();
         let outgoing_messages = vec![rx_outgoing_message];
 
@@ -1180,6 +1216,10 @@ mod test {
         tx_outgoing_message
             .unbounded_send(Message::Response(response))
             .unwrap();
+
+        // Simulate dropping the stream.
+
+        mem::drop(rx_message);
 
         // Wait for the task to end.
 
@@ -1281,9 +1321,9 @@ mod test {
     fn test_split_messages_task_forward_request_error() {
         let (tx_state_change, rx_state_change) = unbounded();
         let (tx_message, rx_message) = unbounded();
-        let (tx_incoming_request, _) = channel(DEFAULT_REQUESTS_BUFFER_SIZE);
-        let (tx_incoming_response, _) = channel(DEFAULT_RESPONSES_BUFFER_SIZE);
-        let (tx_outgoing_message, _) = unbounded();
+        let (tx_incoming_request, rx_incoming_request) = channel(DEFAULT_REQUESTS_BUFFER_SIZE);
+        let (tx_incoming_response, _rx_incoming_response) = channel(DEFAULT_RESPONSES_BUFFER_SIZE);
+        let (tx_outgoing_message, _rx_outgoing_message) = unbounded();
 
         let protocol_state = Arc::new(Mutex::new(ProtocolState::new(tx_state_change)));
         let task = create_split_messages_task(
@@ -1311,6 +1351,10 @@ mod test {
         tx_message
             .unbounded_send(Ok(Message::Request(request)))
             .unwrap();
+
+        // Simulate dropping the forwarded request stream.
+
+        mem::drop(rx_incoming_request);
 
         let mut runtime = Runtime::new().unwrap();
 
@@ -1346,9 +1390,9 @@ mod test {
     fn test_split_messages_task_forward_response_error() {
         let (tx_state_change, rx_state_change) = unbounded();
         let (tx_message, rx_message) = unbounded();
-        let (tx_incoming_request, _) = channel(DEFAULT_REQUESTS_BUFFER_SIZE);
-        let (tx_incoming_response, _) = channel(DEFAULT_RESPONSES_BUFFER_SIZE);
-        let (tx_outgoing_message, _) = unbounded();
+        let (tx_incoming_request, _rx_incoming_request) = channel(DEFAULT_REQUESTS_BUFFER_SIZE);
+        let (tx_incoming_response, rx_incoming_response) = channel(DEFAULT_RESPONSES_BUFFER_SIZE);
+        let (tx_outgoing_message, _rx_outgoing_message) = unbounded();
 
         let protocol_state = Arc::new(Mutex::new(ProtocolState::new(tx_state_change)));
         let task = create_split_messages_task(
@@ -1371,6 +1415,10 @@ mod test {
         tx_message
             .unbounded_send(Ok(Message::Response(response)))
             .unwrap();
+
+        // Simulate dropping the forwarded responses stream.
+
+        mem::drop(rx_incoming_response);
 
         let mut runtime = Runtime::new().unwrap();
 
@@ -1408,7 +1456,7 @@ mod test {
         let (tx_message, rx_message) = unbounded();
         let (tx_incoming_request, rx_incoming_request) = channel(DEFAULT_REQUESTS_BUFFER_SIZE);
         let (tx_incoming_response, rx_incoming_response) = channel(DEFAULT_RESPONSES_BUFFER_SIZE);
-        let (tx_outgoing_message, _) = unbounded();
+        let (tx_outgoing_message, _rx_outgoing_message) = unbounded();
 
         let protocol_state = Arc::new(Mutex::new(ProtocolState::new(tx_state_change)));
         let task = create_split_messages_task(
@@ -1466,8 +1514,8 @@ mod test {
     fn test_split_messages_task_invalid_request_responses_not_allowed() {
         let (tx_state_change, rx_state_change) = unbounded();
         let (tx_message, rx_message) = unbounded();
-        let (tx_incoming_request, _) = channel(DEFAULT_REQUESTS_BUFFER_SIZE);
-        let (tx_incoming_response, _) = channel(DEFAULT_RESPONSES_BUFFER_SIZE);
+        let (tx_incoming_request, _rx_incoming_request) = channel(DEFAULT_REQUESTS_BUFFER_SIZE);
+        let (tx_incoming_response, _rx_incoming_response) = channel(DEFAULT_RESPONSES_BUFFER_SIZE);
         let (tx_outgoing_message, rx_outgoing_message) = unbounded();
 
         let protocol_state = Arc::new(Mutex::new(ProtocolState::new(tx_state_change)));
@@ -1520,8 +1568,8 @@ mod test {
     fn test_split_messages_task_invalid_request_responses_allowed() {
         let (tx_state_change, rx_state_change) = unbounded();
         let (tx_message, rx_message) = unbounded();
-        let (tx_incoming_request, _) = channel(DEFAULT_REQUESTS_BUFFER_SIZE);
-        let (tx_incoming_response, _) = channel(DEFAULT_RESPONSES_BUFFER_SIZE);
+        let (tx_incoming_request, _rx_incoming_request) = channel(DEFAULT_REQUESTS_BUFFER_SIZE);
+        let (tx_incoming_response, _rx_incoming_response) = channel(DEFAULT_RESPONSES_BUFFER_SIZE);
         let (tx_outgoing_message, rx_outgoing_message) = unbounded();
 
         let protocol_state = Arc::new(Mutex::new(ProtocolState::new(tx_state_change)));
@@ -1583,9 +1631,10 @@ mod test {
         for new_read_state in [ReadState::None, ReadState::Error(dummy_error)].iter() {
             let (tx_state_change, rx_state_change) = unbounded();
             let (_tx_message, rx_message) = unbounded();
-            let (tx_incoming_request, _) = channel(DEFAULT_REQUESTS_BUFFER_SIZE);
-            let (tx_incoming_response, _) = channel(DEFAULT_RESPONSES_BUFFER_SIZE);
-            let (tx_outgoing_message, _) = unbounded();
+            let (tx_incoming_request, _rx_incoming_request) = channel(DEFAULT_REQUESTS_BUFFER_SIZE);
+            let (tx_incoming_response, _rx_incoming_response) =
+                channel(DEFAULT_RESPONSES_BUFFER_SIZE);
+            let (tx_outgoing_message, _rx_outgoing_message) = unbounded();
 
             let protocol_state = Arc::new(Mutex::new(ProtocolState::new(tx_state_change)));
 
@@ -1717,9 +1766,9 @@ mod test {
     fn test_split_messages_task_state_change_no_responses() {
         let (tx_state_change, rx_state_change) = unbounded();
         let (tx_message, rx_message) = unbounded();
-        let (tx_incoming_request, _) = channel(DEFAULT_REQUESTS_BUFFER_SIZE);
+        let (tx_incoming_request, _rx_incoming_request) = channel(DEFAULT_REQUESTS_BUFFER_SIZE);
         let (tx_incoming_response, rx_incoming_response) = channel(DEFAULT_RESPONSES_BUFFER_SIZE);
-        let (tx_outgoing_message, _) = unbounded();
+        let (tx_outgoing_message, _rx_outgoing_message) = unbounded();
 
         let protocol_state = Arc::new(Mutex::new(ProtocolState::new(tx_state_change)));
 
@@ -1784,9 +1833,9 @@ mod test {
     fn test_split_messages_task_stream_ends() {
         let (tx_state_change, rx_state_change) = unbounded();
         let (tx_message, rx_message) = unbounded();
-        let (tx_incoming_request, _) = channel(DEFAULT_REQUESTS_BUFFER_SIZE);
-        let (tx_incoming_response, _) = channel(DEFAULT_RESPONSES_BUFFER_SIZE);
-        let (tx_outgoing_message, _) = unbounded();
+        let (tx_incoming_request, _rx_incoming_request) = channel(DEFAULT_REQUESTS_BUFFER_SIZE);
+        let (tx_incoming_response, _rx_incoming_response) = channel(DEFAULT_RESPONSES_BUFFER_SIZE);
+        let (tx_outgoing_message, _rx_outgoing_message) = unbounded();
 
         let protocol_state = Arc::new(Mutex::new(ProtocolState::new(tx_state_change)));
         let task = create_split_messages_task(
@@ -1824,9 +1873,9 @@ mod test {
     fn test_split_messages_task_stream_error() {
         let (tx_state_change, rx_state_change) = unbounded();
         let (tx_message, rx_message) = unbounded();
-        let (tx_incoming_request, _) = channel(DEFAULT_REQUESTS_BUFFER_SIZE);
-        let (tx_incoming_response, _) = channel(DEFAULT_RESPONSES_BUFFER_SIZE);
-        let (tx_outgoing_message, _) = unbounded();
+        let (tx_incoming_request, _rx_incoming_request) = channel(DEFAULT_REQUESTS_BUFFER_SIZE);
+        let (tx_incoming_response, _rx_incoming_response) = channel(DEFAULT_RESPONSES_BUFFER_SIZE);
+        let (tx_outgoing_message, _rx_outgoing_message) = unbounded();
 
         let protocol_state = Arc::new(Mutex::new(ProtocolState::new(tx_state_change)));
         let task = create_split_messages_task(
