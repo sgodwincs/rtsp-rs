@@ -516,8 +516,7 @@ fn create_request_handler_task(
                 ))
             },
         )
-        .map(|_| ())
-        .map_err(|_| ())
+        .then(|_| Ok(()))
 }
 
 /// Constructs a task that maps incoming responses to pending requests based on the `CSeq` header.
