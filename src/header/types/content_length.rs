@@ -17,6 +17,26 @@ pub const MAX_CONTENT_LENGTH: u64 = 9_999_999_999_999_999_999;
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct ContentLength(usize);
 
+impl Deref for ContentLength {
+    type Target = usize;
+
+    fn deref(&self) -> &usize {
+        &self.0
+    }
+}
+
+impl TryFrom<usize> for ContentLength {
+    type Error = InvalidTypedHeader;
+
+    fn try_from(value: usize) -> Result<Self, Self::Error> {
+        if value as u64 > MAX_CONTENT_LENGTH {
+            Err(InvalidTypedHeader)
+        } else {
+            Ok(ContentLength(value))
+        }
+    }
+}
+
 impl TypedHeader for ContentLength {
     /// Returns the statically assigned `HeaderName` for this header.
     fn header_name() -> &'static HeaderName {
@@ -98,26 +118,6 @@ impl TypedHeader for ContentLength {
                 .parse::<usize>()
                 .map_err(|_| InvalidTypedHeader)
                 .and_then(|content_length| ContentLength::try_from(content_length))
-        }
-    }
-}
-
-impl Deref for ContentLength {
-    type Target = usize;
-
-    fn deref(&self) -> &usize {
-        &self.0
-    }
-}
-
-impl TryFrom<usize> for ContentLength {
-    type Error = InvalidTypedHeader;
-
-    fn try_from(value: usize) -> Result<Self, Self::Error> {
-        if value as u64 > MAX_CONTENT_LENGTH {
-            Err(InvalidTypedHeader)
-        } else {
-            Ok(ContentLength(value))
         }
     }
 }
