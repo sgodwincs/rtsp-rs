@@ -379,6 +379,30 @@ fn create_decoding_timer_task(
 }
 
 /// Constructs a task that orders incoming requests based on their `CSeq` header.
+/// 
+/// This task is not strictly necessary in its entirety. While we do need to parse the `CSeq` header
+/// to make sure it is valid, ordering incoming requests should not be necessary when a reliable,
+/// in-order transport like TCP is used. However, the specification states that we must process
+/// requests in order of their sequence numbers in case support for out-of-order transports were to
+/// be added (e.g. UDP).
+/// 
+/// Also, as it is configured in the protocol's [`Config`], the size of the buffer of incoming
+/// requests needs to be set. If a request comes with a sequence number that is too far from the
+/// current sequence number, it will not be processed and will be responded to with a
+/// `503 Service Unavailable` response.
+/// 
+/// As for the starting sequence number, the specification allows the sender to start with any 
+/// number, so the first request's sequence number will be the starting sequence number. This does
+/// have some problems if unreliable transports are to be used, but the specification will specify
+/// better error handling in the case that such support is added.
+/// 
+/// This task will end in one of three situations:
+/// 
+/// * The incoming request stream ends.
+/// * The ordered incoming request channel receiver is dropped.
+/// * The outgoing message channel receiver is dropped. This implies that requests and responses can
+///   no longer be written, so there is no point in ordering requests anymore since we cannot 
+///   response to them.
 ///
 /// # Arguments
 ///
@@ -589,9 +613,9 @@ fn create_response_handler_task(
                         let pending_request = pending_requests.remove(&cseq);
 
                         if let Some(mut pending_request) = pending_request {
-                            // We do not really care if this fails. If would only fail in the case where
-                            // the receiver has been dropped, but either way, we can get rid of the
-                            // pending request.
+                            // We do not really care if this fails. If would only fail in the case
+                            // where the receiver has been dropped, but either way, we can get rid
+                            // of the pending request.
 
                             pending_request
                                 .take()
