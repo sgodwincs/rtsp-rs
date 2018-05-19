@@ -1008,7 +1008,7 @@ where
                             (ReadState::Response, _)
                             | (_, WriteState::None)
                             | (_, WriteState::Error(_))
-                            | (_, WriteState::Response) => tx_incoming_request = None,
+                            | (_, WriteState::Request) => tx_incoming_request = None,
                             _ => (),
                         }
 
@@ -1160,6 +1160,231 @@ mod test {
                 WriteState::Response
             )
         );
+    }
+
+    #[test]
+    fn test_request_handler_task_cseq_ordering() {
+        let (tx_state_change, _rx_state_change) = unbounded();
+        let (tx_incoming_request, rx_incoming_request) = channel(DEFAULT_REQUESTS_BUFFER_SIZE);
+        let (tx_ordered_incoming_request, rx_ordered_incoming_request) = unbounded();
+        let (tx_outgoing_message, rx_outgoing_message) = unbounded();
+
+        let protocol_state = Arc::new(Mutex::new(ProtocolState::new(tx_state_change)));
+        let task = create_request_handler_task(
+            protocol_state.clone(),
+            rx_incoming_request,
+            tx_ordered_incoming_request,
+            tx_outgoing_message,
+        );
+
+        let mut runtime = current_thread::Runtime::new().unwrap();
+
+        // Send request with `CSeq` header which sets the starting sequence number.
+
+        let request_1 = Request::builder()
+            .method(Method::Options)
+            .uri(URI::Any)
+            .header(HeaderName::CSeq, "0")
+            .build("".into())
+            .unwrap();
+        let tx_incoming_request = runtime
+            .block_on(tx_incoming_request.send(request_1.clone()))
+            .unwrap();
+
+        // Send next requests with out of order `CSeq`s.
+
+        let request_2 = Request::builder()
+            .method(Method::Options)
+            .uri(URI::Any)
+            .header(HeaderName::CSeq, "2")
+            .build("".into())
+            .unwrap();
+        let tx_incoming_request = runtime
+            .block_on(tx_incoming_request.send(request_2.clone()))
+            .unwrap();
+
+        let request_3 = Request::builder()
+            .method(Method::Options)
+            .uri(URI::Any)
+            .header(HeaderName::CSeq, "1")
+            .build("".into())
+            .unwrap();
+        let tx_incoming_request = runtime
+            .block_on(tx_incoming_request.send(request_3.clone()))
+            .unwrap();
+
+        // Simulate ending incoming requests.
+
+        mem::drop(tx_incoming_request);
+
+        // Wait for the task to end.
+
+        runtime.block_on(task).unwrap();
+
+        let ordered_incoming_requests = runtime
+            .block_on(rx_ordered_incoming_request.collect())
+            .unwrap();
+
+        assert_eq!(
+            ordered_incoming_requests,
+            vec![request_1, request_3, request_2]
+        );
+    }
+
+    #[test]
+    fn test_request_handler_task_cseq_out_of_range() {
+        let (tx_state_change, _rx_state_change) = unbounded();
+        let (tx_incoming_request, rx_incoming_request) = channel(DEFAULT_REQUESTS_BUFFER_SIZE);
+        let (tx_ordered_incoming_request, rx_ordered_incoming_request) = unbounded();
+        let (tx_outgoing_message, rx_outgoing_message) = unbounded();
+
+        let protocol_state = Arc::new(Mutex::new(ProtocolState::new(tx_state_change)));
+        let task = create_request_handler_task(
+            protocol_state.clone(),
+            rx_incoming_request,
+            tx_ordered_incoming_request,
+            tx_outgoing_message,
+        );
+
+        let mut runtime = current_thread::Runtime::new().unwrap();
+
+        // Send request with `CSeq` header which sets the starting sequence number.
+
+        let request_1 = Request::builder()
+            .method(Method::Options)
+            .uri(URI::Any)
+            .header(HeaderName::CSeq, "0")
+            .build("".into())
+            .unwrap();
+        let tx_incoming_request = runtime
+            .block_on(tx_incoming_request.send(request_1.clone()))
+            .unwrap();
+
+        // Send next request with very different `CSeq`.
+
+        let request_2 = Request::builder()
+            .method(Method::Options)
+            .uri(URI::Any)
+            .header(HeaderName::CSeq, "99999")
+            .build("".into())
+            .unwrap();
+        let tx_incoming_request = runtime
+            .block_on(tx_incoming_request.send(request_2))
+            .unwrap();
+
+        // Simulate ending incoming requests.
+
+        mem::drop(tx_incoming_request);
+
+        // Wait for the task to end.
+
+        runtime.block_on(task).unwrap();
+
+        let ordered_incoming_requests = runtime
+            .block_on(rx_ordered_incoming_request.collect())
+            .unwrap();
+
+        assert_eq!(ordered_incoming_requests, vec![request_1]);
+
+        let outgoing_messages = runtime.block_on(rx_outgoing_message.collect()).unwrap();
+        let expected_message = Message::Response(
+            Response::builder()
+                .status_code(StatusCode::ServiceUnavailable)
+                .build("".into())
+                .unwrap(),
+        );
+
+        assert_eq!(outgoing_messages, vec![expected_message]);
+    }
+
+    #[test]
+    fn test_request_handler_task_invalid_cseq_responses_allowed() {
+        let (tx_state_change, _rx_state_change) = unbounded();
+        let (tx_incoming_request, rx_incoming_request) = channel(DEFAULT_REQUESTS_BUFFER_SIZE);
+        let (tx_ordered_incoming_request, _rx_ordered_incoming_request) = unbounded();
+        let (tx_outgoing_message, rx_outgoing_message) = unbounded();
+
+        let protocol_state = Arc::new(Mutex::new(ProtocolState::new(tx_state_change)));
+        let task = create_request_handler_task(
+            protocol_state.clone(),
+            rx_incoming_request,
+            tx_ordered_incoming_request,
+            tx_outgoing_message,
+        );
+
+        // Send request with invalid `CSeq` header.
+
+        let request = Request::builder()
+            .method(Method::Options)
+            .uri(URI::Any)
+            .header(HeaderName::CSeq, "invalid cseq")
+            .build("".into())
+            .unwrap();
+
+        let mut runtime = current_thread::Runtime::new().unwrap();
+        let tx_incoming_request = runtime.block_on(tx_incoming_request.send(request)).unwrap();
+
+        // Simulate ending incoming requests.
+
+        mem::drop(tx_incoming_request);
+
+        // Wait for the task to end.
+
+        runtime.block_on(task).unwrap();
+
+        let outgoing_messages = runtime.block_on(rx_outgoing_message.collect()).unwrap();
+        let expected_message = Message::Response(
+            Response::builder()
+                .status_code(StatusCode::BadRequest)
+                .build("".into())
+                .unwrap(),
+        );
+
+        assert_eq!(outgoing_messages, vec![expected_message]);
+    }
+
+    #[test]
+    fn test_request_handler_task_invalid_cseq_responses_not_allowed() {
+        let (tx_state_change, _rx_state_change) = unbounded();
+        let (tx_incoming_request, rx_incoming_request) = channel(DEFAULT_REQUESTS_BUFFER_SIZE);
+        let (tx_ordered_incoming_request, _rx_ordered_incoming_request) = unbounded();
+        let (tx_outgoing_message, rx_outgoing_message) = unbounded();
+
+        let protocol_state = Arc::new(Mutex::new(ProtocolState::new(tx_state_change)));
+
+        {
+            lock_state(&protocol_state).update_write_state(WriteState::Request);
+        }
+
+        let task = create_request_handler_task(
+            protocol_state.clone(),
+            rx_incoming_request,
+            tx_ordered_incoming_request,
+            tx_outgoing_message,
+        );
+
+        // Send request with invalid `CSeq` header.
+
+        let request = Request::builder()
+            .method(Method::Options)
+            .uri(URI::Any)
+            .header(HeaderName::CSeq, "invalid cseq")
+            .build("".into())
+            .unwrap();
+
+        let mut runtime = current_thread::Runtime::new().unwrap();
+        let tx_incoming_request = runtime.block_on(tx_incoming_request.send(request)).unwrap();
+
+        // Simulate ending incoming requests.
+
+        mem::drop(tx_incoming_request);
+
+        // Wait for the task to end.
+
+        runtime.block_on(task).unwrap();
+
+        let outgoing_messages = runtime.block_on(rx_outgoing_message.collect()).unwrap();
+        assert_eq!(outgoing_messages, vec![]);
     }
 
     #[test]
@@ -1680,7 +1905,7 @@ mod test {
             (Some(ReadState::Response), None),
             (None, Some(WriteState::None)),
             (None, Some(WriteState::Error(dummy_error))),
-            (None, Some(WriteState::Response)),
+            (None, Some(WriteState::Request)),
         ];
 
         for new_state in new_states.iter_mut() {
@@ -1748,7 +1973,11 @@ mod test {
                 .unwrap();
 
             let expected_write_state = if let Some(new_write_state) = write_state.take() {
-                new_write_state
+                if new_write_state.is_request() {
+                    WriteState::None
+                } else {
+                    new_write_state
+                }
             } else {
                 WriteState::Response
             };
