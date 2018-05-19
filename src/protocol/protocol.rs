@@ -5,7 +5,6 @@ use futures::sync::mpsc::{
 };
 use futures::sync::oneshot;
 use futures::{stream, Future, Sink, Stream};
-use linked_hash_map::LinkedHashMap;
 use std::collections::HashMap;
 use std::io;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -231,12 +230,37 @@ impl ProtocolState {
     }
 }
 
+#[derive(Debug)]
 enum PendingRequestResponse {
     Continue(oneshot::Receiver<PendingRequestResponse>),
     None,
     Response(Response<BytesMut>),
 }
 
+impl PendingRequestResponse {
+    pub fn is_continue(&self) -> bool {
+        match self {
+            PendingRequestResponse::Continue(_) => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_none(&self) -> bool {
+        match self {
+            PendingRequestResponse::None => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_response(&self) -> bool {
+        match self {
+            PendingRequestResponse::Response(_) => true,
+            _ => false,
+        }
+    }
+}
+
+#[derive(Debug)]
 enum PendingRequestUpdate {
     AddPendingRequest((CSeq, oneshot::Sender<PendingRequestResponse>)),
     RemovePendingRequest(CSeq),
@@ -379,29 +403,29 @@ fn create_decoding_timer_task(
 }
 
 /// Constructs a task that orders incoming requests based on their `CSeq` header.
-/// 
+///
 /// This task is not strictly necessary in its entirety. While we do need to parse the `CSeq` header
 /// to make sure it is valid, ordering incoming requests should not be necessary when a reliable,
 /// in-order transport like TCP is used. However, the specification states that we must process
 /// requests in order of their sequence numbers in case support for out-of-order transports were to
 /// be added (e.g. UDP).
-/// 
+///
 /// Also, as it is configured in the protocol's [`Config`], the size of the buffer of incoming
 /// requests needs to be set. If a request comes with a sequence number that is too far from the
 /// current sequence number, it will not be processed and will be responded to with a
 /// `503 Service Unavailable` response.
-/// 
-/// As for the starting sequence number, the specification allows the sender to start with any 
+///
+/// As for the starting sequence number, the specification allows the sender to start with any
 /// number, so the first request's sequence number will be the starting sequence number. This does
 /// have some problems if unreliable transports are to be used, but the specification will specify
 /// better error handling in the case that such support is added.
-/// 
+///
 /// This task will end in one of three situations:
-/// 
+///
 /// * The incoming request stream ends.
 /// * The ordered incoming request channel receiver is dropped.
 /// * The outgoing message channel receiver is dropped. This implies that requests and responses can
-///   no longer be written, so there is no point in ordering requests anymore since we cannot 
+///   no longer be written, so there is no point in ordering requests anymore since we cannot
 ///   response to them.
 ///
 /// # Arguments
@@ -556,7 +580,7 @@ fn create_response_handler_task(
 ) -> impl Future<Item = (), Error = ()> {
     fn handle_response(
         response: Option<Response<BytesMut>>,
-        pending_requests: &mut LinkedHashMap<CSeq, Option<oneshot::Sender<PendingRequestResponse>>>,
+        pending_requests: &mut HashMap<CSeq, Option<oneshot::Sender<PendingRequestResponse>>>,
     ) -> bool {
         match response {
             Some(response) => {
@@ -613,7 +637,7 @@ fn create_response_handler_task(
                         let pending_request = pending_requests.remove(&cseq);
 
                         if let Some(mut pending_request) = pending_request {
-                            // We do not really care if this fails. If would only fail in the case
+                            // We do not really care if this fails. It would only fail in the case
                             // where the receiver has been dropped, but either way, we can get rid
                             // of the pending request.
 
@@ -659,9 +683,12 @@ fn create_response_handler_task(
         (
             rx_incoming_response.into_future(),
             Some(rx_pending_request.into_future()),
-            LinkedHashMap::new(),
+            HashMap::new(),
         ),
         |(rx_incoming_response, rx_pending_request, mut pending_requests)| {
+            // TODO: Once async/await are usable, avoid this branch by using `empty`. It should be
+            // possible to do it without async/await, but I was not able to get it to work.
+
             if let Some(rx_pending_request) = rx_pending_request {
                 Either::A(
                     rx_incoming_response
@@ -1066,6 +1093,7 @@ where
 mod test {
     // TODO: Maybe try to cleanup this testing so that the setup is not so repetitive?
 
+    use std::convert::TryFrom;
     use std::mem;
     use tokio::runtime::current_thread;
     use tokio::runtime::Runtime;
@@ -1191,7 +1219,7 @@ mod test {
         let (tx_state_change, _rx_state_change) = unbounded();
         let (tx_incoming_request, rx_incoming_request) = channel(DEFAULT_REQUESTS_BUFFER_SIZE);
         let (tx_ordered_incoming_request, rx_ordered_incoming_request) = unbounded();
-        let (tx_outgoing_message, rx_outgoing_message) = unbounded();
+        let (tx_outgoing_message, _rx_outgoing_message) = unbounded();
 
         let protocol_state = Arc::new(Mutex::new(ProtocolState::new(tx_state_change)));
         let task = create_request_handler_task(
@@ -1413,7 +1441,7 @@ mod test {
 
     #[test]
     fn test_request_handler_task_stream_ends() {
-        let (tx_state_change, rx_state_change) = unbounded();
+        let (tx_state_change, _rx_state_change) = unbounded();
         let (tx_incoming_request, rx_incoming_request) = channel(DEFAULT_REQUESTS_BUFFER_SIZE);
         let (tx_ordered_incoming_request, _rx_ordered_incoming_request) = unbounded();
         let (tx_outgoing_message, _rx_outgoing_message) = unbounded();
@@ -1436,6 +1464,182 @@ mod test {
             .unwrap()
             .block_on(task)
             .unwrap();
+    }
+
+    #[test]
+    fn test_response_handler_task_continue() {
+        let (tx_incoming_response, rx_incoming_response) = channel(DEFAULT_RESPONSES_BUFFER_SIZE);
+        let (tx_pending_request, rx_pending_request) = unbounded();
+        let task = create_response_handler_task(rx_incoming_response, rx_pending_request);
+
+        // Add a pending request.
+
+        let (tx_pending_request_1, rx_pending_request_1) = oneshot::channel();
+        tx_pending_request
+            .unbounded_send(PendingRequestUpdate::AddPendingRequest((
+                CSeq::try_from(0).unwrap(),
+                tx_pending_request_1,
+            )))
+            .unwrap();
+
+        // Send a `100 Continue` response after some delay and then the final response.
+
+        let final_response = Response::builder()
+            .header(HeaderName::CSeq, "0")
+            .build("".into())
+            .unwrap();
+        let final_response_clone = final_response.clone();
+
+        let mut runtime = Runtime::new().unwrap();
+
+        runtime.spawn(
+            Delay::new(Instant::now() + Duration::from_millis(100))
+                .then(move |_| {
+                    let continue_response = Response::builder()
+                        .status_code(StatusCode::Continue)
+                        .header(HeaderName::CSeq, "0")
+                        .build("".into())
+                        .unwrap();
+
+                    tx_incoming_response
+                        .send(continue_response)
+                        .and_then(|tx_incoming_response| tx_incoming_response.send(final_response))
+                })
+                .then(|_| Ok(())),
+        );
+        runtime.spawn(rx_pending_request_1.then(move |pending_request| {
+            let pending_request = pending_request.unwrap();
+            let receiver = match pending_request {
+                PendingRequestResponse::Continue(receiver) => receiver,
+                _ => panic!("expected a continue"),
+            };
+
+            receiver.then(move |pending_request| {
+                let pending_request = pending_request.unwrap();
+
+                match pending_request {
+                    PendingRequestResponse::Response(response) => {
+                        assert_eq!(response, final_response_clone)
+                    }
+                    _ => panic!("expected a response"),
+                }
+
+                Ok(())
+            })
+        }));
+
+        // Wait for task to end.
+
+        runtime.spawn(task);
+        runtime.shutdown_on_idle().wait().unwrap();
+    }
+
+    #[test]
+    fn test_response_handler_task_pending_requests_stream_ends() {
+        let (_tx_incoming_response, rx_incoming_response) = channel(DEFAULT_RESPONSES_BUFFER_SIZE);
+        let (tx_pending_request, rx_pending_request) = unbounded();
+        let task = create_response_handler_task(rx_incoming_response, rx_pending_request);
+
+        // Simulate ending the pending request stream.
+
+        mem::drop(tx_pending_request);
+
+        // Wait for task to end.
+
+        current_thread::Runtime::new()
+            .unwrap()
+            .block_on(task)
+            .unwrap();
+    }
+
+    #[test]
+    fn test_response_handler_task_response_matching() {
+        let (tx_incoming_response, rx_incoming_response) = channel(DEFAULT_RESPONSES_BUFFER_SIZE);
+        let (tx_pending_request, rx_pending_request) = unbounded();
+        let task = create_response_handler_task(rx_incoming_response, rx_pending_request);
+
+        // Add a pending request.
+
+        let (tx_pending_request_1, rx_pending_request_1) = oneshot::channel();
+        tx_pending_request
+            .unbounded_send(PendingRequestUpdate::AddPendingRequest((
+                CSeq::try_from(0).unwrap(),
+                tx_pending_request_1,
+            )))
+            .unwrap();
+
+        // Send a response after some delay.
+
+        let response = Response::builder()
+            .header(HeaderName::CSeq, "0")
+            .build("".into())
+            .unwrap();
+        let response_clone = response.clone();
+
+        let mut runtime = Runtime::new().unwrap();
+
+        runtime.spawn(
+            Delay::new(Instant::now() + Duration::from_millis(100))
+                .then(move |_| tx_incoming_response.send(response))
+                .then(|_| Ok(())),
+        );
+
+        // Wait for task to end.
+
+        runtime.spawn(rx_pending_request_1.then(move |pending_response| {
+            match pending_response.unwrap() {
+                PendingRequestResponse::Response(received_response) => {
+                    assert_eq!(received_response, response_clone);
+                }
+                _ => panic!("expected a response"),
+            }
+            Ok(())
+        }));
+
+        runtime.spawn(task);
+        runtime.shutdown_on_idle().wait().unwrap();
+    }
+
+    #[test]
+    fn test_response_handler_task_response_stream_ends() {
+        let (tx_incoming_response, rx_incoming_response) = channel(DEFAULT_RESPONSES_BUFFER_SIZE);
+        let (tx_pending_request, rx_pending_request) = unbounded();
+        let task = create_response_handler_task(rx_incoming_response, rx_pending_request);
+
+        // Add a pending request that will not be fulfilled.
+
+        let (tx_pending_request_1, rx_pending_request_1) = oneshot::channel();
+        tx_pending_request
+            .unbounded_send(PendingRequestUpdate::AddPendingRequest((
+                CSeq::try_from(0).unwrap(),
+                tx_pending_request_1,
+            )))
+            .unwrap();
+
+        let mut runtime = Runtime::new().unwrap();
+
+        // Simulate ending the incoming response stream, but wait to do it so that the update above
+        // can be handled.
+
+        runtime.spawn(
+            Delay::new(Instant::now() + Duration::from_millis(100)).then(move |_| {
+                mem::drop(tx_incoming_response);
+                Ok(())
+            }),
+        );
+
+        // Wait for task to end.
+
+        runtime.spawn(task);
+        runtime.shutdown_on_idle().wait().unwrap();
+
+        // Wait for task to end.
+
+        let pending_request_response = current_thread::Runtime::new()
+            .unwrap()
+            .block_on(rx_pending_request_1)
+            .unwrap();
+        assert!(pending_request_response.is_none());
     }
 
     #[test]

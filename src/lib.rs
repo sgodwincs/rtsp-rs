@@ -8,7 +8,6 @@ extern crate fnv;
 extern crate futures;
 #[macro_use]
 extern crate lazy_static;
-extern crate linked_hash_map;
 extern crate regex;
 #[cfg(test)]
 extern crate tokio;
