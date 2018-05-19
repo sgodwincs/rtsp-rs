@@ -569,6 +569,12 @@ fn create_request_handler_task(
 
 /// Constructs a task that maps incoming responses to pending requests based on the `CSeq` header.
 ///
+/// Note that the order in which responses are returned to pending requests is completely dependent
+/// on the order in which they arrive. Although support for buffering responses so that they are
+/// returned in the correct order could be added, there are some complications with this.
+/// Specifically, determining how to deal with request timeouts in situations where head-of-line
+/// blocking is occurring is non-trivial (at least from what I can tell).
+///
 /// # Arguments
 ///
 /// * `rx_incoming_response` - A stream of [`Response`]s that are to be mapped to pending requests.
