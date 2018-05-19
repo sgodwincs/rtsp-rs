@@ -85,7 +85,7 @@ impl<'a, 'b> Sub<&'a CSeq> for &'b CSeq {
     type Output = CSeq;
 
     fn sub(self, other: &'a CSeq) -> Self::Output {
-        CSeq(if self > other {
+        CSeq(if self >= other {
             self.0 - other.0
         } else {
             MAX_CSEQ - (other.0 - self.0)
@@ -184,6 +184,7 @@ mod test {
         let cseq_1 = CSeq::try_from(50).unwrap();
         let cseq_2 = CSeq::try_from(100).unwrap();
 
+        assert_eq!(*(cseq_1 - cseq_1), 0);
         assert_eq!(*(cseq_2 - cseq_1), 50);
         assert_eq!(*(cseq_1 - cseq_2), MAX_CSEQ - 50);
     }
