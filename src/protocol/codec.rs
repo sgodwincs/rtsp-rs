@@ -1,7 +1,7 @@
 use bytes::BytesMut;
 use futures::sync::mpsc::UnboundedSender;
 use std::convert::TryFrom;
-use std::error::Error as ErrorTrait;
+use std::error::Error;
 use std::sync::Arc;
 use std::{fmt, io};
 use tokio_io::codec::{Decoder, Encoder};
@@ -73,7 +73,8 @@ impl Codec {
     ///
     /// * `event` - The event to send through the sink.
     fn send_codec_event(&mut self, event: CodecEvent) {
-        self.tx_event = self.tx_event
+        self.tx_event = self
+            .tx_event
             .take()
             .and_then(|tx_event| tx_event.unbounded_send(event).ok().map(|_| tx_event));
     }
@@ -121,10 +122,10 @@ impl Codec {
                             .expect("unexpected irrecoverable request parse error"),
                     ))))
                 } else {
-                    Err(Error::InvalidRequest(
+                    Err(ProtocolError::DecodeError(DecodeError::InvalidRequest(
                         IrrecoverableInvalidRequest::try_from(error)
                             .expect("unexpected recoverable request parse error"),
-                    ))
+                    )))
                 }
             }
             ParseResult::Incomplete => Ok(None),
@@ -174,10 +175,10 @@ impl Codec {
                             .expect("unexpected irrecoverable response parse error"),
                     ))))
                 } else {
-                    Err(Error::InvalidResponse(
+                    Err(ProtocolError::DecodeError(DecodeError::InvalidResponse(
                         IrrecoverableInvalidResponse::try_from(error)
                             .expect("unexpected recoverable response parse error"),
-                    ))
+                    )))
                 }
             }
             ParseResult::Incomplete => Ok(None),
@@ -187,7 +188,7 @@ impl Codec {
 
 impl Decoder for Codec {
     type Item = MessageResult;
-    type Error = Error;
+    type Error = ProtocolError;
 
     /// Decodes a message.
     ///
@@ -260,7 +261,7 @@ impl Decoder for Codec {
                 if buffer.is_empty() {
                     Ok(None)
                 } else {
-                    Err(Error::UnexpectedEOF)
+                    Err(ProtocolError::UnexpectedEOF)
                 }
             }
         }
@@ -279,7 +280,7 @@ impl Default for Codec {
 
 impl Encoder for Codec {
     type Item = Message;
-    type Error = Error;
+    type Error = ProtocolError;
 
     /// Encodes a message.
     ///
@@ -338,7 +339,20 @@ pub enum Message {
 /// A generic error type for any RTSP networking related errors.
 #[derive(Clone, Debug)]
 #[non_exhaustive]
-pub enum Error {
+pub enum ProtocolError {
+    /// A pending request that neither timed out nor received a corresponding response was
+    /// cancelled. This will only occur when the read state has been changed such that responses are
+    /// no longer able to be read, thus any requests currently pending will be cancelled.
+    Cancelled,
+
+    /// An attempt was made to send a request when the write state no longer allows sending
+    /// requests. This situation can occur if, for example, a soft shutdown is happening or an error
+    /// occurred while trying to send a message to the receiving agent.
+    Closed,
+
+    /// An irrecoverable error was encountered while decoding a request or response.
+    DecodeError(DecodeError),
+
     /// An error that occurs when too much time has passed from the start of message decoding. The
     /// timer starts whenever the information line of a request or response is encountered.
     /// Preceding newlines do not start the timer.
@@ -347,44 +361,66 @@ pub enum Error {
     /// An underlying I/O error occurred either in the stream or sink.
     IO(Arc<io::Error>),
 
-    /// An irrecoverable error was encountered while decoding a request.
-    InvalidRequest(IrrecoverableInvalidRequest),
-
-    /// An irrecoverable error was encountered while decoding a response.
-    InvalidResponse(IrrecoverableInvalidResponse),
-
-    /// A networking operation was attempted when there was no connection.
-    NotConnected,
+    /// A pending request timed out while waiting for its corresponding response.
+    RequestTimedOut,
 
     /// The underlying stream has ended, but there is still leftover data that is not enough for a
     /// full request or response to be decoded from.
     UnexpectedEOF,
 }
 
-impl fmt::Display for Error {
+impl fmt::Display for ProtocolError {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         formatter.write_str(self.description())
     }
 }
 
-impl ErrorTrait for Error {
+impl Error for ProtocolError {
     fn description(&self) -> &str {
-        use self::Error::*;
+        use self::ProtocolError::*;
 
-        match *self {
+        match self {
+            Cancelled => "cancelled",
+            Closed => "closed",
+            DecodeError(ref decode_error) => decode_error.description(),
             DecodingTimedOut => "decoding timed out",
             IO(ref io) => io.description(),
-            InvalidRequest(ref request) => request.description(),
-            InvalidResponse(ref response) => response.description(),
-            NotConnected => "not connected",
+            RequestTimedOut => "request timed out",
             UnexpectedEOF => "unexpected EOF",
         }
     }
 }
 
-impl From<io::Error> for Error {
-    fn from(value: io::Error) -> Error {
-        Error::IO(Arc::new(value))
+impl From<io::Error> for ProtocolError {
+    fn from(value: io::Error) -> ProtocolError {
+        ProtocolError::IO(Arc::new(value))
+    }
+}
+
+/// An irrecoverable error was encountered while decoding a request or response.
+#[derive(Clone, Debug)]
+pub enum DecodeError {
+    /// An irrecoverable error was encountered while decoding a request.
+    InvalidRequest(IrrecoverableInvalidRequest),
+
+    /// An irrecoverable error was encountered while decoding a response.
+    InvalidResponse(IrrecoverableInvalidResponse),
+}
+
+impl fmt::Display for DecodeError {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str(self.description())
+    }
+}
+
+impl Error for DecodeError {
+    fn description(&self) -> &str {
+        use self::DecodeError::*;
+
+        match self {
+            InvalidRequest(ref invalid_request) => invalid_request.description(),
+            InvalidResponse(ref invalid_response) => invalid_response.description(),
+        }
     }
 }
 
@@ -405,11 +441,11 @@ impl fmt::Display for IrrecoverableInvalidRequest {
     }
 }
 
-impl ErrorTrait for IrrecoverableInvalidRequest {
+impl Error for IrrecoverableInvalidRequest {
     fn description(&self) -> &str {
         use self::IrrecoverableInvalidRequest::*;
 
-        match *self {
+        match self {
             InvalidContentLength => "invalid RTSP request - invalid content length",
             InvalidHeaderLine => "invalid RTSP request - invalid header line",
             InvalidRequestLine => "invalid RTSP request - invalid request line",
@@ -453,11 +489,11 @@ impl fmt::Display for IrrecoverableInvalidResponse {
     }
 }
 
-impl ErrorTrait for IrrecoverableInvalidResponse {
+impl Error for IrrecoverableInvalidResponse {
     fn description(&self) -> &str {
         use self::IrrecoverableInvalidResponse::*;
 
-        match *self {
+        match self {
             InvalidContentLength => "invalid RTSP response - invalid content length",
             InvalidHeaderLine => "invalid RTSP response - invalid header line",
             InvalidResponseLine => "invalid RTSP response - invalid response line",
@@ -498,11 +534,11 @@ impl fmt::Display for InvalidMessage {
     }
 }
 
-impl ErrorTrait for InvalidMessage {
+impl Error for InvalidMessage {
     fn description(&self) -> &str {
         use self::InvalidMessage::*;
 
-        match *self {
+        match self {
             InvalidRequest(ref request) => request.description(),
             InvalidResponse(ref response) => response.description(),
         }
@@ -525,11 +561,11 @@ impl fmt::Display for RecoverableInvalidRequest {
     }
 }
 
-impl ErrorTrait for RecoverableInvalidRequest {
+impl Error for RecoverableInvalidRequest {
     fn description(&self) -> &str {
         use self::RecoverableInvalidRequest::*;
 
-        match *self {
+        match self {
             InvalidHeaderName => "invalid RTSP request - invalid header name",
             InvalidHeaderValue => "invalid RTSP request - invalid header value",
             InvalidMethod => "invalid RTSP request - invalid method",
@@ -570,11 +606,11 @@ impl fmt::Display for RecoverableInvalidResponse {
     }
 }
 
-impl ErrorTrait for RecoverableInvalidResponse {
+impl Error for RecoverableInvalidResponse {
     fn description(&self) -> &str {
         use self::RecoverableInvalidResponse::*;
 
-        match *self {
+        match self {
             InvalidHeaderName => "invalid RTSP response - invalid header name",
             InvalidHeaderValue => "invalid RTSP response - invalid header value",
             InvalidReasonPhrase => "invalid RTSP response - invalid reason phrase",
