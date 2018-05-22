@@ -361,8 +361,10 @@ pub enum ProtocolError {
     /// An underlying I/O error occurred either in the stream or sink.
     IO(Arc<io::Error>),
 
-    /// A pending request timed out while waiting for its corresponding response.
-    RequestTimedOut,
+    /// A pending request timed out while waiting for its corresponding response. If `true`, then
+    /// the timeout was a result of the maximum time elapsing regardless of any `100 Continue`
+    /// responses received.
+    RequestTimedOut(bool),
 
     /// The underlying stream has ended, but there is still leftover data that is not enough for a
     /// full request or response to be decoded from.
@@ -385,7 +387,8 @@ impl Error for ProtocolError {
             DecodeError(ref decode_error) => decode_error.description(),
             DecodingTimedOut => "decoding timed out",
             IO(ref io) => io.description(),
-            RequestTimedOut => "request timed out",
+            RequestTimedOut(true) => "request timed out (maximum)",
+            RequestTimedOut(false) => "request timed out",
             UnexpectedEOF => "unexpected EOF",
         }
     }

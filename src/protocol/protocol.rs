@@ -4,7 +4,7 @@ use futures::sync::mpsc::{
     channel, unbounded, Receiver, Sender, UnboundedReceiver, UnboundedSender,
 };
 use futures::sync::oneshot;
-use futures::{stream, Future, Sink, Stream};
+use futures::{Future, Sink, Stream};
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::error::Error;
@@ -25,12 +25,14 @@ use status::StatusCode;
 
 pub const DEFAULT_DECODE_TIMEOUT_DURATION: Duration = Duration::from_secs(10);
 pub const DEFAULT_REQUEST_BUFFER_SIZE: usize = 10;
+pub const DEFAULT_REQUEST_MAX_TIMEOUT_DURATION: Duration = Duration::from_secs(10);
 pub const DEFAULT_REQUEST_TIMEOUT_DURATION: Duration = Duration::from_secs(5);
 pub const DEFAULT_RESPONSE_BUFFER_SIZE: usize = 10;
 pub const DEFAULT_SOFT_SHUTDOWN_TIMEOUT_DURATION: Duration = Duration::from_secs(10);
 
 #[derive(Debug)]
 pub struct Protocol {
+    request_default_max_timeout_duration: Option<Duration>,
     request_default_timeout_duration: Option<Duration>,
     rx_ordered_incoming_request: UnboundedReceiver<Request<BytesMut>>,
     sequence_number: CSeq,
@@ -153,6 +155,7 @@ impl Protocol {
         ))?;
 
         Ok(Protocol {
+            request_default_max_timeout_duration: config.request_default_max_timeout_duration,
             request_default_timeout_duration: config.request_default_timeout_duration,
             rx_ordered_incoming_request,
             sequence_number: CSeq::try_from(0).expect("sequence number `0` should not be invalid"),
@@ -232,55 +235,72 @@ impl Protocol {
             return Either::A(lazy(error_closure));
         }
 
-        Either::B(loop_fn(
-            (
-                rx_response,
-                self.tx_pending_request.clone(),
-                self.request_default_timeout_duration,
-                sequence_number,
-            ),
-            |(rx_response, tx_pending_request, request_timeout_duration, sequence_number)| {
-                let timer = if let Some(duration) = request_timeout_duration {
-                    let expire_time = Instant::now() + duration;
-                    Either::A(Delay::new(expire_time))
-                } else {
-                    Either::B(future::empty())
-                };
+        let timer = if let Some(duration) = self.request_default_max_timeout_duration {
+            let expire_time = Instant::now() + duration;
+            Either::A(Delay::new(expire_time))
+        } else {
+            Either::B(future::empty())
+        }.then(|_| Err(ProtocolError::RequestTimedOut(true)));
 
-                rx_response.select2(timer).then(move |result| {
-                    let response = match result {
-                        Ok(Either::A((response, _))) => Some(response),
-                        Err(Either::B(_)) => Some(PendingRequestResponse::None),
-                        _ => None,
-                    };
+        Either::B(
+            timer
+                .select(loop_fn(
+                    (
+                        rx_response,
+                        self.tx_pending_request.clone(),
+                        self.request_default_timeout_duration,
+                        sequence_number,
+                    ),
+                    |(
+                        rx_response,
+                        tx_pending_request,
+                        request_timeout_duration,
+                        sequence_number,
+                    )| {
+                        let timer = if let Some(duration) = request_timeout_duration {
+                            let expire_time = Instant::now() + duration;
+                            Either::A(Delay::new(expire_time))
+                        } else {
+                            Either::B(future::empty())
+                        };
 
-                    match response {
-                        Some(PendingRequestResponse::Continue(rx_response)) => {
-                            Ok(Loop::Continue((
-                                rx_response,
-                                tx_pending_request,
-                                request_timeout_duration,
-                                sequence_number,
-                            )))
-                        }
-                        Some(PendingRequestResponse::None) => Err(ProtocolError::Cancelled),
-                        Some(PendingRequestResponse::Response(response)) => {
-                            Ok(Loop::Break(response))
-                        }
-                        None => {
-                            tx_pending_request
-                                .lock()
-                                .expect("acquiring pending request sender should not fail")
-                                .unbounded_send(PendingRequestUpdate::RemovePendingRequest(
-                                    sequence_number,
-                                ))
-                                .ok();
-                            Err(ProtocolError::RequestTimedOut)
-                        }
-                    }
-                })
-            },
-        ))
+                        rx_response.select2(timer).then(move |result| {
+                            let response = match result {
+                                Ok(Either::A((response, _))) => Some(response),
+                                Err(Either::B(_)) => Some(PendingRequestResponse::None),
+                                _ => None,
+                            };
+
+                            match response {
+                                Some(PendingRequestResponse::Continue(rx_response)) => {
+                                    Ok(Loop::Continue((
+                                        rx_response,
+                                        tx_pending_request,
+                                        request_timeout_duration,
+                                        sequence_number,
+                                    )))
+                                }
+                                Some(PendingRequestResponse::None) => Err(ProtocolError::Cancelled),
+                                Some(PendingRequestResponse::Response(response)) => {
+                                    Ok(Loop::Break(response))
+                                }
+                                None => {
+                                    tx_pending_request
+                                        .lock()
+                                        .expect("acquiring pending request sender should not fail")
+                                        .unbounded_send(PendingRequestUpdate::RemovePendingRequest(
+                                            sequence_number,
+                                        ))
+                                        .ok();
+                                    Err(ProtocolError::RequestTimedOut(false))
+                                }
+                            }
+                        })
+                    },
+                ))
+                .map(|result| result.0)
+                .map_err(|result| result.0),
+        )
     }
 
     fn send_response<B>(&self, response: Response<B>) -> Result<(), ProtocolError>
@@ -318,6 +338,7 @@ impl Drop for Protocol {
 pub struct Config {
     pub(crate) decode_timeout_duration: Duration,
     pub(crate) request_buffer_size: usize,
+    pub(crate) request_default_max_timeout_duration: Option<Duration>,
     pub(crate) request_default_timeout_duration: Option<Duration>,
     pub(crate) response_buffer_size: usize,
     pub(crate) shutdown_future: Option<Box<Future<Item = ShutdownType, Error = ()> + Send>>,
@@ -334,6 +355,10 @@ impl Config {
 
     pub fn request_buffer_size(&self) -> usize {
         self.request_buffer_size
+    }
+
+    pub fn request_default_max_timeout_duration(&self) -> Option<Duration> {
+        self.request_default_max_timeout_duration
     }
 
     pub fn request_default_timeout_duration(&self) -> Option<Duration> {
@@ -357,6 +382,7 @@ pub struct ConfigBuilder {
     error: Option<BuilderError>,
     decode_timeout_duration: Duration,
     request_buffer_size: usize,
+    request_default_max_timeout_duration: Option<Duration>,
     request_default_timeout_duration: Option<Duration>,
     response_buffer_size: usize,
     shutdown_future: Box<Future<Item = ShutdownType, Error = ()> + Send>,
@@ -375,6 +401,7 @@ impl ConfigBuilder {
         Ok(Config {
             decode_timeout_duration: self.decode_timeout_duration,
             request_buffer_size: self.request_buffer_size,
+            request_default_max_timeout_duration: self.request_default_max_timeout_duration,
             request_default_timeout_duration: self.request_default_timeout_duration,
             response_buffer_size: self.response_buffer_size,
             shutdown_future: Some(self.shutdown_future),
@@ -396,6 +423,20 @@ impl ConfigBuilder {
             self.error = Some(BuilderError::InvalidRequestBufferSize)
         } else {
             self.request_buffer_size = size;
+        }
+
+        self
+    }
+
+    pub fn request_default_max_timeout_duration(
+        &mut self,
+        duration: Option<Duration>,
+    ) -> &mut Self {
+        match duration {
+            Some(ref duration) if duration.as_secs() == 0 => {
+                self.error = Some(BuilderError::InvalidRequestDefaultMaxTimeoutDuration);
+            }
+            _ => self.request_default_max_timeout_duration = duration,
         }
 
         self
@@ -437,6 +478,7 @@ impl Default for ConfigBuilder {
             error: None,
             decode_timeout_duration: DEFAULT_DECODE_TIMEOUT_DURATION,
             request_buffer_size: DEFAULT_REQUEST_BUFFER_SIZE,
+            request_default_max_timeout_duration: Some(DEFAULT_REQUEST_MAX_TIMEOUT_DURATION),
             request_default_timeout_duration: Some(DEFAULT_REQUEST_TIMEOUT_DURATION),
             response_buffer_size: DEFAULT_RESPONSE_BUFFER_SIZE,
             shutdown_future: Box::new(future::empty()),
@@ -448,6 +490,7 @@ impl Default for ConfigBuilder {
 pub enum BuilderError {
     InvalidDecodeTimeoutDuration,
     InvalidRequestBufferSize,
+    InvalidRequestDefaultMaxTimeoutDuration,
     InvalidRequestDefaultTimeoutDuration,
     InvalidResponseBufferSize,
 }
@@ -465,6 +508,9 @@ impl Error for BuilderError {
         match self {
             InvalidDecodeTimeoutDuration => "invalid decode timeout duration",
             InvalidRequestBufferSize => "invalid request buffer size",
+            InvalidRequestDefaultMaxTimeoutDuration => {
+                "invalid request default max timeout duration"
+            }
             InvalidRequestDefaultTimeoutDuration => "invalid request default timeout duration",
             InvalidResponseBufferSize => "invalid response buffer size",
         }
@@ -2225,7 +2271,7 @@ mod test {
     fn test_send_messages_task_stream_ends() {
         let (tx_state_change, rx_state_change) = unbounded();
         let (tx_message, _rx_message) = unbounded();
-        let (_tx_outgoing_message, rx_outgoing_message) = unbounded();
+        let (tx_outgoing_message, rx_outgoing_message) = unbounded();
 
         let protocol_state = Arc::new(Mutex::new(ProtocolState::new(vec![tx_state_change])));
         let task = create_send_messages_task(
@@ -2239,6 +2285,10 @@ mod test {
             }),
             rx_outgoing_message,
         );
+
+        // Simulate ending the stream.
+
+        mem::drop(tx_outgoing_message);
 
         // Wait for the task to end.
 
