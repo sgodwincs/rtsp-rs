@@ -1,5 +1,5 @@
 use bytes::BytesMut;
-use futures::future::{self, lazy, loop_fn, Either, Loop};
+use futures::future::{self, loop_fn, Either, Loop};
 use futures::sync::mpsc::{
     channel, unbounded, Receiver, Sender, UnboundedReceiver, UnboundedSender,
 };
@@ -18,7 +18,10 @@ use tokio_timer::Delay;
 
 use header::types::CSeq;
 use header::{HeaderName, HeaderValue, TypedHeader};
-use protocol::{Codec, CodecEvent, InvalidMessage, Message, MessageResult, ProtocolError};
+use protocol::{
+    Codec, CodecEvent, InvalidMessage, Message, MessageResult, OperationError, ProtocolError,
+    RequestTimeoutType,
+};
 use request::Request;
 use response::Response;
 use status::StatusCode;
@@ -31,31 +34,35 @@ pub const DEFAULT_RESPONSE_BUFFER_SIZE: usize = 10;
 pub const DEFAULT_SOFT_SHUTDOWN_TIMEOUT_DURATION: Duration = Duration::from_secs(10);
 
 #[derive(Debug)]
-pub struct Protocol {
+pub struct Connection {
     request_default_max_timeout_duration: Option<Duration>,
     request_default_timeout_duration: Option<Duration>,
-    rx_ordered_incoming_request: UnboundedReceiver<Request<BytesMut>>,
+    rx_ordered_incoming_request: Option<UnboundedReceiver<Request<BytesMut>>>,
     sequence_number: CSeq,
-    state: Arc<Mutex<ProtocolState>>,
+    state: Arc<Mutex<ConnectionState>>,
     tx_pending_request: Arc<Mutex<UnboundedSender<PendingRequestUpdate>>>,
     tx_outgoing_message: UnboundedSender<Message>,
     tx_shutdown: Option<oneshot::Sender<ShutdownType>>,
 }
 
-impl Protocol {
+impl Connection {
     pub fn new<IO>(io: IO) -> Result<Self, SpawnError>
     where
         IO: AsyncRead + AsyncWrite + Send + 'static,
     {
-        Protocol::with_config(io, Config::default())
+        Connection::with_config(io, Config::default())
     }
 
     pub fn with_config<IO>(io: IO, mut config: Config) -> Result<Self, SpawnError>
     where
         IO: AsyncRead + AsyncWrite + Send + 'static,
     {
-        // Create all channels needed for communication from task to task and from protocol to task.
-        // This is pretty terrible looking, so it would be nice to come up with a better structure.
+        // Create all channels needed for communication from task to task and from connection to
+        // task.
+        //
+        // TODO: This is pretty terrible looking, so it would be nice to come up with a better
+        // structure. Maybe instead of creating tasks via functions, each task should be separate
+        // `struct`s that implement `Future`/`Stream`/`Sink` and so on.
 
         let (tx_codec_event, rx_codec_event) = unbounded();
         let (tx_pending_request, rx_pending_request) = unbounded();
@@ -68,7 +75,7 @@ impl Protocol {
         let (tx_shutdown, rx_shutdown) = oneshot::channel();
 
         let mut executor = DefaultExecutor::current();
-        let state = Arc::new(Mutex::new(ProtocolState::new(vec![
+        let state = Arc::new(Mutex::new(ConnectionState::new(vec![
             tx_state_change_1,
             tx_state_change_2,
         ])));
@@ -154,10 +161,26 @@ impl Protocol {
                 }),
         ))?;
 
-        Ok(Protocol {
+        executor.spawn(Box::new(
+            rx_ordered_incoming_request
+                .fold(
+                    tx_outgoing_message.clone(),
+                    |tx_outgoing_message, _request| {
+                        tx_outgoing_message
+                            .send(Message::Response(
+                                Response::builder().build("".into()).unwrap(),
+                            ))
+                            .and_then(|tx_outgoing_message| Ok(tx_outgoing_message))
+                            .map_err(|_| ())
+                    },
+                )
+                .then(|_| Ok(())),
+        ))?;
+
+        Ok(Connection {
             request_default_max_timeout_duration: config.request_default_max_timeout_duration,
             request_default_timeout_duration: config.request_default_timeout_duration,
-            rx_ordered_incoming_request,
+            rx_ordered_incoming_request: None,
             sequence_number: CSeq::try_from(0).expect("sequence number `0` should not be invalid"),
             state,
             tx_outgoing_message: tx_outgoing_message,
@@ -175,28 +198,48 @@ impl Protocol {
         self.state().0
     }
 
-    pub fn send_request<B>(
+    pub fn send_request<R, B>(
         &mut self,
-        request: Request<B>,
-        // options: RequestOptions,
-    ) -> impl Future<Item = Response<BytesMut>, Error = ProtocolError>
+        request: R,
+    ) -> impl Future<Item = Response<BytesMut>, Error = OperationError>
     where
+        R: Into<Request<B>>,
         B: AsRef<[u8]>,
     {
-        let error_closure = || Err(ProtocolError::Closed);
+        let request_default_max_timeout_duration = self.request_default_max_timeout_duration;
+        let request_default_timeout_duration = self.request_default_timeout_duration;
 
+        self.send_request_with_options(
+            request,
+            RequestOptions::builder()
+                .max_timeout_duration(request_default_max_timeout_duration)
+                .timeout_duration(request_default_timeout_duration)
+                .build()
+                .expect("request options should not be invalid internally"),
+        )
+    }
+
+    pub fn send_request_with_options<R, B>(
+        &mut self,
+        request: R,
+        options: RequestOptions,
+    ) -> impl Future<Item = Response<BytesMut>, Error = OperationError>
+    where
+        R: Into<Request<B>>,
+        B: AsRef<[u8]>,
+    {
         // Check if the write state allows sending requests. We should also probably check whether
         // the read state allows reading responses, but if everything is working correctly, it
         // should agree with the write state.
 
         if !self.write_state().requests_allowed() {
-            return Either::A(lazy(error_closure));
+            return Either::A(future::err(OperationError::Closed));
         }
 
         let sequence_number = self.sequence_number;
         self.sequence_number = self.sequence_number.increment();
 
-        let mut request = request.map(|body| BytesMut::from(body.as_ref()));
+        let mut request = request.into().map(|body| BytesMut::from(body.as_ref()));
         let cseq_header = CSeq::to_header_raw(&sequence_number)
             .into_iter()
             .nth(0)
@@ -216,7 +259,7 @@ impl Protocol {
             // does, make sure that the state is updated correctly.
 
             lock_state(&self.state).update_state(ReadState::Request, WriteState::Response);
-            return Either::A(lazy(error_closure));
+            return Either::A(future::err(OperationError::Closed));
         }
 
         if let Err(_) = self
@@ -232,15 +275,15 @@ impl Protocol {
                 .unbounded_send(PendingRequestUpdate::RemovePendingRequest(sequence_number))
                 .ok();
             lock_state(&self.state).update_state(ReadState::Response, WriteState::None);
-            return Either::A(lazy(error_closure));
+            return Either::A(future::err(OperationError::Closed));
         }
 
-        let timer = if let Some(duration) = self.request_default_max_timeout_duration {
+        let timer = if let Some(duration) = options.max_timeout_duration() {
             let expire_time = Instant::now() + duration;
             Either::A(Delay::new(expire_time))
         } else {
             Either::B(future::empty())
-        }.then(|_| Err(ProtocolError::RequestTimedOut(true)));
+        }.then(|_| Err(OperationError::RequestTimedOut(RequestTimeoutType::Long)));
 
         Either::B(
             timer
@@ -248,7 +291,7 @@ impl Protocol {
                     (
                         rx_response,
                         self.tx_pending_request.clone(),
-                        self.request_default_timeout_duration,
+                        options.timeout_duration(),
                         sequence_number,
                     ),
                     |(
@@ -280,7 +323,9 @@ impl Protocol {
                                         sequence_number,
                                     )))
                                 }
-                                Some(PendingRequestResponse::None) => Err(ProtocolError::Cancelled),
+                                Some(PendingRequestResponse::None) => {
+                                    Err(OperationError::RequestCancelled)
+                                }
                                 Some(PendingRequestResponse::Response(response)) => {
                                     Ok(Loop::Break(response))
                                 }
@@ -292,7 +337,7 @@ impl Protocol {
                                             sequence_number,
                                         ))
                                         .ok();
-                                    Err(ProtocolError::RequestTimedOut(false))
+                                    Err(OperationError::RequestTimedOut(RequestTimeoutType::Short))
                                 }
                             }
                         })
@@ -303,7 +348,7 @@ impl Protocol {
         )
     }
 
-    fn send_response<B>(&self, response: Response<B>) -> Result<(), ProtocolError>
+    fn send_response<B>(&self, response: Response<B>) -> Result<(), OperationError>
     where
         B: AsRef<[u8]>,
     {
@@ -311,7 +356,7 @@ impl Protocol {
 
         self.tx_outgoing_message
             .unbounded_send(Message::Response(response))
-            .map_err(|_| ProtocolError::Closed)
+            .map_err(|_| OperationError::Closed)
     }
 
     pub fn state(&self) -> ReadWriteStatePair {
@@ -323,9 +368,9 @@ impl Protocol {
     }
 }
 
-impl Drop for Protocol {
+impl Drop for Connection {
     fn drop(&mut self) {
-        // Protocol object is being dropped, start a soft shutdown.
+        // Connection is being dropped, start a soft shutdown.
 
         if let Some(tx_shutdown) = self.tx_shutdown.take() {
             tx_shutdown
@@ -347,6 +392,10 @@ pub struct Config {
 impl Config {
     pub fn builder() -> ConfigBuilder {
         ConfigBuilder::new()
+    }
+
+    pub fn new() -> Self {
+        Config::default()
     }
 
     pub fn decode_timeout_duration(&self) -> Duration {
@@ -374,12 +423,11 @@ impl Default for Config {
     fn default() -> Self {
         Config::builder()
             .build()
-            .expect("default config builder options should be valid")
+            .expect("default config builder should be valid")
     }
 }
 
 pub struct ConfigBuilder {
-    error: Option<BuilderError>,
     decode_timeout_duration: Duration,
     request_buffer_size: usize,
     request_default_max_timeout_duration: Option<Duration>,
@@ -393,9 +441,29 @@ impl ConfigBuilder {
         ConfigBuilder::default()
     }
 
-    pub fn build(self) -> Result<Config, BuilderError> {
-        if let Some(error) = self.error {
-            return Err(error);
+    pub fn build(self) -> Result<Config, ConfigBuilderError> {
+        if self.decode_timeout_duration.as_secs() == 0 {
+            return Err(ConfigBuilderError::InvalidDecodeTimeoutDuration);
+        }
+
+        if self.request_buffer_size == 0 {
+            return Err(ConfigBuilderError::InvalidRequestBufferSize);
+        }
+
+        if let Some(duration) = self.request_default_max_timeout_duration {
+            if duration.as_secs() == 0 {
+                return Err(ConfigBuilderError::InvalidRequestDefaultMaxTimeoutDuration);
+            }
+        }
+
+        if let Some(duration) = self.request_default_timeout_duration {
+            if duration.as_secs() == 0 {
+                return Err(ConfigBuilderError::InvalidRequestDefaultTimeoutDuration);
+            }
+        }
+
+        if self.response_buffer_size == 0 {
+            return Err(ConfigBuilderError::InvalidResponseBufferSize);
         }
 
         Ok(Config {
@@ -409,22 +477,12 @@ impl ConfigBuilder {
     }
 
     pub fn decode_timeout_duration(&mut self, duration: Duration) -> &mut Self {
-        if duration.as_secs() == 0 {
-            self.error = Some(BuilderError::InvalidDecodeTimeoutDuration);
-        } else {
-            self.decode_timeout_duration = duration;
-        }
-
+        self.decode_timeout_duration = duration;
         self
     }
 
     pub fn request_buffer_size(&mut self, size: usize) -> &mut Self {
-        if size == 0 {
-            self.error = Some(BuilderError::InvalidRequestBufferSize)
-        } else {
-            self.request_buffer_size = size;
-        }
-
+        self.request_buffer_size = size;
         self
     }
 
@@ -432,34 +490,17 @@ impl ConfigBuilder {
         &mut self,
         duration: Option<Duration>,
     ) -> &mut Self {
-        match duration {
-            Some(ref duration) if duration.as_secs() == 0 => {
-                self.error = Some(BuilderError::InvalidRequestDefaultMaxTimeoutDuration);
-            }
-            _ => self.request_default_max_timeout_duration = duration,
-        }
-
+        self.request_default_max_timeout_duration = duration;
         self
     }
 
     pub fn request_default_timeout_duration(&mut self, duration: Option<Duration>) -> &mut Self {
-        match duration {
-            Some(ref duration) if duration.as_secs() == 0 => {
-                self.error = Some(BuilderError::InvalidRequestDefaultTimeoutDuration);
-            }
-            _ => self.request_default_timeout_duration = duration,
-        }
-
+        self.request_default_timeout_duration = duration;
         self
     }
 
     pub fn response_buffer_size(&mut self, size: usize) -> &mut Self {
-        if size == 0 {
-            self.error = Some(BuilderError::InvalidResponseBufferSize);
-        } else {
-            self.response_buffer_size = size;
-        }
-
+        self.response_buffer_size = size;
         self
     }
 
@@ -475,7 +516,6 @@ impl ConfigBuilder {
 impl Default for ConfigBuilder {
     fn default() -> Self {
         ConfigBuilder {
-            error: None,
             decode_timeout_duration: DEFAULT_DECODE_TIMEOUT_DURATION,
             request_buffer_size: DEFAULT_REQUEST_BUFFER_SIZE,
             request_default_max_timeout_duration: Some(DEFAULT_REQUEST_MAX_TIMEOUT_DURATION),
@@ -487,7 +527,7 @@ impl Default for ConfigBuilder {
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum BuilderError {
+pub enum ConfigBuilderError {
     InvalidDecodeTimeoutDuration,
     InvalidRequestBufferSize,
     InvalidRequestDefaultMaxTimeoutDuration,
@@ -495,15 +535,15 @@ pub enum BuilderError {
     InvalidResponseBufferSize,
 }
 
-impl fmt::Display for BuilderError {
+impl fmt::Display for ConfigBuilderError {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         formatter.write_str(self.description())
     }
 }
 
-impl Error for BuilderError {
+impl Error for ConfigBuilderError {
     fn description(&self) -> &str {
-        use self::BuilderError::*;
+        use self::ConfigBuilderError::*;
 
         match self {
             InvalidDecodeTimeoutDuration => "invalid decode timeout duration",
@@ -513,6 +553,121 @@ impl Error for BuilderError {
             }
             InvalidRequestDefaultTimeoutDuration => "invalid request default timeout duration",
             InvalidResponseBufferSize => "invalid response buffer size",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct RequestOptions {
+    max_timeout_duration: Option<Duration>,
+    timeout_duration: Option<Duration>,
+}
+
+impl RequestOptions {
+    pub fn builder() -> RequestOptionsBuilder {
+        RequestOptionsBuilder::new()
+    }
+
+    pub fn new() -> Self {
+        RequestOptions::default()
+    }
+
+    pub fn max_timeout_duration(&self) -> Option<Duration> {
+        self.max_timeout_duration
+    }
+
+    pub fn timeout_duration(&self) -> Option<Duration> {
+        self.timeout_duration
+    }
+}
+
+impl Default for RequestOptions {
+    fn default() -> Self {
+        RequestOptions::builder()
+            .build()
+            .expect("default request options builder should be valid")
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct RequestOptionsBuilder {
+    max_timeout_duration: Option<Duration>,
+    timeout_duration: Option<Duration>,
+}
+
+impl RequestOptionsBuilder {
+    pub fn new() -> Self {
+        RequestOptionsBuilder::default()
+    }
+
+    pub fn build(self) -> Result<RequestOptions, RequestOptionsBuilderError> {
+        if let Some(timeout_duration) = self.timeout_duration {
+            if timeout_duration.as_secs() == 0 {
+                return Err(RequestOptionsBuilderError::InvalidTimeoutDuration);
+            }
+        }
+
+        if let Some(max_timeout_duration) = self.max_timeout_duration {
+            if max_timeout_duration.as_secs() == 0 {
+                return Err(RequestOptionsBuilderError::InvalidMaxTimeoutDuration);
+            }
+
+            if let Some(timeout_duration) = self.timeout_duration {
+                if timeout_duration > max_timeout_duration {
+                    return Err(RequestOptionsBuilderError::TimeoutDurationGreaterThanMax);
+                }
+            }
+        }
+
+        Ok(RequestOptions {
+            max_timeout_duration: self.max_timeout_duration,
+            timeout_duration: self.timeout_duration,
+        })
+    }
+
+    pub fn max_timeout_duration(&mut self, duration: Option<Duration>) -> &mut Self {
+        self.max_timeout_duration = duration;
+        self
+    }
+
+    pub fn timeout_duration(&mut self, duration: Option<Duration>) -> &mut Self {
+        self.timeout_duration = duration;
+        self
+    }
+}
+
+impl Default for RequestOptionsBuilder {
+    fn default() -> Self {
+        RequestOptionsBuilder {
+            max_timeout_duration: None,
+            timeout_duration: None,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum RequestOptionsBuilderError {
+    InvalidTimeoutDuration,
+    InvalidMaxTimeoutDuration,
+    TimeoutDurationGreaterThanMax,
+}
+
+impl fmt::Display for RequestOptionsBuilderError {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str(self.description())
+    }
+}
+
+impl Error for RequestOptionsBuilderError {
+    fn description(&self) -> &str {
+        use self::RequestOptionsBuilderError::*;
+
+        match self {
+            InvalidTimeoutDuration => "invalid timeout duration",
+            InvalidMaxTimeoutDuration => "invalid max timeout duration",
+            TimeoutDurationGreaterThanMax => {
+                "timeout duration is greater than the max timeout duration"
+            }
         }
     }
 }
@@ -642,15 +797,15 @@ state_type!(WriteState);
 pub type ReadWriteStatePair = (ReadState, WriteState);
 
 #[derive(Debug)]
-pub struct ProtocolState {
+pub struct ConnectionState {
     read_state: ReadState,
     state_changes: Vec<UnboundedSender<ReadWriteStatePair>>,
     write_state: WriteState,
 }
 
-impl ProtocolState {
+impl ConnectionState {
     pub fn new(state_changes: Vec<UnboundedSender<ReadWriteStatePair>>) -> Self {
-        ProtocolState {
+        ConnectionState {
             read_state: ReadState::All,
             state_changes,
             write_state: WriteState::All,
@@ -740,7 +895,7 @@ enum PendingRequestUpdate {
     RemovePendingRequest(CSeq),
 }
 
-fn lock_state(state: &Arc<Mutex<ProtocolState>>) -> MutexGuard<ProtocolState> {
+fn lock_state(state: &Arc<Mutex<ConnectionState>>) -> MutexGuard<ConnectionState> {
     state.lock().expect("acquiring state lock should not fail")
 }
 
@@ -759,7 +914,7 @@ fn try_send_message(
 /// Constructs a task that manages the timer for decoding messages.
 ///
 /// If the timer expires, then messages can no longer be read from the connection. But writing
-/// responses is still allowed as long as the protocol state had not already passed that point.
+/// responses is still allowed as long as the connection state had not already passed that point.
 ///
 /// Since the timer is managed via events from the codec, if the stream of the events end, then it
 /// is implied that the connection is completely closed.
@@ -774,11 +929,11 @@ fn try_send_message(
 ///
 /// # Arguments
 ///
-/// * `state` - A reference to the protocol state.
+/// * `state` - A reference to the connection state.
 /// * `rx_codec_event` - A stream of [`CodecEvent`]s.
 /// * `decode_timeout_duration` - The duration of time that must pass for decoding to timeout.
 fn create_decoding_timer_task(
-    state: Arc<Mutex<ProtocolState>>,
+    state: Arc<Mutex<ConnectionState>>,
     rx_codec_event: UnboundedReceiver<CodecEvent>,
     decode_timeout_duration: Duration,
 ) -> impl Future<Item = (), Error = ()> {
@@ -805,8 +960,8 @@ fn create_decoding_timer_task(
                         Either::B(((None, _), _)) => {
                             // The codec that handles decoding and encoding has been dropped. This
                             // implies that the connection is completely closed. It is likely that
-                            // the protocol state has already been updated by this point, but we do
-                            // it just in case, since this is the final protocol state.
+                            // the connection state has already been updated by this point, but we
+                            // do it just in case, since this is the final connection state.
 
                             lock_state(&state).update_state(ReadState::None, WriteState::None);
                             Loop::Break(())
@@ -836,7 +991,7 @@ fn create_decoding_timer_task(
 /// requests in order of their sequence numbers in case support for out-of-order transports were to
 /// be added (e.g. UDP).
 ///
-/// Also, as it is configured in the protocol's [`Config`], the size of the buffer of incoming
+/// Also, as it is configured in the connection's [`Config`], the size of the buffer of incoming
 /// requests needs to be set. If a request comes with a sequence number that is too far from the
 /// current sequence number, it will not be processed and will be responded to with a
 /// `503 Service Unavailable` response.
@@ -856,14 +1011,14 @@ fn create_decoding_timer_task(
 ///
 /// # Arguments
 ///
-/// * `state` - A reference to the protocol state.
+/// * `state` - A reference to the connection state.
 /// * `rx_incoming_request` - A stream of [`Request`]s that are to be ordered.
 /// * `tx_incoming_response` - The sink where [`Request`]s will be sent in order based on their
 ///   `CSeq` header.
 /// * `tx_outgoing_message` - A sink where messages to be sent to the connected host are sent. This
 ///   is needed in order to send `400 Bad Request` and `503 Service Unavailable` responses.
 fn create_request_handler_task(
-    state: Arc<Mutex<ProtocolState>>,
+    state: Arc<Mutex<ConnectionState>>,
     rx_incoming_request: Receiver<Request<BytesMut>>,
     tx_ordered_incoming_request: UnboundedSender<Request<BytesMut>>,
     tx_outgoing_message: UnboundedSender<Message>,
@@ -908,11 +1063,11 @@ fn create_request_handler_task(
                             // This is actually a bit of a break from the specification. The
                             // specification states that requests must be handled in the order of
                             // their `CSeq`, but this is not practical here and opens up possible
-                            // resource exhaustion attacks. The protocol will only process the next
-                            // expected `CSeq` to abide by the specification. All other requests
-                            // will simply be buffered until the next one with the next `CSeq` has
-                            // arrived. But the range of possible `CSeq`s is way too large to buffer
-                            // per agent, so we only buffer a small amount.
+                            // resource exhaustion attacks. The connection will only process the
+                            // next expected `CSeq` to abide by the specification. All other
+                            // requests will simply be buffered until the next one with the next
+                            // `CSeq` has arrived. But the range of possible `CSeq`s is way too
+                            // large to buffer per agent, so we only buffer a small amount.
 
                             if lock_state(&state).write_state().responses_allowed() {
                                 let response = Response::builder()
@@ -1012,7 +1167,7 @@ fn create_request_handler_task(
 /// * `rx_pending_request` - A stream of [`PendingRequestUpdate`]s that add and remove pending
 ///   requests that are waiting to be mapped responses.
 fn create_response_handler_task(
-    state: Arc<Mutex<ProtocolState>>,
+    state: Arc<Mutex<ConnectionState>>,
     rx_incoming_response: Receiver<Response<BytesMut>>,
     rx_pending_request: UnboundedReceiver<PendingRequestUpdate>,
 ) -> Box<Future<Item = (), Error = ()> + Send + 'static> {
@@ -1237,17 +1392,17 @@ fn create_response_handler_task(
 ///
 /// * The vector of receivers all end, so no more messages will be sent through the sink.
 /// * While trying to send a message through the sink, an error occurs.
-/// * A protocol state change was detected in which writing is no longer necessary or possible.
+/// * A connection state change was detected in which writing is no longer necessary or possible.
 ///
 /// # Arguments
 ///
-/// * `state` - A reference to the protocol state.
-/// * `rx_state_change` - A stream of [`ReadWriteStatePair`] protocol state changes.
+/// * `state` - A reference to the connection state.
+/// * `rx_state_change` - A stream of [`ReadWriteStatePair`] connection state changes.
 /// * `sink` - The sink which all messages are forwarded to.
 /// * `outgoing_messages` - A list of message channel receivers from different sources. All of the
 ///   messages sent to these receivers will be forwarded to the given sink as they arrive.
 fn create_send_messages_task<S>(
-    state: Arc<Mutex<ProtocolState>>,
+    state: Arc<Mutex<ConnectionState>>,
     rx_state_change: UnboundedReceiver<ReadWriteStatePair>,
     sink: S,
     rx_outgoing_message: UnboundedReceiver<Message>,
@@ -1259,7 +1414,7 @@ where
     let stream = rx_outgoing_message
         .filter(move |message| {
             // Only allow writing of messages that are allowed by the current write state. This is
-            // here just in case something else in the protocol does not obey the write state. But
+            // here just in case something else in the connection does not obey the write state. But
             // if everything does, then this is a waste of time. Until everything has been tested
             // extensively, this will remain.
             //
@@ -1348,9 +1503,9 @@ where
 /// * The incoming message stream has ended.
 /// * There was an irrecoverable error during message decoding that produced an error in the message
 ///   stream.
-/// * A protocol state change was detected in which reading is no longer necessary or possible. This
-///   can happen from external causes or from within the function. Specifically, if the request and
-///   response channel receivers are dropped, this will implicitly cause the corresponding state
+/// * A connection state change was detected in which reading is no longer necessary or possible.
+///   This can happen from external causes or from within the function. Specifically, if the request
+///   and response channel receivers are dropped, this will implicitly cause the corresponding state
 ///   change thus forcing this task to end.
 ///
 /// In order for this task to end properly in all cases, we have to make sure that the dropping of
@@ -1361,8 +1516,8 @@ where
 ///
 /// # Arguments
 ///
-/// * `state` - A reference to the protocol state.
-/// * `rx_state_change` - A stream of [`ReadWriteStatePair`] protocol state changes.
+/// * `state` - A reference to the connection state.
+/// * `rx_state_change` - A stream of [`ReadWriteStatePair`] connection state changes.
 /// * `stream` - The stream of incoming messages.
 /// * `tx_incoming_request` - The sink where requests extracted from the message stream will be
 ///   sent.
@@ -1371,7 +1526,7 @@ where
 /// * `tx_outgoing_message` - A sink where messages to be sent to the connected host are sent. This
 ///   is needed in order to send `400 Bad Request` responses in response to invalid messages.
 fn create_split_messages_task<S>(
-    state: Arc<Mutex<ProtocolState>>,
+    state: Arc<Mutex<ConnectionState>>,
     rx_state_change: UnboundedReceiver<ReadWriteStatePair>,
     stream: S,
     tx_incoming_request: Sender<Request<BytesMut>>,
@@ -1384,7 +1539,7 @@ where
     fn forward_message<M>(
         tx_incoming_message: Option<Sender<M>>,
         message: M,
-        state: &Arc<Mutex<ProtocolState>>,
+        state: &Arc<Mutex<ConnectionState>>,
         error_state: (Option<ReadState>, Option<WriteState>),
     ) -> Option<Sender<M>> {
         tx_incoming_message.and_then(|tx_incoming_message| {
@@ -1586,9 +1741,9 @@ mod test {
     fn test_decoding_timer_task_event_handling() {
         let (tx_state_change, _rx_state_change) = unbounded();
         let (tx_codec_event, rx_codec_event) = unbounded();
-        let protocol_state = Arc::new(Mutex::new(ProtocolState::new(vec![tx_state_change])));
+        let connection_state = Arc::new(Mutex::new(ConnectionState::new(vec![tx_state_change])));
         let task = create_decoding_timer_task(
-            protocol_state.clone(),
+            connection_state.clone(),
             rx_codec_event,
             Duration::from_millis(50),
         );
@@ -1627,7 +1782,7 @@ mod test {
         runtime.shutdown_on_idle().wait().unwrap();
 
         assert_eq!(
-            lock_state(&protocol_state).state(),
+            lock_state(&connection_state).state(),
             (ReadState::None, WriteState::None)
         );
     }
@@ -1636,9 +1791,9 @@ mod test {
     fn test_decoding_timer_task_codec_dropped() {
         let (tx_state_change, _rx_state_change) = unbounded();
         let (tx_codec_event, rx_codec_event) = unbounded();
-        let protocol_state = Arc::new(Mutex::new(ProtocolState::new(vec![tx_state_change])));
+        let connection_state = Arc::new(Mutex::new(ConnectionState::new(vec![tx_state_change])));
         let task = create_decoding_timer_task(
-            protocol_state.clone(),
+            connection_state.clone(),
             rx_codec_event,
             DEFAULT_DECODE_TIMEOUT_DURATION,
         );
@@ -1655,7 +1810,7 @@ mod test {
             .unwrap();
 
         assert_eq!(
-            lock_state(&protocol_state).state(),
+            lock_state(&connection_state).state(),
             (ReadState::None, WriteState::None)
         );
     }
@@ -1664,9 +1819,9 @@ mod test {
     fn test_decoding_timer_task_expired() {
         let (tx_state_change, _rx_state_change) = unbounded();
         let (tx_codec_event, rx_codec_event) = unbounded();
-        let protocol_state = Arc::new(Mutex::new(ProtocolState::new(vec![tx_state_change])));
+        let connection_state = Arc::new(Mutex::new(ConnectionState::new(vec![tx_state_change])));
         let task = create_decoding_timer_task(
-            protocol_state.clone(),
+            connection_state.clone(),
             rx_codec_event,
             Duration::from_millis(1),
         );
@@ -1685,7 +1840,7 @@ mod test {
             .unwrap();
 
         assert_eq!(
-            lock_state(&protocol_state).state(),
+            lock_state(&connection_state).state(),
             (
                 ReadState::Error(ProtocolError::DecodingTimedOut),
                 WriteState::Response
@@ -1700,9 +1855,9 @@ mod test {
         let (tx_ordered_incoming_request, rx_ordered_incoming_request) = unbounded();
         let (tx_outgoing_message, _rx_outgoing_message) = unbounded();
 
-        let protocol_state = Arc::new(Mutex::new(ProtocolState::new(vec![tx_state_change])));
+        let connection_state = Arc::new(Mutex::new(ConnectionState::new(vec![tx_state_change])));
         let task = create_request_handler_task(
-            protocol_state.clone(),
+            connection_state.clone(),
             rx_incoming_request,
             tx_ordered_incoming_request,
             tx_outgoing_message,
@@ -1770,9 +1925,9 @@ mod test {
         let (tx_ordered_incoming_request, rx_ordered_incoming_request) = unbounded();
         let (tx_outgoing_message, rx_outgoing_message) = unbounded();
 
-        let protocol_state = Arc::new(Mutex::new(ProtocolState::new(vec![tx_state_change])));
+        let connection_state = Arc::new(Mutex::new(ConnectionState::new(vec![tx_state_change])));
         let task = create_request_handler_task(
-            protocol_state.clone(),
+            connection_state.clone(),
             rx_incoming_request,
             tx_ordered_incoming_request,
             tx_outgoing_message,
@@ -1837,9 +1992,9 @@ mod test {
         let (tx_ordered_incoming_request, _rx_ordered_incoming_request) = unbounded();
         let (tx_outgoing_message, rx_outgoing_message) = unbounded();
 
-        let protocol_state = Arc::new(Mutex::new(ProtocolState::new(vec![tx_state_change])));
+        let connection_state = Arc::new(Mutex::new(ConnectionState::new(vec![tx_state_change])));
         let task = create_request_handler_task(
-            protocol_state.clone(),
+            connection_state.clone(),
             rx_incoming_request,
             tx_ordered_incoming_request,
             tx_outgoing_message,
@@ -1884,14 +2039,14 @@ mod test {
         let (tx_ordered_incoming_request, _rx_ordered_incoming_request) = unbounded();
         let (tx_outgoing_message, rx_outgoing_message) = unbounded();
 
-        let protocol_state = Arc::new(Mutex::new(ProtocolState::new(vec![tx_state_change])));
+        let connection_state = Arc::new(Mutex::new(ConnectionState::new(vec![tx_state_change])));
 
         {
-            lock_state(&protocol_state).update_write_state(WriteState::Request);
+            lock_state(&connection_state).update_write_state(WriteState::Request);
         }
 
         let task = create_request_handler_task(
-            protocol_state.clone(),
+            connection_state.clone(),
             rx_incoming_request,
             tx_ordered_incoming_request,
             tx_outgoing_message,
@@ -1929,9 +2084,9 @@ mod test {
         let (tx_ordered_incoming_request, _rx_ordered_incoming_request) = unbounded();
         let (tx_outgoing_message, _rx_outgoing_message) = unbounded();
 
-        let protocol_state = Arc::new(Mutex::new(ProtocolState::new(vec![tx_state_change])));
+        let connection_state = Arc::new(Mutex::new(ConnectionState::new(vec![tx_state_change])));
         let task = create_request_handler_task(
-            protocol_state.clone(),
+            connection_state.clone(),
             rx_incoming_request,
             tx_ordered_incoming_request,
             tx_outgoing_message,
@@ -1956,9 +2111,9 @@ mod test {
         let (tx_incoming_response, rx_incoming_response) = channel(DEFAULT_RESPONSE_BUFFER_SIZE);
         let (tx_pending_request, rx_pending_request) = unbounded();
 
-        let protocol_state = Arc::new(Mutex::new(ProtocolState::new(vec![tx_state_change])));
+        let connection_state = Arc::new(Mutex::new(ConnectionState::new(vec![tx_state_change])));
         let task = create_response_handler_task(
-            protocol_state.clone(),
+            connection_state.clone(),
             rx_incoming_response,
             rx_pending_request,
         );
@@ -2025,7 +2180,7 @@ mod test {
         runtime.shutdown_on_idle().wait().unwrap();
 
         assert_eq!(
-            lock_state(&protocol_state).state(),
+            lock_state(&connection_state).state(),
             (ReadState::Request, WriteState::Response)
         );
     }
@@ -2036,9 +2191,9 @@ mod test {
         let (_tx_incoming_response, rx_incoming_response) = channel(DEFAULT_RESPONSE_BUFFER_SIZE);
         let (tx_pending_request, rx_pending_request) = unbounded();
 
-        let protocol_state = Arc::new(Mutex::new(ProtocolState::new(vec![tx_state_change])));
+        let connection_state = Arc::new(Mutex::new(ConnectionState::new(vec![tx_state_change])));
         let task = create_response_handler_task(
-            protocol_state.clone(),
+            connection_state.clone(),
             rx_incoming_response,
             rx_pending_request,
         );
@@ -2055,7 +2210,7 @@ mod test {
             .unwrap();
 
         assert_eq!(
-            lock_state(&protocol_state).state(),
+            lock_state(&connection_state).state(),
             (ReadState::Request, WriteState::Response)
         );
     }
@@ -2066,9 +2221,9 @@ mod test {
         let (tx_incoming_response, rx_incoming_response) = channel(DEFAULT_RESPONSE_BUFFER_SIZE);
         let (tx_pending_request, rx_pending_request) = unbounded();
 
-        let protocol_state = Arc::new(Mutex::new(ProtocolState::new(vec![tx_state_change])));
+        let connection_state = Arc::new(Mutex::new(ConnectionState::new(vec![tx_state_change])));
         let task = create_response_handler_task(
-            protocol_state.clone(),
+            connection_state.clone(),
             rx_incoming_response,
             rx_pending_request,
         );
@@ -2115,7 +2270,7 @@ mod test {
         runtime.shutdown_on_idle().wait().unwrap();
 
         assert_eq!(
-            lock_state(&protocol_state).state(),
+            lock_state(&connection_state).state(),
             (ReadState::Request, WriteState::Response)
         );
     }
@@ -2126,9 +2281,9 @@ mod test {
         let (tx_incoming_response, rx_incoming_response) = channel(DEFAULT_RESPONSE_BUFFER_SIZE);
         let (tx_pending_request, rx_pending_request) = unbounded();
 
-        let protocol_state = Arc::new(Mutex::new(ProtocolState::new(vec![tx_state_change])));
+        let connection_state = Arc::new(Mutex::new(ConnectionState::new(vec![tx_state_change])));
         let task = create_response_handler_task(
-            protocol_state.clone(),
+            connection_state.clone(),
             rx_incoming_response,
             rx_pending_request,
         );
@@ -2169,7 +2324,7 @@ mod test {
         assert!(pending_request_response.is_none());
 
         assert_eq!(
-            lock_state(&protocol_state).state(),
+            lock_state(&connection_state).state(),
             (ReadState::Request, WriteState::Response)
         );
     }
@@ -2180,9 +2335,9 @@ mod test {
         let (tx_message, rx_message) = unbounded();
         let (tx_outgoing_message, rx_outgoing_message) = unbounded();
 
-        let protocol_state = Arc::new(Mutex::new(ProtocolState::new(vec![tx_state_change])));
+        let connection_state = Arc::new(Mutex::new(ConnectionState::new(vec![tx_state_change])));
         let task = create_send_messages_task(
-            protocol_state.clone(),
+            connection_state.clone(),
             rx_state_change,
             tx_message.sink_map_err(|_| {
                 ProtocolError::IO(Arc::new(io::Error::new(
@@ -2212,7 +2367,7 @@ mod test {
             .unwrap();
 
         assert_eq!(
-            lock_state(&protocol_state).state(),
+            lock_state(&connection_state).state(),
             (
                 ReadState::Response,
                 WriteState::Error(ProtocolError::IO(Arc::new(io::Error::new(
@@ -2235,14 +2390,15 @@ mod test {
             let (tx_message, _rx_message) = unbounded();
             let (_tx_outgoing_message, rx_outgoing_message) = unbounded();
 
-            let protocol_state = Arc::new(Mutex::new(ProtocolState::new(vec![tx_state_change])));
+            let connection_state =
+                Arc::new(Mutex::new(ConnectionState::new(vec![tx_state_change])));
 
             {
-                lock_state(&protocol_state).update_write_state(new_write_state.clone());
+                lock_state(&connection_state).update_write_state(new_write_state.clone());
             }
 
             let task = create_send_messages_task(
-                protocol_state.clone(),
+                connection_state.clone(),
                 rx_state_change,
                 tx_message.sink_map_err(|_| {
                     ProtocolError::IO(Arc::new(io::Error::new(
@@ -2261,7 +2417,7 @@ mod test {
                 .unwrap();
 
             assert_eq!(
-                lock_state(&protocol_state).state(),
+                lock_state(&connection_state).state(),
                 (ReadState::Response, new_write_state.clone())
             );
         }
@@ -2273,9 +2429,9 @@ mod test {
         let (tx_message, _rx_message) = unbounded();
         let (tx_outgoing_message, rx_outgoing_message) = unbounded();
 
-        let protocol_state = Arc::new(Mutex::new(ProtocolState::new(vec![tx_state_change])));
+        let connection_state = Arc::new(Mutex::new(ConnectionState::new(vec![tx_state_change])));
         let task = create_send_messages_task(
-            protocol_state.clone(),
+            connection_state.clone(),
             rx_state_change,
             tx_message.sink_map_err(|_| {
                 ProtocolError::IO(Arc::new(io::Error::new(
@@ -2298,7 +2454,7 @@ mod test {
             .unwrap();
 
         assert_eq!(
-            lock_state(&protocol_state).state(),
+            lock_state(&connection_state).state(),
             (ReadState::Response, WriteState::None)
         );
     }
@@ -2311,9 +2467,9 @@ mod test {
         let (tx_incoming_response, _rx_incoming_response) = channel(DEFAULT_RESPONSE_BUFFER_SIZE);
         let (tx_outgoing_message, _rx_outgoing_message) = unbounded();
 
-        let protocol_state = Arc::new(Mutex::new(ProtocolState::new(vec![tx_state_change])));
+        let connection_state = Arc::new(Mutex::new(ConnectionState::new(vec![tx_state_change])));
         let task = create_split_messages_task(
-            protocol_state.clone(),
+            connection_state.clone(),
             rx_state_change,
             rx_message.map_err(|_| {
                 ProtocolError::IO(Arc::new(io::Error::new(
@@ -2344,15 +2500,15 @@ mod test {
 
         let mut runtime = Runtime::new().unwrap();
 
-        // Simulate ending the stream, but wait to do it so that the protocol state can be checked
+        // Simulate ending the stream, but wait to do it so that the connection state can be checked
         // after the task has handled a forwarding request error.
 
-        let protocol_state_cloned = protocol_state.clone();
+        let connection_state_cloned = connection_state.clone();
 
         runtime.spawn(
             Delay::new(Instant::now() + Duration::from_millis(100)).then(move |_| {
                 assert_eq!(
-                    lock_state(&protocol_state_cloned).state(),
+                    lock_state(&connection_state_cloned).state(),
                     (ReadState::Response, WriteState::All)
                 );
 
@@ -2367,7 +2523,7 @@ mod test {
         runtime.shutdown_on_idle().wait().unwrap();
 
         assert_eq!(
-            lock_state(&protocol_state).state(),
+            lock_state(&connection_state).state(),
             (ReadState::None, WriteState::Response)
         );
     }
@@ -2380,9 +2536,9 @@ mod test {
         let (tx_incoming_response, rx_incoming_response) = channel(DEFAULT_RESPONSE_BUFFER_SIZE);
         let (tx_outgoing_message, _rx_outgoing_message) = unbounded();
 
-        let protocol_state = Arc::new(Mutex::new(ProtocolState::new(vec![tx_state_change])));
+        let connection_state = Arc::new(Mutex::new(ConnectionState::new(vec![tx_state_change])));
         let task = create_split_messages_task(
-            protocol_state.clone(),
+            connection_state.clone(),
             rx_state_change,
             rx_message.map_err(|_| {
                 ProtocolError::IO(Arc::new(io::Error::new(
@@ -2408,15 +2564,15 @@ mod test {
 
         let mut runtime = Runtime::new().unwrap();
 
-        // Simulate ending the stream, but wait to do it so that the protocol state can be checked
+        // Simulate ending the stream, but wait to do it so that the connection state can be checked
         // after the task has handled a forwarding request error.
 
-        let protocol_state_cloned = protocol_state.clone();
+        let connection_state_cloned = connection_state.clone();
 
         runtime.spawn(
             Delay::new(Instant::now() + Duration::from_millis(100)).then(move |_| {
                 assert_eq!(
-                    lock_state(&protocol_state_cloned).state(),
+                    lock_state(&connection_state_cloned).state(),
                     (ReadState::Request, WriteState::Response)
                 );
 
@@ -2431,7 +2587,7 @@ mod test {
         runtime.shutdown_on_idle().wait().unwrap();
 
         assert_eq!(
-            lock_state(&protocol_state).state(),
+            lock_state(&connection_state).state(),
             (ReadState::None, WriteState::Response)
         );
     }
@@ -2444,9 +2600,9 @@ mod test {
         let (tx_incoming_response, rx_incoming_response) = channel(DEFAULT_RESPONSE_BUFFER_SIZE);
         let (tx_outgoing_message, _rx_outgoing_message) = unbounded();
 
-        let protocol_state = Arc::new(Mutex::new(ProtocolState::new(vec![tx_state_change])));
+        let connection_state = Arc::new(Mutex::new(ConnectionState::new(vec![tx_state_change])));
         let task = create_split_messages_task(
-            protocol_state.clone(),
+            connection_state.clone(),
             rx_state_change,
             rx_message.map_err(|_| {
                 ProtocolError::IO(Arc::new(io::Error::new(
@@ -2489,7 +2645,7 @@ mod test {
         let incoming_responses = runtime.block_on(rx_incoming_response.collect()).unwrap();
 
         assert_eq!(
-            lock_state(&protocol_state).state(),
+            lock_state(&connection_state).state(),
             (ReadState::None, WriteState::Response)
         );
         assert_eq!(incoming_requests, vec![request]);
@@ -2504,14 +2660,14 @@ mod test {
         let (tx_incoming_response, _rx_incoming_response) = channel(DEFAULT_RESPONSE_BUFFER_SIZE);
         let (tx_outgoing_message, rx_outgoing_message) = unbounded();
 
-        let protocol_state = Arc::new(Mutex::new(ProtocolState::new(vec![tx_state_change])));
+        let connection_state = Arc::new(Mutex::new(ConnectionState::new(vec![tx_state_change])));
 
         {
-            lock_state(&protocol_state).update_write_state(WriteState::None);
+            lock_state(&connection_state).update_write_state(WriteState::None);
         }
 
         let task = create_split_messages_task(
-            protocol_state.clone(),
+            connection_state.clone(),
             rx_state_change,
             rx_message.map_err(|_| {
                 ProtocolError::IO(Arc::new(io::Error::new(
@@ -2544,7 +2700,7 @@ mod test {
         let outgoing_messages = runtime.block_on(rx_outgoing_message.collect()).unwrap();
 
         assert_eq!(
-            lock_state(&protocol_state).state(),
+            lock_state(&connection_state).state(),
             (ReadState::None, WriteState::None)
         );
         assert_eq!(outgoing_messages, vec![]);
@@ -2558,9 +2714,9 @@ mod test {
         let (tx_incoming_response, _rx_incoming_response) = channel(DEFAULT_RESPONSE_BUFFER_SIZE);
         let (tx_outgoing_message, rx_outgoing_message) = unbounded();
 
-        let protocol_state = Arc::new(Mutex::new(ProtocolState::new(vec![tx_state_change])));
+        let connection_state = Arc::new(Mutex::new(ConnectionState::new(vec![tx_state_change])));
         let task = create_split_messages_task(
-            protocol_state.clone(),
+            connection_state.clone(),
             rx_state_change,
             rx_message.map_err(|_| {
                 ProtocolError::IO(Arc::new(io::Error::new(
@@ -2593,7 +2749,7 @@ mod test {
         let outgoing_messages = runtime.block_on(rx_outgoing_message.collect()).unwrap();
 
         assert_eq!(
-            lock_state(&protocol_state).state(),
+            lock_state(&connection_state).state(),
             (ReadState::None, WriteState::Response)
         );
 
@@ -2622,14 +2778,15 @@ mod test {
                 channel(DEFAULT_RESPONSE_BUFFER_SIZE);
             let (tx_outgoing_message, _rx_outgoing_message) = unbounded();
 
-            let protocol_state = Arc::new(Mutex::new(ProtocolState::new(vec![tx_state_change])));
+            let connection_state =
+                Arc::new(Mutex::new(ConnectionState::new(vec![tx_state_change])));
 
             {
-                lock_state(&protocol_state).update_read_state(new_read_state.clone());
+                lock_state(&connection_state).update_read_state(new_read_state.clone());
             }
 
             let task = create_split_messages_task(
-                protocol_state.clone(),
+                connection_state.clone(),
                 rx_state_change,
                 rx_message.map_err(|_| {
                     ProtocolError::IO(Arc::new(io::Error::new(
@@ -2650,7 +2807,7 @@ mod test {
                 .unwrap();
 
             assert_eq!(
-                lock_state(&protocol_state).state(),
+                lock_state(&connection_state).state(),
                 (new_read_state.clone(), WriteState::Response)
             );
         }
@@ -2677,21 +2834,22 @@ mod test {
             let (tx_incoming_response, _) = channel(DEFAULT_RESPONSE_BUFFER_SIZE);
             let (tx_outgoing_message, _) = unbounded();
 
-            let protocol_state = Arc::new(Mutex::new(ProtocolState::new(vec![tx_state_change])));
+            let connection_state =
+                Arc::new(Mutex::new(ConnectionState::new(vec![tx_state_change])));
             let mut write_state = new_state.1.clone();
 
             {
                 if let Some(new_read_state) = new_state.0.take() {
-                    lock_state(&protocol_state).update_read_state(new_read_state);
+                    lock_state(&connection_state).update_read_state(new_read_state);
                 }
 
                 if let Some(new_write_state) = new_state.1.take() {
-                    lock_state(&protocol_state).update_write_state(new_write_state);
+                    lock_state(&connection_state).update_write_state(new_write_state);
                 }
             }
 
             let task = create_split_messages_task(
-                protocol_state.clone(),
+                connection_state.clone(),
                 rx_state_change,
                 rx_message.map_err(|_| {
                     ProtocolError::IO(Arc::new(io::Error::new(
@@ -2706,8 +2864,8 @@ mod test {
 
             let mut runtime = Runtime::new().unwrap();
 
-            // Simulate sending a request but wait to do it so that the protocol state change can be
-            // handled first.
+            // Simulate sending a request but wait to do it so that the connection state change can
+            // be handled first.
 
             runtime.spawn(
                 Delay::new(Instant::now() + Duration::from_millis(100)).then(move |_| {
@@ -2745,7 +2903,7 @@ mod test {
             };
 
             assert_eq!(
-                lock_state(&protocol_state).state(),
+                lock_state(&connection_state).state(),
                 (ReadState::None, expected_write_state)
             );
             assert!(incoming_requests.is_empty());
@@ -2760,14 +2918,14 @@ mod test {
         let (tx_incoming_response, rx_incoming_response) = channel(DEFAULT_RESPONSE_BUFFER_SIZE);
         let (tx_outgoing_message, _rx_outgoing_message) = unbounded();
 
-        let protocol_state = Arc::new(Mutex::new(ProtocolState::new(vec![tx_state_change])));
+        let connection_state = Arc::new(Mutex::new(ConnectionState::new(vec![tx_state_change])));
 
         {
-            lock_state(&protocol_state).update_read_state(ReadState::Request);
+            lock_state(&connection_state).update_read_state(ReadState::Request);
         }
 
         let task = create_split_messages_task(
-            protocol_state.clone(),
+            connection_state.clone(),
             rx_state_change,
             rx_message.map_err(|_| {
                 ProtocolError::IO(Arc::new(io::Error::new(
@@ -2782,15 +2940,15 @@ mod test {
 
         let mut runtime = Runtime::new().unwrap();
 
-        // Simulate sending a response but wait to do it so that the protocol state change can be
+        // Simulate sending a response but wait to do it so that the connection state change can be
         // handled first.
 
-        let protocol_state_cloned = protocol_state.clone();
+        let connection_state_cloned = connection_state.clone();
 
         runtime.spawn(
             Delay::new(Instant::now() + Duration::from_millis(100)).then(move |_| {
                 assert_eq!(
-                    lock_state(&protocol_state_cloned).state(),
+                    lock_state(&connection_state_cloned).state(),
                     (ReadState::Request, WriteState::Response)
                 );
 
@@ -2813,7 +2971,7 @@ mod test {
             .unwrap();
 
         assert_eq!(
-            lock_state(&protocol_state).state(),
+            lock_state(&connection_state).state(),
             (ReadState::None, WriteState::Response)
         );
         assert!(incoming_responses.is_empty());
@@ -2827,9 +2985,9 @@ mod test {
         let (tx_incoming_response, _rx_incoming_response) = channel(DEFAULT_RESPONSE_BUFFER_SIZE);
         let (tx_outgoing_message, _rx_outgoing_message) = unbounded();
 
-        let protocol_state = Arc::new(Mutex::new(ProtocolState::new(vec![tx_state_change])));
+        let connection_state = Arc::new(Mutex::new(ConnectionState::new(vec![tx_state_change])));
         let task = create_split_messages_task(
-            protocol_state.clone(),
+            connection_state.clone(),
             rx_state_change,
             rx_message.map_err(|_| {
                 ProtocolError::IO(Arc::new(io::Error::new(
@@ -2854,7 +3012,7 @@ mod test {
             .unwrap();
 
         assert_eq!(
-            lock_state(&protocol_state).state(),
+            lock_state(&connection_state).state(),
             (ReadState::None, WriteState::Response)
         );
     }
@@ -2867,9 +3025,9 @@ mod test {
         let (tx_incoming_response, _rx_incoming_response) = channel(DEFAULT_RESPONSE_BUFFER_SIZE);
         let (tx_outgoing_message, _rx_outgoing_message) = unbounded();
 
-        let protocol_state = Arc::new(Mutex::new(ProtocolState::new(vec![tx_state_change])));
+        let connection_state = Arc::new(Mutex::new(ConnectionState::new(vec![tx_state_change])));
         let task = create_split_messages_task(
-            protocol_state.clone(),
+            connection_state.clone(),
             rx_state_change,
             rx_message.then(|_: Result<Result<Message, InvalidMessage>, ()>| {
                 Err(ProtocolError::IO(Arc::new(io::Error::new(
@@ -2896,7 +3054,7 @@ mod test {
             .unwrap();
 
         assert_eq!(
-            lock_state(&protocol_state).state(),
+            lock_state(&connection_state).state(),
             (
                 ReadState::Error(ProtocolError::IO(Arc::new(io::Error::new(
                     io::ErrorKind::Other,

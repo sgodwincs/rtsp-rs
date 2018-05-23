@@ -336,20 +336,62 @@ pub enum Message {
     Response(Response<BytesMut>),
 }
 
-/// A generic error type for any RTSP networking related errors.
-#[derive(Clone, Debug)]
+/// An error type related to a specific operation being performed by a caller.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
-pub enum ProtocolError {
-    /// A pending request that neither timed out nor received a corresponding response was
-    /// cancelled. This will only occur when the read state has been changed such that responses are
-    /// no longer able to be read, thus any requests currently pending will be cancelled.
-    Cancelled,
-
+pub enum OperationError {
     /// An attempt was made to send a request when the write state no longer allows sending
     /// requests. This situation can occur if, for example, a soft shutdown is happening or an error
     /// occurred while trying to send a message to the receiving agent.
     Closed,
 
+    /// A pending request that neither timed out nor received a corresponding response was
+    /// cancelled. This will only occur when the read state has been changed such that responses are
+    /// no longer able to be read, thus any requests currently pending will be cancelled.
+    RequestCancelled,
+
+    /// A pending request timed out while waiting for its corresponding response. For any given
+    /// request, there are two timeouts to be considered. The first is a timeout for a duration of
+    /// time for which no response is heard. However, if a `100 Continue` response is received for
+    /// this request, the timer will be reset. The second timer is one for the entire duration for
+    /// which we are waiting for the final response regardless of any received `100 Continue`
+    /// responses.
+    RequestTimedOut(RequestTimeoutType),
+}
+
+impl fmt::Display for OperationError {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str(self.description())
+    }
+}
+
+impl Error for OperationError {
+    fn description(&self) -> &str {
+        use self::OperationError::*;
+
+        match self {
+            Closed => "closed",
+            RequestCancelled => "request cancelled",
+            RequestTimedOut(RequestTimeoutType::Long) => "request timed out (long)",
+            RequestTimedOut(RequestTimeoutType::Short) => "request timed out (short)",
+        }
+    }
+}
+
+/// Specifies what kind of request timeout occurred.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum RequestTimeoutType {
+    /// The timeout was for the entire duration of waiting for the final response. Specifically,
+    /// `100 Continue` responses are *not* final responses.
+    Long,
+
+    /// The timeout was for a duration for which no response was heard.
+    Short,
+}
+
+/// A generic error type for any protocol errors that occur.
+#[derive(Clone, Debug)]
+pub enum ProtocolError {
     /// An irrecoverable error was encountered while decoding a request or response.
     DecodeError(DecodeError),
 
@@ -360,11 +402,6 @@ pub enum ProtocolError {
 
     /// An underlying I/O error occurred either in the stream or sink.
     IO(Arc<io::Error>),
-
-    /// A pending request timed out while waiting for its corresponding response. If `true`, then
-    /// the timeout was a result of the maximum time elapsing regardless of any `100 Continue`
-    /// responses received.
-    RequestTimedOut(bool),
 
     /// The underlying stream has ended, but there is still leftover data that is not enough for a
     /// full request or response to be decoded from.
@@ -382,13 +419,9 @@ impl Error for ProtocolError {
         use self::ProtocolError::*;
 
         match self {
-            Cancelled => "cancelled",
-            Closed => "closed",
             DecodeError(ref decode_error) => decode_error.description(),
             DecodingTimedOut => "decoding timed out",
             IO(ref io) => io.description(),
-            RequestTimedOut(true) => "request timed out (maximum)",
-            RequestTimedOut(false) => "request timed out",
             UnexpectedEOF => "unexpected EOF",
         }
     }
@@ -401,7 +434,7 @@ impl From<io::Error> for ProtocolError {
 }
 
 /// An irrecoverable error was encountered while decoding a request or response.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum DecodeError {
     /// An irrecoverable error was encountered while decoding a request.
     InvalidRequest(IrrecoverableInvalidRequest),
