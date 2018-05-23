@@ -161,21 +161,21 @@ impl Connection {
                 }),
         ))?;
 
-        executor.spawn(Box::new(
-            rx_ordered_incoming_request
-                .fold(
-                    tx_outgoing_message.clone(),
-                    |tx_outgoing_message, _request| {
-                        tx_outgoing_message
-                            .send(Message::Response(
-                                Response::builder().build("".into()).unwrap(),
-                            ))
-                            .and_then(|tx_outgoing_message| Ok(tx_outgoing_message))
-                            .map_err(|_| ())
-                    },
-                )
-                .then(|_| Ok(())),
-        ))?;
+        // executor.spawn(Box::new(
+        //     rx_ordered_incoming_request
+        //         .fold(
+        //             tx_outgoing_message.clone(),
+        //             |tx_outgoing_message, _request| {
+        //                 tx_outgoing_message
+        //                     .send(Message::Response(
+        //                         Response::builder().build("".into()).unwrap(),
+        //                     ))
+        //                     .and_then(|tx_outgoing_message| Ok(tx_outgoing_message))
+        //                     .map_err(|_| ())
+        //             },
+        //         )
+        //         .then(|_| Ok(())),
+        // ))?;
 
         Ok(Connection {
             request_default_max_timeout_duration: config.request_default_max_timeout_duration,
