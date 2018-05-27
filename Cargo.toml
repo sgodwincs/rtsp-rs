@@ -13,6 +13,7 @@ lazy_static = "0.2.10"
 regex = "0.2.2"
 tokio-executor = "0.1.1"
 tokio-io = "0.1.6"
+tokio-tcp = "0.1.0"
 tokio-timer = "0.2.3"
 url = "1.6.0"
 
