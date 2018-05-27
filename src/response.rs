@@ -172,7 +172,7 @@ where
     }
 }
 
-/// Alias for a request using typed headers.
+/// Alias for a response using typed headers.
 pub type TypedResponse<B> = Response<B, TypedHeaderMap>;
 
 /// An RTSP response builder
