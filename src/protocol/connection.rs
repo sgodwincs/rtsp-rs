@@ -1,30 +1,30 @@
 use bytes::BytesMut;
-use futures::future::{self, loop_fn, Either, Loop};
-use futures::sync::mpsc::{
-    channel, unbounded, Receiver, Sender, UnboundedReceiver, UnboundedSender,
-};
+use futures::future::{self, Either};
+use futures::stream::Fuse;
+use futures::sync::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
 use futures::sync::oneshot;
-use futures::{Future, Sink, Stream};
+use futures::{Async, AsyncSink, Future, Poll, Sink, Stream};
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::error::Error;
-use std::fmt;
-use std::io;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
+use std::{fmt, mem};
 use tokio_executor::{DefaultExecutor, Executor, SpawnError};
 use tokio_io::{AsyncRead, AsyncWrite};
-use tokio_timer::Delay;
+use tokio_timer::{Delay, Error as TimerError};
 
 use header::types::CSeq;
 use header::{HeaderName, HeaderValue, TypedHeader};
 use protocol::{
-    Codec, CodecEvent, InvalidMessage, Message, MessageResult, OperationError, ProtocolError,
-    RequestTimeoutType,
+    Codec, CodecEvent, DecodeError, InvalidMessage, IrrecoverableInvalidRequest,
+    IrrecoverableInvalidResponse, Message, MessageResult, OperationError, ProtocolError,
+    RequestTimeoutType, Service,
 };
 use request::Request;
 use response::Response;
 use status::StatusCode;
+use version::Version;
 
 pub const DEFAULT_DECODE_TIMEOUT_DURATION: Duration = Duration::from_secs(10);
 pub const DEFAULT_REQUEST_BUFFER_SIZE: usize = 10;
@@ -37,154 +37,96 @@ pub const DEFAULT_SOFT_SHUTDOWN_TIMEOUT_DURATION: Duration = Duration::from_secs
 pub struct Connection {
     request_default_max_timeout_duration: Option<Duration>,
     request_default_timeout_duration: Option<Duration>,
-    rx_ordered_incoming_request: Option<UnboundedReceiver<Request<BytesMut>>>,
     sequence_number: CSeq,
     state: Arc<Mutex<ConnectionState>>,
-    tx_pending_request: Arc<Mutex<UnboundedSender<PendingRequestUpdate>>>,
-    tx_outgoing_message: UnboundedSender<Message>,
+    tx_pending_request: Option<UnboundedSender<PendingRequestUpdate>>,
+    tx_outgoing_message: Option<UnboundedSender<Message>>,
     tx_shutdown: Option<oneshot::Sender<ShutdownType>>,
 }
 
 impl Connection {
-    pub fn new<IO>(io: IO) -> Result<Self, SpawnError>
+    pub fn new<IO, S>(io: IO, service: Option<S>) -> Result<Self, SpawnError>
     where
         IO: AsyncRead + AsyncWrite + Send + 'static,
+        S: Service<RequestBody = BytesMut, ResponseBody = BytesMut> + Send + 'static,
+        S::Future: Send + 'static,
     {
-        Connection::with_config(io, Config::default())
+        Connection::with_config(io, service, Config::default())
     }
 
-    pub fn with_config<IO>(io: IO, mut config: Config) -> Result<Self, SpawnError>
+    pub fn with_config<IO, S>(
+        io: IO,
+        service: Option<S>,
+        mut config: Config,
+    ) -> Result<Self, SpawnError>
     where
         IO: AsyncRead + AsyncWrite + Send + 'static,
+        S: Service<RequestBody = BytesMut, ResponseBody = BytesMut> + Send + 'static,
+        S::Future: Send + 'static,
     {
         // Create all channels needed for communication from task to task and from connection to
         // task.
-        //
-        // TODO: This is pretty terrible looking, so it would be nice to come up with a better
-        // structure. Maybe instead of creating tasks via functions, each task should be separate
-        // `struct`s that implement `Future`/`Stream`/`Sink` and so on.
 
         let (tx_codec_event, rx_codec_event) = unbounded();
         let (tx_pending_request, rx_pending_request) = unbounded();
-        let (tx_incoming_request, rx_incoming_request) = channel(config.request_buffer_size);
-        let (tx_incoming_response, rx_incoming_response) = channel(config.response_buffer_size);
-        let (tx_state_change_1, rx_state_change_1) = unbounded();
-        let (tx_state_change_2, rx_state_change_2) = unbounded();
+        let (tx_incoming_request, rx_incoming_request) = unbounded();
         let (tx_outgoing_message, rx_outgoing_message) = unbounded();
-        let (tx_ordered_incoming_request, rx_ordered_incoming_request) = unbounded();
         let (tx_shutdown, rx_shutdown) = oneshot::channel();
 
         let mut executor = DefaultExecutor::current();
-        let state = Arc::new(Mutex::new(ConnectionState::new(vec![
-            tx_state_change_1,
-            tx_state_change_2,
-        ])));
+        let state = Arc::new(Mutex::new(ConnectionState::new()));
         let (sink, stream) = io.framed(Codec::with_events(tx_codec_event)).split();
 
-        executor.spawn(Box::new(
-            create_decoding_timer_task(
-                state.clone(),
-                rx_codec_event,
-                config.decode_timeout_duration,
-            ).then(|_| {
-                println!("Decoding task is done!");
-                Ok(())
-            }),
-        ))?;
-        executor.spawn(Box::new(
-            create_request_handler_task(
-                state.clone(),
-                rx_incoming_request,
-                tx_ordered_incoming_request,
-                tx_outgoing_message.clone(),
-                config.request_buffer_size,
-            ).then(|_| {
-                println!("Request handler task is done!");
-                Ok(())
-            }),
-        ))?;
-        executor.spawn(create_response_handler_task(
+        executor.spawn(Box::new(DecodingTimerTask::new(
             state.clone(),
-            rx_incoming_response,
-            rx_pending_request,
-        ))?;
-        executor.spawn(Box::new(
-            create_send_messages_task(state.clone(), rx_state_change_1, sink, rx_outgoing_message)
-                .then(|_| {
-                    println!("Message sending task is done!");
-                    Ok(())
-                }),
-        ))?;
-        executor.spawn(Box::new(
-            create_split_messages_task(
-                state.clone(),
-                rx_state_change_2,
-                stream,
-                tx_incoming_request,
-                tx_incoming_response,
-                tx_outgoing_message.clone(),
-            ).then(|_| {
-                println!("Message splitting task is done!");
-                Ok(())
-            }),
-        ))?;
+            rx_codec_event,
+            config.decode_timeout_duration,
+        )))?;
 
-        let state_clone = state.clone();
+        executor.spawn(Box::new(MessageReceiverTask::new(
+            state.clone(),
+            stream,
+            rx_pending_request,
+            tx_incoming_request,
+            tx_outgoing_message.clone(),
+            config.request_buffer_size,
+        )))?;
+
+        executor.spawn(Box::new(MessageSenderTask::new(
+            state.clone(),
+            sink,
+            rx_outgoing_message,
+        )))?;
+
         let shutdown_future = config
             .shutdown_future
             .take()
             .expect("config shutdown future should not be `None`");
 
-        executor.spawn(Box::new(
-            rx_shutdown
-                .map_err(|_| ())
-                .select(shutdown_future)
-                .then(move |result| {
-                    let shutdown_type = match result {
-                        Ok((shutdown_type, _)) => shutdown_type,
-                        Err(_) => ShutdownType::Hard,
-                    };
+        executor.spawn(Box::new(ShutdownTask::new(
+            state.clone(),
+            shutdown_future,
+            rx_shutdown,
+        )))?;
 
-                    println!("SHUTDOWN OCCURRING! {:?}", shutdown_type);
-                    match shutdown_type {
-                        ShutdownType::Hard => {
-                            lock_state(&state_clone)
-                                .update_state(ReadState::None, WriteState::None);
-                        }
-                        ShutdownType::Soft(_) => {
-                            lock_state(&state_clone)
-                                .update_state(ReadState::Response, WriteState::Response);
-                        }
-                    }
-
-                    Ok::<_, ()>(())
-                }),
-        ))?;
-
-        // executor.spawn(Box::new(
-        //     rx_ordered_incoming_request
-        //         .fold(
-        //             tx_outgoing_message.clone(),
-        //             |tx_outgoing_message, _request| {
-        //                 tx_outgoing_message
-        //                     .send(Message::Response(
-        //                         Response::builder().build("".into()).unwrap(),
-        //                     ))
-        //                     .and_then(|tx_outgoing_message| Ok(tx_outgoing_message))
-        //                     .map_err(|_| ())
-        //             },
-        //         )
-        //         .then(|_| Ok(())),
-        // ))?;
+        if let Some(service) = service {
+            executor.spawn(Box::new(RequestHandlerTask::new(
+                state.clone(),
+                service,
+                rx_incoming_request,
+                tx_outgoing_message.clone(),
+            )))?;
+        } else {
+            lock_state(&state).update_state(ReadState::Response, WriteState::Request);
+        }
 
         Ok(Connection {
             request_default_max_timeout_duration: config.request_default_max_timeout_duration,
             request_default_timeout_duration: config.request_default_timeout_duration,
-            rx_ordered_incoming_request: None,
             sequence_number: CSeq::try_from(0).expect("sequence number `0` should not be invalid"),
-            state,
-            tx_outgoing_message: tx_outgoing_message,
-            tx_pending_request: Arc::new(Mutex::new(tx_pending_request)),
+            state: state,
+            tx_pending_request: Some(tx_pending_request),
+            tx_outgoing_message: Some(tx_outgoing_message),
             tx_shutdown: Some(tx_shutdown),
         })
     }
@@ -192,6 +134,20 @@ impl Connection {
     pub fn is_shutdown(&self) -> bool {
         let state = lock_state(&self.state).state();
         state.0.is_none() || state.0.is_error() && state.1.is_none() || state.1.is_error()
+    }
+
+    fn pending_request(&self) -> &UnboundedSender<PendingRequestUpdate> {
+        self.tx_pending_request
+            .as_ref()
+            .take()
+            .expect("pending request sender should not be `None`")
+    }
+
+    fn outgoing_message(&self) -> &UnboundedSender<Message> {
+        self.tx_outgoing_message
+            .as_ref()
+            .take()
+            .expect("outgoing message sender should not be `None`")
     }
 
     pub fn read_state(&self) -> ReadState {
@@ -249,12 +205,7 @@ impl Connection {
         let (tx_response, rx_response) = oneshot::channel();
         let update = PendingRequestUpdate::AddPendingRequest((sequence_number, tx_response));
 
-        if let Err(_) = self
-            .tx_pending_request
-            .lock()
-            .expect("acquiring pending request sender should not fail")
-            .unbounded_send(update)
-        {
+        if let Err(_) = self.pending_request().unbounded_send(update) {
             // This really should not happen, since we checked the write state above. But if it
             // does, make sure that the state is updated correctly.
 
@@ -263,100 +214,34 @@ impl Connection {
         }
 
         if let Err(_) = self
-            .tx_outgoing_message
+            .outgoing_message()
             .unbounded_send(Message::Request(request))
         {
             // This also should not happen. And if it does, we need to remove the pending request we
             // just sent. Also update the state to be what it should be.
 
-            self.tx_pending_request
-                .lock()
-                .expect("acquiring pending request sender should not fail")
+            self.pending_request()
                 .unbounded_send(PendingRequestUpdate::RemovePendingRequest(sequence_number))
                 .ok();
             lock_state(&self.state).update_state(ReadState::Response, WriteState::None);
             return Either::A(future::err(OperationError::Closed));
         }
 
-        let timer = if let Some(duration) = options.max_timeout_duration() {
-            let expire_time = Instant::now() + duration;
-            Either::A(Delay::new(expire_time))
-        } else {
-            Either::B(future::empty())
-        }.then(|_| Err(OperationError::RequestTimedOut(RequestTimeoutType::Long)));
-
-        Either::B(
-            timer
-                .select(loop_fn(
-                    (
-                        rx_response,
-                        self.tx_pending_request.clone(),
-                        options.timeout_duration(),
-                        sequence_number,
-                    ),
-                    |(
-                        rx_response,
-                        tx_pending_request,
-                        request_timeout_duration,
-                        sequence_number,
-                    )| {
-                        let timer = if let Some(duration) = request_timeout_duration {
-                            let expire_time = Instant::now() + duration;
-                            Either::A(Delay::new(expire_time))
-                        } else {
-                            Either::B(future::empty())
-                        };
-
-                        rx_response.select2(timer).then(move |result| {
-                            let response = match result {
-                                Ok(Either::A((response, _))) => Some(response),
-                                Err(Either::B(_)) => Some(PendingRequestResponse::None),
-                                _ => None,
-                            };
-
-                            match response {
-                                Some(PendingRequestResponse::Continue(rx_response)) => {
-                                    Ok(Loop::Continue((
-                                        rx_response,
-                                        tx_pending_request,
-                                        request_timeout_duration,
-                                        sequence_number,
-                                    )))
-                                }
-                                Some(PendingRequestResponse::None) => {
-                                    Err(OperationError::RequestCancelled)
-                                }
-                                Some(PendingRequestResponse::Response(response)) => {
-                                    Ok(Loop::Break(response))
-                                }
-                                None => {
-                                    tx_pending_request
-                                        .lock()
-                                        .expect("acquiring pending request sender should not fail")
-                                        .unbounded_send(PendingRequestUpdate::RemovePendingRequest(
-                                            sequence_number,
-                                        ))
-                                        .ok();
-                                    Err(OperationError::RequestTimedOut(RequestTimeoutType::Short))
-                                }
-                            }
-                        })
-                    },
-                ))
-                .map(|result| result.0)
-                .map_err(|result| result.0),
-        )
+        Either::B(SendRequestFuture::new(
+            rx_response,
+            self.pending_request().clone(),
+            sequence_number,
+            options.timeout_duration(),
+            options.max_timeout_duration(),
+        ))
     }
 
-    fn send_response<B>(&self, response: Response<B>) -> Result<(), OperationError>
-    where
-        B: AsRef<[u8]>,
-    {
-        let response = response.map(|body| BytesMut::from(body.as_ref()));
-
-        self.tx_outgoing_message
-            .unbounded_send(Message::Response(response))
-            .map_err(|_| OperationError::Closed)
+    pub fn shutdown(&mut self, shutdown_type: ShutdownType) {
+        if let Some(tx_shutdown) = self.tx_shutdown.take() {
+            self.tx_outgoing_message = None;
+            self.tx_pending_request = None;
+            tx_shutdown.send(shutdown_type).ok();
+        }
     }
 
     pub fn state(&self) -> ReadWriteStatePair {
@@ -372,11 +257,7 @@ impl Drop for Connection {
     fn drop(&mut self) {
         // Connection is being dropped, start a soft shutdown.
 
-        if let Some(tx_shutdown) = self.tx_shutdown.take() {
-            tx_shutdown
-                .send(ShutdownType::Soft(DEFAULT_SOFT_SHUTDOWN_TIMEOUT_DURATION))
-                .ok();
-        }
+        self.shutdown(ShutdownType::Soft(DEFAULT_SOFT_SHUTDOWN_TIMEOUT_DURATION));
     }
 }
 
@@ -386,7 +267,8 @@ pub struct Config {
     pub(crate) request_default_max_timeout_duration: Option<Duration>,
     pub(crate) request_default_timeout_duration: Option<Duration>,
     pub(crate) response_buffer_size: usize,
-    pub(crate) shutdown_future: Option<Box<Future<Item = ShutdownType, Error = ()> + Send>>,
+    pub(crate) shutdown_future:
+        Option<Box<Future<Item = ShutdownType, Error = ()> + Send + 'static>>,
 }
 
 impl Config {
@@ -433,7 +315,7 @@ pub struct ConfigBuilder {
     request_default_max_timeout_duration: Option<Duration>,
     request_default_timeout_duration: Option<Duration>,
     response_buffer_size: usize,
-    shutdown_future: Box<Future<Item = ShutdownType, Error = ()> + Send>,
+    shutdown_future: Box<Future<Item = ShutdownType, Error = ()> + Send + 'static>,
 }
 
 impl ConfigBuilder {
@@ -804,10 +686,10 @@ pub struct ConnectionState {
 }
 
 impl ConnectionState {
-    pub fn new(state_changes: Vec<UnboundedSender<ReadWriteStatePair>>) -> Self {
+    pub fn new() -> Self {
         ConnectionState {
             read_state: ReadState::All,
-            state_changes,
+            state_changes: vec![],
             write_state: WriteState::All,
         }
     }
@@ -816,6 +698,12 @@ impl ConnectionState {
         for state_change in self.state_changes.iter() {
             state_change.unbounded_send(self.state()).ok();
         }
+    }
+
+    pub fn add_listener(&mut self) -> UnboundedReceiver<ReadWriteStatePair> {
+        let (tx_state_change, rx_state_change) = unbounded();
+        self.state_changes.push(tx_state_change);
+        rx_state_change
     }
 
     pub fn read_state(&self) -> ReadState {
@@ -895,2173 +783,938 @@ enum PendingRequestUpdate {
     RemovePendingRequest(CSeq),
 }
 
-fn lock_state(state: &Arc<Mutex<ConnectionState>>) -> MutexGuard<ConnectionState> {
-    state.lock().expect("acquiring state lock should not fail")
-}
-
-fn try_send_message(
-    tx_outgoing_message: Option<UnboundedSender<Message>>,
-    message: Message,
-) -> Option<UnboundedSender<Message>> {
-    tx_outgoing_message.and_then(|tx_outgoing_message| {
-        tx_outgoing_message
-            .unbounded_send(message)
-            .ok()
-            .map(|_| tx_outgoing_message)
-    })
-}
-
-/// Constructs a task that manages the timer for decoding messages.
-///
-/// If the timer expires, then messages can no longer be read from the connection. But writing
-/// responses is still allowed as long as the connection state had not already passed that point.
-///
-/// Since the timer is managed via events from the codec, if the stream of the events end, then it
-/// is implied that the connection is completely closed.
-///
-/// This task will only end if the timer expires or if the codec is dropped. The codec will be
-/// dropped when both the message splitting and sending tasks have ended.
-///
-/// TODO: We really do not have to wait for the codec to have been dropped to end this task. The
-/// weaker condition of having the message splitting task end would work as well. This can be done
-/// by watching for state changes. I am currently not adding this as it is not strictly necessary
-/// and also complicates the code more.
-///
-/// # Arguments
-///
-/// * `state` - A reference to the connection state.
-/// * `rx_codec_event` - A stream of [`CodecEvent`]s.
-/// * `decode_timeout_duration` - The duration of time that must pass for decoding to timeout.
-fn create_decoding_timer_task(
-    state: Arc<Mutex<ConnectionState>>,
-    rx_codec_event: UnboundedReceiver<CodecEvent>,
+struct DecodingTimerTask {
     decode_timeout_duration: Duration,
-) -> impl Future<Item = (), Error = ()> {
-    loop_fn(
-        (state, rx_codec_event, Either::A(future::empty())),
-        move |(state, rx_codec_event, timer)| {
-            timer
-                .select2(rx_codec_event.into_future())
-                .map_err(|_| panic!("decode timer and codec event receivers should not error"))
-                .and_then(move |item| {
-                    Ok(match item {
-                        Either::A(_) => {
-                            // Decoding timer has expired. At this point, we consider any reads from
-                            // the connection to be dead. The only writing allowed now are
-                            // responses, since we would not be able to get any of the responses
-                            // back for any requests we were to send.
-
-                            lock_state(&state).update_state(
-                                ReadState::Error(ProtocolError::DecodingTimedOut),
-                                WriteState::Response,
-                            );
-                            Loop::Break(())
-                        }
-                        Either::B(((None, _), _)) => {
-                            // The codec that handles decoding and encoding has been dropped. This
-                            // implies that the connection is completely closed. It is likely that
-                            // the connection state has already been updated by this point, but we
-                            // do it just in case, since this is the final connection state.
-
-                            lock_state(&state).update_state(ReadState::None, WriteState::None);
-                            Loop::Break(())
-                        }
-                        Either::B(((Some(event), rx_codec_event), timer)) => match event {
-                            CodecEvent::DecodingStarted => {
-                                let expire_time = Instant::now() + decode_timeout_duration;
-                                let timer = Either::B(Delay::new(expire_time));
-                                Loop::Continue((state, rx_codec_event, timer))
-                            }
-                            CodecEvent::DecodingEnded => {
-                                Loop::Continue((state, rx_codec_event, Either::A(future::empty())))
-                            }
-                            _ => Loop::Continue((state, rx_codec_event, timer)),
-                        },
-                    })
-                })
-        },
-    )
+    decoding_timer: Either<Delay, future::Empty<(), TimerError>>,
+    rx_codec_event: Fuse<UnboundedReceiver<CodecEvent>>,
+    rx_state_change: Fuse<UnboundedReceiver<ReadWriteStatePair>>,
+    state: Arc<Mutex<ConnectionState>>,
 }
 
-/// Constructs a task that orders incoming requests based on their `CSeq` header.
-///
-/// This task is not strictly necessary in its entirety. While we do need to parse the `CSeq` header
-/// to make sure it is valid, ordering incoming requests should not be necessary when a reliable,
-/// in-order transport like TCP is used. However, the specification states that we must process
-/// requests in order of their sequence numbers in case support for out-of-order transports were to
-/// be added (e.g. UDP).
-///
-/// Also, as it is configured in the connection's [`Config`], the size of the buffer of incoming
-/// requests needs to be set. If a request comes with a sequence number that is too far from the
-/// current sequence number, it will not be processed and will be responded to with a
-/// `503 Service Unavailable` response.
-///
-/// As for the starting sequence number, the specification allows the sender to start with any
-/// number, so the first request's sequence number will be the starting sequence number. This does
-/// have some problems if unreliable transports are to be used, but the specification will specify
-/// better error handling in the case that such support is added.
-///
-/// This task will end in one of three situations:
-///
-/// * The incoming request stream ends.
-/// * The ordered incoming request channel receiver is dropped.
-/// * The outgoing message channel receiver is dropped. This implies that requests and responses can
-///   no longer be written, so there is no point in ordering requests anymore since we cannot
-///   response to them.
-///
-/// # Arguments
-///
-/// * `state` - A reference to the connection state.
-/// * `rx_incoming_request` - A stream of [`Request`]s that are to be ordered.
-/// * `tx_incoming_response` - The sink where [`Request`]s will be sent in order based on their
-///   `CSeq` header.
-/// * `tx_outgoing_message` - A sink where messages to be sent to the connected host are sent. This
-///   is needed in order to send `400 Bad Request` and `503 Service Unavailable` responses.
-fn create_request_handler_task(
-    state: Arc<Mutex<ConnectionState>>,
-    rx_incoming_request: Receiver<Request<BytesMut>>,
-    tx_ordered_incoming_request: UnboundedSender<Request<BytesMut>>,
-    tx_outgoing_message: UnboundedSender<Message>,
-    request_buffer_size: usize,
-) -> impl Future<Item = (), Error = ()> {
-    rx_incoming_request
-        .fold(
-            (
-                state,
-                tx_ordered_incoming_request,
-                Some(tx_outgoing_message),
-                None,
-                HashMap::with_capacity(request_buffer_size),
-            ),
-            move |(
-                state,
-                tx_ordered_incoming_request,
-                mut tx_outgoing_message,
-                mut incoming_sequence_number,
-                mut pending_requests,
-            ),
-                  request| {
-                let header_values = request
-                    .headers()
-                    .get_all(HeaderName::CSeq)
-                    .iter()
-                    .cloned()
-                    .collect::<Vec<HeaderValue>>();
+impl DecodingTimerTask {
+    pub fn new(
+        state: Arc<Mutex<ConnectionState>>,
+        rx_codec_event: UnboundedReceiver<CodecEvent>,
+        decode_timeout_duration: Duration,
+    ) -> Self {
+        let rx_state_change = lock_state(&state).add_listener().fuse();
 
-                match CSeq::try_from_header_raw(&header_values) {
-                    Ok(cseq) => {
-                        // The initial sequence number is defined by the client's first request. So,
-                        // if we do not currently have a sequence number yet, the one in the request
-                        // will be used.
-
-                        let mut request_sequence_number = incoming_sequence_number.unwrap_or(cseq);
-
-                        if *(cseq - request_sequence_number) > request_buffer_size as u32 {
-                            // We received a request with a valid `CSeq` header, but the sequence
-                            // number referenced is too far out from the current sequence number.
-                            //
-                            // This is actually a bit of a break from the specification. The
-                            // specification states that requests must be handled in the order of
-                            // their `CSeq`, but this is not practical here and opens up possible
-                            // resource exhaustion attacks. The connection will only process the
-                            // next expected `CSeq` to abide by the specification. All other
-                            // requests will simply be buffered until the next one with the next
-                            // `CSeq` has arrived. But the range of possible `CSeq`s is way too
-                            // large to buffer per agent, so we only buffer a small amount.
-
-                            if lock_state(&state).write_state().responses_allowed() {
-                                let response = Response::builder()
-                                    .status_code(StatusCode::ServiceUnavailable)
-                                    .build(BytesMut::new())
-                                    .expect("service unavailable response should not be invalid");
-                                tx_outgoing_message = try_send_message(
-                                    tx_outgoing_message,
-                                    Message::Response(response),
-                                );
-                            }
-                        } else {
-                            // Make sure we are processing requests in the order of their `CSeq`
-                            // headers. This is actually redundant if an reliable transport is used
-                            // (e.g. TCP), but the specification states that implementations must do
-                            // so in case support for unreliable or out-of-order transports are to
-                            // be added.
-
-                            pending_requests.insert(cseq, request);
-
-                            while let Some(request) =
-                                pending_requests.remove(&request_sequence_number)
-                            {
-                                // An error here means that the receiver for the channel has been
-                                // dropped, so we no longer will handle anymore requests.
-
-                                if tx_ordered_incoming_request.unbounded_send(request).is_err() {
-                                    return Err(());
-                                }
-
-                                request_sequence_number = request_sequence_number.increment();
-                            }
-                        }
-
-                        incoming_sequence_number = Some(request_sequence_number);
-                    }
-                    Err(_) => {
-                        // Either no `CSeq` header was found, or parsing of the header failed.
-                        //
-                        // To handle this, we send a `400 Bad Request`, but we do not specify a
-                        // `CSeq` in the response. Unfortunately, it is not likely the client will
-                        // even do anything with this response, since it too does not have a `CSeq`.
-                        // For example, if a client using this implementation managed to send a
-                        // request with no `CSeq` and received a response with no `CSeq`, it would
-                        // just ignore it.
-                        //
-                        // Also, this message is immediately queued and may not necessarily be the
-                        // order in which a client would expect the response, but there is no
-                        // avoiding this. `CSeq` must be given in order to demultiplex.
-
-                        if lock_state(&state).write_state().responses_allowed() {
-                            let response = Response::builder()
-                                .status_code(StatusCode::BadRequest)
-                                .build(BytesMut::new())
-                                .expect("bad request response should not be invalid");
-                            tx_outgoing_message =
-                                try_send_message(tx_outgoing_message, Message::Response(response));
-                        }
-                    }
-                }
-
-                // If the receiver for outgoing messages has been dropped, then we can no longer
-                // send any messages. So forwarding ordered requests from this task is no longer
-                // meaningful, since they cannot be responded to.
-
-                if tx_outgoing_message.is_none() {
-                    return Err(());
-                }
-
-                Ok((
-                    state,
-                    tx_ordered_incoming_request,
-                    tx_outgoing_message,
-                    incoming_sequence_number,
-                    pending_requests,
-                ))
-            },
-        )
-        .then(|_| Ok(()))
-}
-
-/// Constructs a task that maps incoming responses to pending requests based on the `CSeq` header.
-///
-/// Note that the order in which responses are returned to pending requests is completely dependent
-/// on the order in which they arrive. Although support for buffering responses so that they are
-/// returned in the correct order could be added, there are some complications with this.
-/// Specifically, determining how to deal with request timeouts in situations where head-of-line
-/// blocking is occurring is non-trivial (at least from what I can tell).
-///
-/// TODO: The reason why this is the only task that returns a boxed [`Future`] is due to an
-/// [ICE](https://github.com/rust-lang/rust/issues/48751). Once the ICE has been fixed, it can
-/// return `impl Future`.
-///
-/// # Arguments
-///
-/// * `rx_incoming_response` - A stream of [`Response`]s that are to be mapped to pending requests.
-/// * `rx_pending_request` - A stream of [`PendingRequestUpdate`]s that add and remove pending
-///   requests that are waiting to be mapped responses.
-fn create_response_handler_task(
-    state: Arc<Mutex<ConnectionState>>,
-    rx_incoming_response: Receiver<Response<BytesMut>>,
-    rx_pending_request: UnboundedReceiver<PendingRequestUpdate>,
-) -> Box<Future<Item = (), Error = ()> + Send + 'static> {
-    fn handle_response(
-        response: Option<Response<BytesMut>>,
-        pending_requests: &mut HashMap<CSeq, Option<oneshot::Sender<PendingRequestResponse>>>,
-    ) -> bool {
-        match response {
-            Some(response) => {
-                let header_values = response
-                    .headers()
-                    .get_all(HeaderName::CSeq)
-                    .iter()
-                    .cloned()
-                    .collect::<Vec<HeaderValue>>();
-                let cseq = CSeq::try_from_header_raw(&header_values);
-
-                // Make sure the `CSeq` was valid (and that there was only one) and that a request
-                // is pending with the given value.
-
-                if let Ok(cseq) = cseq {
-                    if response.status_code() == StatusCode::Continue {
-                        // Received a `100 Continue` response meaning we should expect the actual
-                        // response a bit later. But we want to make sure that any timers for the
-                        // request do not timeout, so we notify them of the continue.
-                        //
-                        // TODO: When NLL is stable, restructure this.
-
-                        let mut remove_pending_request = false;
-
-                        {
-                            let pending_request = pending_requests.get_mut(&cseq);
-
-                            if let Some(pending_request) = pending_request {
-                                // Since we are using oneshots here, we need to create a new channel
-                                // to be used and send it as well.
-
-                                let (tx_pending_request, rx_pending_request) = oneshot::channel();
-                                let result = pending_request
-                                    .take()
-                                    .unwrap()
-                                    .send(PendingRequestResponse::Continue(rx_pending_request));
-
-                                // We do care if it fails here, since if it fails, we need to remove
-                                // the pending request from the hashmap.
-
-                                match result {
-                                    Ok(_) => *pending_request = Some(tx_pending_request),
-                                    Err(_) => remove_pending_request = true,
-                                }
-                            }
-                        }
-
-                        if remove_pending_request {
-                            pending_requests.remove(&cseq);
-                        }
-                    } else {
-                        // Received a final response.
-
-                        let pending_request = pending_requests.remove(&cseq);
-
-                        if let Some(mut pending_request) = pending_request {
-                            // We do not really care if this fails. It would only fail in the case
-                            // where the receiver has been dropped, but either way, we can get rid
-                            // of the pending request.
-
-                            pending_request
-                                .take()
-                                .unwrap()
-                                .send(PendingRequestResponse::Response(response))
-                                .ok();
-                        }
-                    }
-                }
-
-                true
-            }
-            None => {
-                // The incoming response stream has ended, so all currently pending requests will
-                // not be responded to. Instead of sending a response to them, we will just send
-                // `PendingRequestResponse::None` indicating that no response will be coming.
-
-                for (_, tx_pending_request) in pending_requests.iter_mut() {
-                    // Even though the value type for the linked hash map is an `Option<T>`, it will
-                    // never be `None` at this point. It is only done this way because the oneshot
-                    // channel `send` requires ownership and so we are unable to deal without the
-                    // option. If `LinkedHashMap` had a `drain` function, we could, but it does not.
-                    //
-                    // We also do not really care if this fails. If would only fail in the case
-                    // where the receiver has been dropped, but either way, we can get rid of the
-                    // pending request.
-
-                    tx_pending_request
-                        .take()
-                        .unwrap()
-                        .send(PendingRequestResponse::None)
-                        .ok();
-                }
-
-                false
-            }
+        DecodingTimerTask {
+            decode_timeout_duration,
+            decoding_timer: Either::B(future::empty()),
+            rx_codec_event: rx_codec_event.fuse(),
+            rx_state_change,
+            state,
         }
     }
 
-    Box::new(
-        loop_fn(
-            (
-                state,
-                rx_incoming_response.into_future(),
-                Some(rx_pending_request.into_future()),
-                HashMap::new(),
-            ),
-            |(state, rx_incoming_response, rx_pending_request, mut pending_requests)| {
-                // TODO: Once async/await are usable, avoid this branch by using `empty`. It should be
-                // possible to do it without async/await, but I was not able to get it to work.
+    fn cleanup(&mut self) {
+        if !self.rx_codec_event.is_done() {
+            self.rx_codec_event.get_mut().close();
+        }
 
-                if let Some(rx_pending_request) = rx_pending_request {
-                    Either::A(
-                        rx_incoming_response
-                            .select2(rx_pending_request)
-                            .and_then(|item| match item {
-                                Either::A((
-                                    (response, rx_incoming_response),
-                                    rx_pending_request,
-                                )) => {
-                                    if handle_response(response, &mut pending_requests) {
-                                        Ok(Loop::Continue((
-                                            state,
-                                            rx_incoming_response.into_future(),
-                                            Some(rx_pending_request),
-                                            pending_requests,
-                                        )))
-                                    } else {
-                                        lock_state(&state)
-                                            .update_state(ReadState::Request, WriteState::Response);
-                                        Ok(Loop::Break(()))
-                                    }
-                                }
-                                Either::B(((update, rx_pending_request), rx_incoming_response)) => {
-                                    if let Some(update) = update {
-                                        match update {
-                                            // A new request has been made that is waiting for a
-                                            // response. When the response has been received, the given
-                                            // oneshot channel will be used to forward the response.
-                                            PendingRequestUpdate::AddPendingRequest((
-                                                cseq,
-                                                tx_pending_request,
-                                            )) => {
-                                                pending_requests
-                                                    .insert(cseq, Some(tx_pending_request));
-                                            }
+        if !self.rx_state_change.is_done() {
+            self.rx_state_change.get_mut().close();
+        }
+    }
 
-                                            // A previous pending request has determined that it will no
-                                            // longer wait for a response. This will typically happen if
-                                            // there is a timeout for the request.
-                                            PendingRequestUpdate::RemovePendingRequest(cseq) => {
-                                                pending_requests.remove(&cseq);
-                                            }
-                                        }
-
-                                        Ok(Loop::Continue((
-                                            state,
-                                            rx_incoming_response,
-                                            Some(rx_pending_request.into_future()),
-                                            pending_requests,
-                                        )))
-                                    } else if pending_requests.is_empty() {
-                                        // The update stream has ended, and there are no pending
-                                        // requests, so this task can end.
-
-                                        lock_state(&state)
-                                            .update_state(ReadState::Request, WriteState::Response);
-                                        Ok(Loop::Break(()))
-                                    } else {
-                                        Ok(Loop::Continue((
-                                            state,
-                                            rx_incoming_response,
-                                            None,
-                                            pending_requests,
-                                        )))
-                                    }
-                                }
-                            })
-                            .map_err(|_| ()),
-                    )
-                } else {
-                    Either::B(
-                        rx_incoming_response
-                            .and_then(|(response, rx_incoming_response)| {
-                                if !handle_response(response, &mut pending_requests)
-                                    || pending_requests.is_empty()
-                                {
-                                    lock_state(&state)
-                                        .update_state(ReadState::Request, WriteState::Response);
-                                    Ok(Loop::Break(()))
-                                } else {
-                                    Ok(Loop::Continue((
-                                        state,
-                                        rx_incoming_response.into_future(),
-                                        None,
-                                        pending_requests,
-                                    )))
-                                }
-                            })
-                            .map_err(|_| ()),
-                    )
-                }
-            },
-        ).then(|_| {
-            println!("Response handler task is done!");
-            Ok(())
-        }),
-    )
-}
-
-/// Constructs a task that forwards all outgoing messages into a sink.
-///
-/// While the write state should be obeyed, this task will not allow sending of requests or
-/// responses that are not allowed by the current write state.
-///
-/// This task will end in one of three situations:
-///
-/// * The vector of receivers all end, so no more messages will be sent through the sink.
-/// * While trying to send a message through the sink, an error occurs.
-/// * A connection state change was detected in which writing is no longer necessary or possible.
-///
-/// # Arguments
-///
-/// * `state` - A reference to the connection state.
-/// * `rx_state_change` - A stream of [`ReadWriteStatePair`] connection state changes.
-/// * `sink` - The sink which all messages are forwarded to.
-/// * `outgoing_messages` - A list of message channel receivers from different sources. All of the
-///   messages sent to these receivers will be forwarded to the given sink as they arrive.
-fn create_send_messages_task<S>(
-    state: Arc<Mutex<ConnectionState>>,
-    rx_state_change: UnboundedReceiver<ReadWriteStatePair>,
-    sink: S,
-    rx_outgoing_message: UnboundedReceiver<Message>,
-) -> impl Future<Item = (), Error = ()>
-where
-    S: Sink<SinkItem = Message, SinkError = ProtocolError>,
-{
-    let state_clone = state.clone();
-    let stream = rx_outgoing_message
-        .filter(move |message| {
-            // Only allow writing of messages that are allowed by the current write state. This is
-            // here just in case something else in the connection does not obey the write state. But
-            // if everything does, then this is a waste of time. Until everything has been tested
-            // extensively, this will remain.
-            //
-            // TODO: Remove this after testing all tasks extensively.
-
-            match message {
-                Message::Request(_) => lock_state(&state).write_state().requests_allowed(),
-                Message::Response(_) => lock_state(&state).write_state().responses_allowed(),
+    fn handle_codec_event(&mut self, event: CodecEvent) {
+        match event {
+            CodecEvent::DecodingStarted => {
+                let expire_time = Instant::now() + self.decode_timeout_duration;
+                self.decoding_timer = Either::A(Delay::new(expire_time));
             }
-        })
-        .map_err(|_| {
-            // We have to match the error type that the sink generates, and since we do not want to
-            // change the sink's error type in order to catch any errors that occur, we must change
-            // the error here. This is a bit weird, since this is not even possible due to channel
-            // receivers not being able to error.
-            //
-            // TODO: I think this may be able to be fixed once `futures` starts using the `!` type.
+            CodecEvent::DecodingEnded => {
+                self.decoding_timer = Either::B(future::empty());
+            }
+            _ => {}
+        }
+    }
 
-            ProtocolError::IO(Arc::new(io::Error::new(
-                io::ErrorKind::Other,
-                "outgoing message stream error",
-            )))
-        });
-
-    loop_fn(
-        (
-            state_clone,
-            rx_state_change.into_future(),
-            sink.send_all(stream),
-        ),
-        |(state, rx_state_change, send_messages)| {
-            rx_state_change.select2(send_messages).then(|result| {
-                Ok(match result {
-                    Ok(Either::A(((new_state, rx_state_change), send_messages))) => {
-                        println!(
-                            "Message sending task received a state change: {:?}",
-                            new_state
-                        );
-                        match new_state.expect("state change receiver should not end") {
-                            // We can no longer write any messages.
-                            (_, WriteState::None) | (_, WriteState::Error(_)) => {
-                                // Make sure read state is set correctly. This should have already
-                                // happened, but just in case.
-
-                                lock_state(&state).update_read_state(ReadState::Response);
-                                Loop::Break(())
-                            }
-                            _ => Loop::Continue((
-                                state,
-                                rx_state_change.into_future(),
-                                send_messages,
-                            )),
-                        }
-                    }
-                    Ok(Either::B(_)) => {
-                        // All of the messages of the stream defined above have been finished
-                        // meaning no more messages will be sent, so the task can end.
-
-                        lock_state(&state).update_state(ReadState::Response, WriteState::None);
-                        Loop::Break(())
-                    }
-                    Err(Either::A(_)) => panic!("state change receiver should not error"),
-                    Err(Either::B((error, _))) => {
-                        // There was an error while trying to send a message through the sink. Save
-                        // the error to the write state and end the task.
-
-                        lock_state(&state)
-                            .update_state(ReadState::Response, WriteState::Error(error));
-                        Loop::Break(())
-                    }
-                })
-            })
-        },
-    )
+    fn handle_state_change(&mut self, new_state: ReadWriteStatePair) -> bool {
+        if new_state.0.is_none() || new_state.0.is_error() {
+            true
+        } else {
+            false
+        }
+    }
 }
 
-/// Constructs a task that splits incoming messages into either request or response streams.
-///
-/// Currently, the given request and response sinks are bounded channels, and this task will block
-/// on sending any requests or responses to those sinks. Because of this, it is necessary to ensure
-/// that the corresponding receivers are being read frequently enough to avoid blocking when the
-/// channel is full.
-///
-/// This task will end in one of three situations:
-///
-/// * The incoming message stream has ended.
-/// * There was an irrecoverable error during message decoding that produced an error in the message
-///   stream.
-/// * A connection state change was detected in which reading is no longer necessary or possible.
-///   This can happen from external causes or from within the function. Specifically, if the request
-///   and response channel receivers are dropped, this will implicitly cause the corresponding state
-///   change thus forcing this task to end.
-///
-/// In order for this task to end properly in all cases, we have to make sure that the dropping of
-/// either of the incoming channel receivers implies a state change. Otherwise, it could be that
-/// both of the incoming channels are no longer functional and thus this task cannot perform any
-/// work. But it will not be able to detect that, so a state change must occur so the task can
-/// handle any changes.
-///
-/// # Arguments
-///
-/// * `state` - A reference to the connection state.
-/// * `rx_state_change` - A stream of [`ReadWriteStatePair`] connection state changes.
-/// * `stream` - The stream of incoming messages.
-/// * `tx_incoming_request` - The sink where requests extracted from the message stream will be
-///   sent.
-/// * `tx_incoming_response` - The sink where responses extracted from the message stream will be
-///   sent.
-/// * `tx_outgoing_message` - A sink where messages to be sent to the connected host are sent. This
-///   is needed in order to send `400 Bad Request` responses in response to invalid messages.
-fn create_split_messages_task<S>(
-    state: Arc<Mutex<ConnectionState>>,
-    rx_state_change: UnboundedReceiver<ReadWriteStatePair>,
+impl Future for DecodingTimerTask {
+    type Item = ();
+    type Error = ();
+
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        // Handle state changes.
+
+        while let Async::Ready(Some(new_state)) = self
+            .rx_state_change
+            .poll()
+            .expect("state change receiver should not error")
+        {
+            if self.handle_state_change(new_state) {
+                self.cleanup();
+                return Ok(Async::Ready(()));
+            }
+        }
+
+        // Handle codec events.
+
+        while let Async::Ready(item) = self
+            .rx_codec_event
+            .poll()
+            .expect("codec event receiver should not error")
+        {
+            match item {
+                Some(event) => self.handle_codec_event(event),
+                None => {
+                    // The codec that handles decoding and encoding has been dropped. This implies
+                    // that the connection is completely closed.
+
+                    lock_state(&self.state).update_state(ReadState::None, WriteState::None);
+                    self.cleanup();
+                    return Ok(Async::Ready(()));
+                }
+            }
+        }
+
+        // Handle decoding timer.
+
+        if let Async::Ready(()) = self
+            .decoding_timer
+            .poll()
+            .expect("decoding timer should not error")
+        {
+            lock_state(&self.state).update_state(
+                ReadState::Error(ProtocolError::DecodingTimedOut),
+                WriteState::Response,
+            );
+            return Ok(Async::Ready(()));
+        }
+
+        Ok(Async::NotReady)
+    }
+}
+
+struct MessageReceiverTask<S> {
+    buffered_requests: HashMap<CSeq, Request<BytesMut>>,
+    incoming_sequence_number: Option<CSeq>,
+    pending_requests: HashMap<CSeq, oneshot::Sender<PendingRequestResponse>>,
+    request_buffer_size: usize,
+    rx_pending_request: Fuse<UnboundedReceiver<PendingRequestUpdate>>,
+    rx_state_change: Fuse<UnboundedReceiver<ReadWriteStatePair>>,
+    tx_incoming_request: Option<UnboundedSender<Request<BytesMut>>>,
+    tx_outgoing_message: Option<UnboundedSender<Message>>,
     stream: S,
-    tx_incoming_request: Sender<Request<BytesMut>>,
-    tx_incoming_response: Sender<Response<BytesMut>>,
-    tx_outgoing_message: UnboundedSender<Message>,
-) -> impl Future<Item = (), Error = ()>
+    state: Arc<Mutex<ConnectionState>>,
+}
+
+impl<S> MessageReceiverTask<S>
 where
     S: Stream<Item = MessageResult, Error = ProtocolError>,
 {
-    fn forward_message<M>(
-        tx_incoming_message: Option<Sender<M>>,
-        message: M,
-        state: &Arc<Mutex<ConnectionState>>,
-        error_state: (Option<ReadState>, Option<WriteState>),
-    ) -> Option<Sender<M>> {
-        tx_incoming_message.and_then(|tx_incoming_message| {
-            match tx_incoming_message.send(message).wait() {
-                Ok(tx_incoming_message) => Some(tx_incoming_message),
-                Err(_) => {
-                    let mut locked_state = lock_state(state);
+    pub fn new(
+        state: Arc<Mutex<ConnectionState>>,
+        stream: S,
+        rx_pending_request: UnboundedReceiver<PendingRequestUpdate>,
+        tx_incoming_request: UnboundedSender<Request<BytesMut>>,
+        tx_outgoing_message: UnboundedSender<Message>,
+        request_buffer_size: usize,
+    ) -> Self {
+        let rx_state_change = lock_state(&state).add_listener().fuse();
 
-                    if let Some(new_read_state) = error_state.0 {
-                        locked_state.update_read_state(new_read_state);
-                    }
-
-                    if let Some(new_write_state) = error_state.1 {
-                        locked_state.update_write_state(new_write_state);
-                    }
-
-                    None
-                }
-            }
-        })
+        MessageReceiverTask {
+            buffered_requests: HashMap::with_capacity(request_buffer_size),
+            incoming_sequence_number: None,
+            pending_requests: HashMap::new(),
+            request_buffer_size,
+            rx_pending_request: rx_pending_request.fuse(),
+            rx_state_change,
+            tx_incoming_request: Some(tx_incoming_request),
+            tx_outgoing_message: Some(tx_outgoing_message),
+            stream,
+            state,
+        }
     }
 
-    loop_fn(
-        (
-            state,
-            rx_state_change.into_future(),
-            stream.into_future(),
-            Some(tx_incoming_request),
-            Some(tx_incoming_response),
-            Some(tx_outgoing_message),
-        ),
-        |(
-            state,
-            rx_state_change,
-            stream,
-            mut tx_incoming_request,
-            mut tx_incoming_response,
-            mut tx_outgoing_message,
-        )| {
-            stream.select2(rx_state_change).then(move |result| {
-                Ok(match result {
-                    Ok(Either::A(((Some(result), stream), rx_state_change))) => {
-                        // Received a new message, but we need to check whether or not it is valid.
-                        println!("RECEIVED A MESSAGE: {:?}", result);
-                        match result {
-                            Ok(Message::Request(request)) => {
-                                // Forward the request to the request stream. If an error occurs
-                                // (implying that the request stream has been dropped), then we can
-                                // only read responses from now on. We do not change the write
-                                // state, since even though no new responses will be made, there
-                                // still may be responses pending from previous requests.
+    fn cleanup(&mut self) {
+        self.remove_pending_requests();
+        self.tx_incoming_request = None;
+        self.tx_outgoing_message = None;
 
-                                tx_incoming_request = forward_message(
-                                    tx_incoming_request,
-                                    request,
-                                    &state,
-                                    (Some(ReadState::Response), None),
-                                );
-                            }
-                            Ok(Message::Response(response)) => {
-                                // Forward the response to the response stream. If an error occurs
-                                // (implying that the response stream has been dropped), then we can
-                                // only read requests and send responses.
+        if !self.rx_pending_request.is_done() {
+            self.rx_pending_request.get_mut().close();
+        }
 
-                                tx_incoming_response = forward_message(
-                                    tx_incoming_response,
-                                    response,
-                                    &state,
-                                    (Some(ReadState::Request), Some(WriteState::Response)),
-                                );
-                            }
-                            Err(InvalidMessage::InvalidRequest(_)) => {
-                                // We received a request that was invalid, but it still was able to
-                                // be decoded. We send a `400 Bad Request` to deal with this. This
-                                // is one situation, however, in which the order that requests are
-                                // handled is not based on `CSeq`. Even if the message had a valid
-                                // `CSeq` header, it will not be inspected, since at least one part
-                                // of the message was syntactically incorrect. As a result, the
-                                // receiving agent has to manage mapping a response with no `CSeq`
-                                // to its respective request. This is unlikely, and in general not
-                                // possible if proxies are involved, since responses can be received
-                                // out of order.
+        if !self.rx_state_change.is_done() {
+            self.rx_state_change.get_mut().close();
+        }
+    }
 
-                                if lock_state(&state).write_state().responses_allowed() {
-                                    let response = Response::builder()
-                                        .status_code(StatusCode::BadRequest)
-                                        .build(BytesMut::new())
-                                        .expect("bad request response should not be invalid");
-                                    tx_outgoing_message = try_send_message(
-                                        tx_outgoing_message,
-                                        Message::Response(response),
-                                    );
-                                }
-                            }
-                            Err(InvalidMessage::InvalidResponse(_)) => {
-                                // Received an invalid response, but the only appropriate action
-                                // here is to just ignore it.
-                            }
+    fn handle_message(&mut self, message: MessageResult) {
+        match message {
+            Ok(Message::Request(request)) => {
+                if lock_state(&self.state).read_state().requests_allowed() {
+                    self.handle_request(request);
+                }
+            }
+            Ok(Message::Response(response)) => {
+                if lock_state(&self.state).read_state().responses_allowed() {
+                    self.handle_response(response);
+                }
+            }
+            Err(InvalidMessage::InvalidRequest(_)) => {
+                // We received a request that was invalid, but it still was able to be decoded. We
+                // send a `400 Bad Request` to deal with this. This is one situation, however, in
+                // which the order that requests are handled is not based on `CSeq`. Even if the
+                // message had a valid `CSeq` header, it will not be inspected, since at least one
+                // part of the message was syntactically incorrect. As a result, the receiving agent
+                // has to manage mapping a response with no `CSeq` to its respective request. This
+                // is unlikely, and in general not possible if proxies are involved, since responses
+                // can be received out of order.
+
+                self.send_bad_request();
+            }
+            Err(InvalidMessage::InvalidResponse(_)) => {
+                // Received an invalid response, but the only appropriate action here is to just
+                // ignore it.
+            }
+        }
+    }
+
+    fn handle_pending_request_update(&mut self, update: PendingRequestUpdate) {
+        match update {
+            PendingRequestUpdate::AddPendingRequest((cseq, tx_pending_request)) => {
+                // A new request has been made that is waiting for a response. When the response
+                // has been received, the given oneshot channel will be used to forward the
+                // response.
+
+                self.pending_requests.insert(cseq, tx_pending_request);
+            }
+            PendingRequestUpdate::RemovePendingRequest(cseq) => {
+                // A previously pending request has determined that it will no longer wait for a
+                // response. This will happen if there is a timeout for the request.
+
+                self.pending_requests.remove(&cseq);
+            }
+        }
+    }
+
+    fn handle_request(&mut self, request: Request<BytesMut>) {
+        let header_values = request
+            .headers()
+            .get_all(HeaderName::CSeq)
+            .iter()
+            .cloned()
+            .collect::<Vec<HeaderValue>>();
+
+        match CSeq::try_from_header_raw(&header_values) {
+            Ok(cseq) => {
+                // The initial sequence number is defined by the client's first request. So, if we
+                // do not currently have a sequence number yet, the one in the request will be used.
+
+                let mut sequence_number = self.incoming_sequence_number.unwrap_or(cseq);
+
+                if *(cseq - sequence_number) > self.request_buffer_size as u32 {
+                    // We received a request with a valid `CSeq` header, but the sequence number
+                    // referenced is too far out from the current sequence number.
+                    //
+                    // This is actually a bit of a break from the specification. The specification
+                    // states that requests must be handled in the order of their `CSeq`, but this
+                    // is not practical here and opens up possible resource exhaustion attacks. The
+                    // connection will only process the next expected `CSeq` to abide by the
+                    // specification. All other requests will simply be buffered until the next one
+                    // with the next `CSeq` has arrived. But the range of possible `CSeq`s is way
+                    // too large to buffer per agent, so we only buffer a small amount.
+
+                    self.send_not_enough_bandwidth();
+                } else {
+                    self.buffered_requests.insert(cseq, request);
+
+                    while let Some(request) = self.buffered_requests.remove(&sequence_number) {
+                        if self
+                            .tx_incoming_request
+                            .as_ref()
+                            .expect("incoming request sender should not be `None`")
+                            .unbounded_send(request)
+                            .is_err()
+                        {
+                            lock_state(&self.state).update_read_state(ReadState::None);
+                            self.tx_incoming_request = None;
                         }
 
-                        Loop::Continue((
-                            state,
-                            rx_state_change,
-                            stream.into_future(),
-                            tx_incoming_request,
-                            tx_incoming_response,
-                            tx_outgoing_message,
-                        ))
+                        sequence_number = sequence_number.increment();
                     }
-                    Ok(Either::A(((None, _), _))) => {
-                        // The incoming message stream has ended. We can only write responses from
-                        // this point forward.
 
-                        lock_state(&state).update_state(ReadState::None, WriteState::Response);
-                        Loop::Break(())
-                    }
-                    Ok(Either::B(((new_state, rx_state_change), stream))) => {
-                        println!(
-                            "Message splitting task received a state change: {:?}",
-                            new_state
-                        );
+                    self.incoming_sequence_number = Some(sequence_number);
+                }
+            }
+            Err(_) => {
+                // Either no `CSeq` header was found, or parsing of the header failed.
+                //
+                // To handle this, we send a `400 Bad Request`, but we do not specify a  `CSeq` in
+                // the response. Unfortunately, it is not likely the client will even do anything
+                // with this response, since it too does not have a `CSeq`. For example, if a client
+                // using this implementation managed to send a request with no `CSeq` and received a
+                // response with no `CSeq`, it would just ignore it.
+                //
+                // Also, this message is immediately queued and may not necessarily be the order in
+                // which a client would expect the response, but there is no avoiding this. `CSeq`
+                // must be given in order to demultiplex.
 
-                        match new_state.expect("state change receiver should not end") {
-                            // We can no longer read anything.
-                            (ReadState::None, _) | (ReadState::Error(_), _) => {
-                                // Make sure write state is set correctly. This should have already
-                                // happened, but just in case.
+                self.send_bad_request();
+            }
+        }
+    }
 
-                                lock_state(&state).update_write_state(WriteState::Response);
-                                return Ok(Loop::Break(()));
-                            }
+    fn handle_response(&mut self, response: Response<BytesMut>) {
+        if response.version() != Version::RTSP20 {
+            return;
+        }
 
-                            // We can no longer read responses.
-                            (ReadState::Request, _) => {
-                                // Make sure write state is set correctly. This should have already
-                                // happened, but just in case.
+        let header_values = response
+            .headers()
+            .get_all(HeaderName::CSeq)
+            .iter()
+            .cloned()
+            .collect::<Vec<HeaderValue>>();
+        let cseq = CSeq::try_from_header_raw(&header_values);
 
-                                lock_state(&state).update_write_state(WriteState::Response);
-                                tx_incoming_response = None;
-                            }
+        // Make sure the `CSeq` was valid (and that there was only one) and that a request is
+        // pending with the given value.
 
-                            // We can no longer read requests.
-                            (ReadState::Response, _)
-                            | (_, WriteState::None)
-                            | (_, WriteState::Error(_))
-                            | (_, WriteState::Request) => {
-                                // Make sure read state is set correctly. This should have already
-                                // happened, but just in case. Also drop message sending stream.
+        if let Ok(cseq) = cseq {
+            if response.status_code() == StatusCode::Continue {
+                // Received a `100 Continue` response meaning we should expect the actual response a
+                // bit later. But we want to make sure that any timers for the request do not
+                // timeout, so we notify them of the continue.
+                //
+                // TODO: When NLL is stable, restructure this.
 
-                                lock_state(&state).update_read_state(ReadState::Response);
-                                tx_outgoing_message = None;
-                                tx_incoming_request = None;
-                            }
-                            _ => (),
+                let mut remove_pending_request = false;
+
+                {
+                    if let Some(mut pending_request) = self.pending_requests.get_mut(&cseq) {
+                        // Since we are using oneshots here, we need to create a new channel to be
+                        // used and send it as well.
+
+                        let (tx_pending_request, rx_pending_request) = oneshot::channel();
+
+                        // We do care if it fails here, since if it fails, we need to remove the
+                        // pending request from the hashmap.
+
+                        if let Err(_) = mem::replace(pending_request, tx_pending_request)
+                            .send(PendingRequestResponse::Continue(rx_pending_request))
+                        {
+                            remove_pending_request = true;
                         }
-
-                        Loop::Continue((
-                            state,
-                            rx_state_change.into_future(),
-                            stream,
-                            tx_incoming_request,
-                            tx_incoming_response,
-                            tx_outgoing_message,
-                        ))
                     }
-                    Err(Either::A(((error, _), _))) => {
-                        println!("MESSAGE SPLITTING ERROR: {}", error);
-                        // There was an error reading from the message stream that was
-                        // irrecoverable. We can no longer read anything, but we may be able to
-                        // still write responses. Requests cannot be written, since we would not be
-                        // able to read their responses.
+                }
 
-                        lock_state(&state)
-                            .update_state(ReadState::Error(error), WriteState::Response);
-                        Loop::Break(())
-                    }
-                    Err(Either::B(_)) => panic!("state change receiver should not error"),
-                })
+                if remove_pending_request {
+                    self.pending_requests.remove(&cseq);
+                }
+            } else if let Some(mut pending_request) = self.pending_requests.remove(&cseq) {
+                // Received a final response for a pending request.
+                //
+                // We do not really care if this fails. It would only fail in the case where the
+                // receiver has been dropped, but either way, we can get rid of the pending request.
+
+                pending_request
+                    .send(PendingRequestResponse::Response(response))
+                    .ok();
+            }
+
+            if self.rx_pending_request.is_done() && self.pending_requests.is_empty() {
+                // There are no more pending requests, and we can be sure that no more will be
+                // created. So we can change the state to disallow reading responses.
+
+                lock_state(&self.state).update_state(ReadState::Request, WriteState::Response);
+            }
+        }
+    }
+
+    fn handle_state_change(&mut self, new_state: ReadWriteStatePair) -> bool {
+        if new_state.0.is_none() || new_state.0.is_error() {
+            // We can no longer read anything.
+
+            lock_state(&self.state).update_write_state(WriteState::Response);
+            return true;
+        }
+
+        if new_state.0.is_request() {
+            // We can no longer read responses.
+
+            lock_state(&self.state).update_write_state(WriteState::Response);
+        }
+
+        if new_state.0.is_response()
+            || new_state.1.is_none()
+            || new_state.1.is_error()
+            || new_state.1.is_request()
+        {
+            // We can no longer read requests. We do not change the write state, since there may
+            // still be incoming requests that are being handled.
+
+            lock_state(&self.state).update_read_state(ReadState::Response);
+            self.tx_incoming_request = None;
+        }
+
+        if self.should_exit() {
+            return true;
+        }
+
+        false
+    }
+
+    fn remove_pending_requests(&mut self) {
+        self.pending_requests
+            .drain()
+            .for_each(|(_, tx_pending_request)| {
+                // We do not really care if this fails. If would only fail in the case where the
+                // receiver has been dropped, but either way, we can get rid of the pending request.
+
+                tx_pending_request.send(PendingRequestResponse::None).ok();
+            });
+    }
+
+    fn send_bad_request(&mut self) {
+        if lock_state(&self.state).write_state().responses_allowed() {
+            let response = Response::builder()
+                .status_code(StatusCode::BadRequest)
+                .build(BytesMut::new())
+                .expect("bad request response should not be invalid");
+            self.try_send_message(Message::Response(response));
+        }
+    }
+
+    fn send_not_enough_bandwidth(&mut self) {
+        if lock_state(&self.state).write_state().responses_allowed() {
+            let response = Response::builder()
+                .status_code(StatusCode::NotEnoughBandwidth)
+                .build(BytesMut::new())
+                .expect("not enough bandwidth response should not be invalid");
+            self.try_send_message(Message::Response(response));
+        }
+    }
+
+    fn send_version_not_supported(&mut self) {
+        // TODO: As per specification, the "response SHOULD contain a message body describing why
+        // that version is not supported and what other protocols are supported by that agent".
+
+        if lock_state(&self.state).write_state().responses_allowed() {
+            let response = Response::builder()
+                .status_code(StatusCode::RTSPVersionNotSupported)
+                .build(BytesMut::new())
+                .expect("RTSP version not supported response should not be invalid");
+            self.try_send_message(Message::Response(response));
+        }
+    }
+
+    fn try_send_message(&mut self, message: Message) {
+        self.tx_outgoing_message = self
+            .tx_outgoing_message
+            .take()
+            .and_then(|tx_outgoing_message| {
+                tx_outgoing_message
+                    .unbounded_send(message)
+                    .ok()
+                    .map(|_| tx_outgoing_message)
+                    .or_else(|| {
+                        lock_state(&self.state).update_read_state(ReadState::Response);
+                        self.tx_incoming_request = None;
+                        None
+                    })
             })
-        },
-    )
+    }
+
+    fn should_exit(&self) -> bool {
+        let state = lock_state(&self.state).read_state();
+        state.is_none() || state.is_error()
+    }
 }
 
-#[cfg(test)]
-mod test {
-    // TODO: Maybe try to cleanup this testing so that the setup is not so repetitive?
-
-    use std::convert::TryFrom;
-    use std::mem;
-    use tokio::runtime::current_thread;
-    use tokio::runtime::Runtime;
-
-    use super::*;
-    use method::Method;
-    use protocol::RecoverableInvalidRequest;
-    use uri::URI;
-
-    #[test]
-    fn test_decoding_timer_task_event_handling() {
-        let (tx_state_change, _rx_state_change) = unbounded();
-        let (tx_codec_event, rx_codec_event) = unbounded();
-        let connection_state = Arc::new(Mutex::new(ConnectionState::new(vec![tx_state_change])));
-        let task = create_decoding_timer_task(
-            connection_state.clone(),
-            rx_codec_event,
-            Duration::from_millis(50),
-        );
-
-        // Simulate codec encoding and decoding.
-
-        tx_codec_event
-            .unbounded_send(CodecEvent::DecodingStarted)
-            .unwrap();
-        tx_codec_event
-            .unbounded_send(CodecEvent::EncodingStarted)
-            .unwrap();
-        tx_codec_event
-            .unbounded_send(CodecEvent::EncodingEnded)
-            .unwrap();
-        tx_codec_event
-            .unbounded_send(CodecEvent::DecodingEnded)
-            .unwrap();
-
-        let mut runtime = Runtime::new().unwrap();
-
-        // Simulate dropping codec event. We wait to do it here, so the task will handle the above
-        // events. Also make sure the delay here is longer than the timeout duration to test whether
-        // the `CodecEvent::DecodingEnded` successfully stops the timer.
-
-        runtime.spawn(
-            Delay::new(Instant::now() + Duration::from_millis(100)).then(|_| {
-                mem::drop(tx_codec_event);
-                Ok(())
-            }),
-        );
-
-        // Wait for task to end.
-
-        runtime.spawn(task);
-        runtime.shutdown_on_idle().wait().unwrap();
-
-        assert_eq!(
-            lock_state(&connection_state).state(),
-            (ReadState::None, WriteState::None)
-        );
-    }
-
-    #[test]
-    fn test_decoding_timer_task_codec_dropped() {
-        let (tx_state_change, _rx_state_change) = unbounded();
-        let (tx_codec_event, rx_codec_event) = unbounded();
-        let connection_state = Arc::new(Mutex::new(ConnectionState::new(vec![tx_state_change])));
-        let task = create_decoding_timer_task(
-            connection_state.clone(),
-            rx_codec_event,
-            DEFAULT_DECODE_TIMEOUT_DURATION,
-        );
-
-        // Simulate the dropping of the codec (meaning the sender has been dropped as well).
-
-        mem::drop(tx_codec_event);
-
-        // Wait for task to end.
-
-        current_thread::Runtime::new()
-            .unwrap()
-            .block_on(task)
-            .unwrap();
-
-        assert_eq!(
-            lock_state(&connection_state).state(),
-            (ReadState::None, WriteState::None)
-        );
-    }
-
-    #[test]
-    fn test_decoding_timer_task_expired() {
-        let (tx_state_change, _rx_state_change) = unbounded();
-        let (tx_codec_event, rx_codec_event) = unbounded();
-        let connection_state = Arc::new(Mutex::new(ConnectionState::new(vec![tx_state_change])));
-        let task = create_decoding_timer_task(
-            connection_state.clone(),
-            rx_codec_event,
-            Duration::from_millis(1),
-        );
-
-        // Simulate the decoding of a message that timeouts.
-
-        tx_codec_event
-            .unbounded_send(CodecEvent::DecodingStarted)
-            .unwrap();
-
-        // Wait for task to end.
-
-        current_thread::Runtime::new()
-            .unwrap()
-            .block_on(task)
-            .unwrap();
-
-        assert_eq!(
-            lock_state(&connection_state).state(),
-            (
-                ReadState::Error(ProtocolError::DecodingTimedOut),
-                WriteState::Response
-            )
-        );
-    }
-
-    #[test]
-    fn test_request_handler_task_cseq_ordering() {
-        let (tx_state_change, _rx_state_change) = unbounded();
-        let (tx_incoming_request, rx_incoming_request) = channel(DEFAULT_REQUEST_BUFFER_SIZE);
-        let (tx_ordered_incoming_request, rx_ordered_incoming_request) = unbounded();
-        let (tx_outgoing_message, _rx_outgoing_message) = unbounded();
-
-        let connection_state = Arc::new(Mutex::new(ConnectionState::new(vec![tx_state_change])));
-        let task = create_request_handler_task(
-            connection_state.clone(),
-            rx_incoming_request,
-            tx_ordered_incoming_request,
-            tx_outgoing_message,
-            DEFAULT_REQUEST_BUFFER_SIZE,
-        );
-
-        let mut runtime = current_thread::Runtime::new().unwrap();
-
-        // Send request with `CSeq` header which sets the starting sequence number.
-
-        let request_1 = Request::builder()
-            .method(Method::Options)
-            .uri(URI::Any)
-            .header(HeaderName::CSeq, "0")
-            .build("".into())
-            .unwrap();
-        let tx_incoming_request = runtime
-            .block_on(tx_incoming_request.send(request_1.clone()))
-            .unwrap();
-
-        // Send next requests with out of order `CSeq`s.
-
-        let request_2 = Request::builder()
-            .method(Method::Options)
-            .uri(URI::Any)
-            .header(HeaderName::CSeq, "2")
-            .build("".into())
-            .unwrap();
-        let tx_incoming_request = runtime
-            .block_on(tx_incoming_request.send(request_2.clone()))
-            .unwrap();
-
-        let request_3 = Request::builder()
-            .method(Method::Options)
-            .uri(URI::Any)
-            .header(HeaderName::CSeq, "1")
-            .build("".into())
-            .unwrap();
-        let tx_incoming_request = runtime
-            .block_on(tx_incoming_request.send(request_3.clone()))
-            .unwrap();
-
-        // Simulate ending incoming requests.
-
-        mem::drop(tx_incoming_request);
-
-        // Wait for the task to end.
-
-        runtime.block_on(task).unwrap();
-
-        let ordered_incoming_requests = runtime
-            .block_on(rx_ordered_incoming_request.collect())
-            .unwrap();
-
-        assert_eq!(
-            ordered_incoming_requests,
-            vec![request_1, request_3, request_2]
-        );
-    }
-
-    #[test]
-    fn test_request_handler_task_cseq_out_of_range() {
-        let (tx_state_change, _rx_state_change) = unbounded();
-        let (tx_incoming_request, rx_incoming_request) = channel(DEFAULT_REQUEST_BUFFER_SIZE);
-        let (tx_ordered_incoming_request, rx_ordered_incoming_request) = unbounded();
-        let (tx_outgoing_message, rx_outgoing_message) = unbounded();
-
-        let connection_state = Arc::new(Mutex::new(ConnectionState::new(vec![tx_state_change])));
-        let task = create_request_handler_task(
-            connection_state.clone(),
-            rx_incoming_request,
-            tx_ordered_incoming_request,
-            tx_outgoing_message,
-            DEFAULT_REQUEST_BUFFER_SIZE,
-        );
-
-        let mut runtime = current_thread::Runtime::new().unwrap();
-
-        // Send request with `CSeq` header which sets the starting sequence number.
-
-        let request_1 = Request::builder()
-            .method(Method::Options)
-            .uri(URI::Any)
-            .header(HeaderName::CSeq, "0")
-            .build("".into())
-            .unwrap();
-        let tx_incoming_request = runtime
-            .block_on(tx_incoming_request.send(request_1.clone()))
-            .unwrap();
-
-        // Send next request with very different `CSeq`.
-
-        let request_2 = Request::builder()
-            .method(Method::Options)
-            .uri(URI::Any)
-            .header(HeaderName::CSeq, "99999")
-            .build("".into())
-            .unwrap();
-        let tx_incoming_request = runtime
-            .block_on(tx_incoming_request.send(request_2))
-            .unwrap();
-
-        // Simulate ending incoming requests.
-
-        mem::drop(tx_incoming_request);
-
-        // Wait for the task to end.
-
-        runtime.block_on(task).unwrap();
-
-        let ordered_incoming_requests = runtime
-            .block_on(rx_ordered_incoming_request.collect())
-            .unwrap();
-
-        assert_eq!(ordered_incoming_requests, vec![request_1]);
-
-        let outgoing_messages = runtime.block_on(rx_outgoing_message.collect()).unwrap();
-        let expected_message = Message::Response(
-            Response::builder()
-                .status_code(StatusCode::ServiceUnavailable)
-                .build("".into())
-                .unwrap(),
-        );
-
-        assert_eq!(outgoing_messages, vec![expected_message]);
-    }
-
-    #[test]
-    fn test_request_handler_task_invalid_cseq_responses_allowed() {
-        let (tx_state_change, _rx_state_change) = unbounded();
-        let (tx_incoming_request, rx_incoming_request) = channel(DEFAULT_REQUEST_BUFFER_SIZE);
-        let (tx_ordered_incoming_request, _rx_ordered_incoming_request) = unbounded();
-        let (tx_outgoing_message, rx_outgoing_message) = unbounded();
-
-        let connection_state = Arc::new(Mutex::new(ConnectionState::new(vec![tx_state_change])));
-        let task = create_request_handler_task(
-            connection_state.clone(),
-            rx_incoming_request,
-            tx_ordered_incoming_request,
-            tx_outgoing_message,
-            DEFAULT_REQUEST_BUFFER_SIZE,
-        );
-
-        // Send request with invalid `CSeq` header.
-
-        let request = Request::builder()
-            .method(Method::Options)
-            .uri(URI::Any)
-            .header(HeaderName::CSeq, "invalid cseq")
-            .build("".into())
-            .unwrap();
-
-        let mut runtime = current_thread::Runtime::new().unwrap();
-        let tx_incoming_request = runtime.block_on(tx_incoming_request.send(request)).unwrap();
-
-        // Simulate ending incoming requests.
-
-        mem::drop(tx_incoming_request);
-
-        // Wait for the task to end.
-
-        runtime.block_on(task).unwrap();
-
-        let outgoing_messages = runtime.block_on(rx_outgoing_message.collect()).unwrap();
-        let expected_message = Message::Response(
-            Response::builder()
-                .status_code(StatusCode::BadRequest)
-                .build("".into())
-                .unwrap(),
-        );
-
-        assert_eq!(outgoing_messages, vec![expected_message]);
-    }
-
-    #[test]
-    fn test_request_handler_task_invalid_cseq_responses_not_allowed() {
-        let (tx_state_change, _rx_state_change) = unbounded();
-        let (tx_incoming_request, rx_incoming_request) = channel(DEFAULT_REQUEST_BUFFER_SIZE);
-        let (tx_ordered_incoming_request, _rx_ordered_incoming_request) = unbounded();
-        let (tx_outgoing_message, rx_outgoing_message) = unbounded();
-
-        let connection_state = Arc::new(Mutex::new(ConnectionState::new(vec![tx_state_change])));
-
-        {
-            lock_state(&connection_state).update_write_state(WriteState::Request);
-        }
-
-        let task = create_request_handler_task(
-            connection_state.clone(),
-            rx_incoming_request,
-            tx_ordered_incoming_request,
-            tx_outgoing_message,
-            DEFAULT_REQUEST_BUFFER_SIZE,
-        );
-
-        // Send request with invalid `CSeq` header.
-
-        let request = Request::builder()
-            .method(Method::Options)
-            .uri(URI::Any)
-            .header(HeaderName::CSeq, "invalid cseq")
-            .build("".into())
-            .unwrap();
-
-        let mut runtime = current_thread::Runtime::new().unwrap();
-        let tx_incoming_request = runtime.block_on(tx_incoming_request.send(request)).unwrap();
-
-        // Simulate ending incoming requests.
-
-        mem::drop(tx_incoming_request);
-
-        // Wait for the task to end.
-
-        runtime.block_on(task).unwrap();
-
-        let outgoing_messages = runtime.block_on(rx_outgoing_message.collect()).unwrap();
-        assert_eq!(outgoing_messages, vec![]);
-    }
-
-    #[test]
-    fn test_request_handler_task_stream_ends() {
-        let (tx_state_change, _rx_state_change) = unbounded();
-        let (tx_incoming_request, rx_incoming_request) = channel(DEFAULT_REQUEST_BUFFER_SIZE);
-        let (tx_ordered_incoming_request, _rx_ordered_incoming_request) = unbounded();
-        let (tx_outgoing_message, _rx_outgoing_message) = unbounded();
-
-        let connection_state = Arc::new(Mutex::new(ConnectionState::new(vec![tx_state_change])));
-        let task = create_request_handler_task(
-            connection_state.clone(),
-            rx_incoming_request,
-            tx_ordered_incoming_request,
-            tx_outgoing_message,
-            DEFAULT_REQUEST_BUFFER_SIZE,
-        );
-
-        // Simulate ending incoming requests.
-
-        mem::drop(tx_incoming_request);
-
-        // Wait for the task to end.
-
-        current_thread::Runtime::new()
-            .unwrap()
-            .block_on(task)
-            .unwrap();
-    }
-
-    #[test]
-    fn test_response_handler_task_continue() {
-        let (tx_state_change, _rx_state_change) = unbounded();
-        let (tx_incoming_response, rx_incoming_response) = channel(DEFAULT_RESPONSE_BUFFER_SIZE);
-        let (tx_pending_request, rx_pending_request) = unbounded();
-
-        let connection_state = Arc::new(Mutex::new(ConnectionState::new(vec![tx_state_change])));
-        let task = create_response_handler_task(
-            connection_state.clone(),
-            rx_incoming_response,
-            rx_pending_request,
-        );
-
-        // Add a pending request.
-
-        let (tx_pending_request_1, rx_pending_request_1) = oneshot::channel();
-        tx_pending_request
-            .unbounded_send(PendingRequestUpdate::AddPendingRequest((
-                CSeq::try_from(0).unwrap(),
-                tx_pending_request_1,
-            )))
-            .unwrap();
-
-        // Send a `100 Continue` response after some delay and then the final response.
-
-        let final_response = Response::builder()
-            .header(HeaderName::CSeq, "0")
-            .build("".into())
-            .unwrap();
-        let final_response_clone = final_response.clone();
-
-        let mut runtime = Runtime::new().unwrap();
-
-        runtime.spawn(
-            Delay::new(Instant::now() + Duration::from_millis(100))
-                .then(move |_| {
-                    let continue_response = Response::builder()
-                        .status_code(StatusCode::Continue)
-                        .header(HeaderName::CSeq, "0")
-                        .build("".into())
-                        .unwrap();
-
-                    tx_incoming_response
-                        .send(continue_response)
-                        .and_then(|tx_incoming_response| tx_incoming_response.send(final_response))
-                })
-                .then(|_| Ok(())),
-        );
-        runtime.spawn(rx_pending_request_1.then(move |pending_request| {
-            let pending_request = pending_request.unwrap();
-            let receiver = match pending_request {
-                PendingRequestResponse::Continue(receiver) => receiver,
-                _ => panic!("expected a continue"),
-            };
-
-            receiver.then(move |pending_request| {
-                let pending_request = pending_request.unwrap();
-
-                match pending_request {
-                    PendingRequestResponse::Response(response) => {
-                        assert_eq!(response, final_response_clone)
+impl<S> Future for MessageReceiverTask<S>
+where
+    S: Stream<Item = MessageResult, Error = ProtocolError>,
+{
+    type Item = ();
+    type Error = ();
+
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        loop {
+            // Handle state changes.
+
+            while let Async::Ready(Some(new_state)) = self
+                .rx_state_change
+                .poll()
+                .expect("state change receiver should not error")
+            {
+                if self.handle_state_change(new_state) {
+                    self.cleanup();
+                    return Ok(Async::Ready(()));
+                }
+            }
+
+            // Handle pending request updates.
+
+            while let Async::Ready(item) = self
+                .rx_pending_request
+                .poll()
+                .expect("pending request update receiver should not error")
+            {
+                match item {
+                    Some(update) => self.handle_pending_request_update(update),
+                    None => {
+                        if self.pending_requests.is_empty() {
+                            // No more are pending, so we can ignore all incoming responses.
+                            // Although this state change will eventually force a change in the
+                            // above loop, we need to make sure that we do not allow anymore
+                            // responses for the stream reading after this loop.
+                            //
+                            // If it turns out that we cannot read requests or responses due to this
+                            // state change, the task will end on the next poll.
+
+                            lock_state(&self.state).update_read_state(ReadState::Request);
+                        }
+
+                        break;
                     }
-                    _ => panic!("expected a response"),
                 }
-
-                Ok(())
-            })
-        }));
-
-        // Wait for task to end.
-
-        runtime.spawn(task);
-        runtime.shutdown_on_idle().wait().unwrap();
-
-        assert_eq!(
-            lock_state(&connection_state).state(),
-            (ReadState::Request, WriteState::Response)
-        );
-    }
-
-    #[test]
-    fn test_response_handler_task_pending_requests_stream_ends() {
-        let (tx_state_change, _rx_state_change) = unbounded();
-        let (_tx_incoming_response, rx_incoming_response) = channel(DEFAULT_RESPONSE_BUFFER_SIZE);
-        let (tx_pending_request, rx_pending_request) = unbounded();
-
-        let connection_state = Arc::new(Mutex::new(ConnectionState::new(vec![tx_state_change])));
-        let task = create_response_handler_task(
-            connection_state.clone(),
-            rx_incoming_response,
-            rx_pending_request,
-        );
-
-        // Simulate ending the pending request stream.
-
-        mem::drop(tx_pending_request);
-
-        // Wait for task to end.
-
-        current_thread::Runtime::new()
-            .unwrap()
-            .block_on(task)
-            .unwrap();
-
-        assert_eq!(
-            lock_state(&connection_state).state(),
-            (ReadState::Request, WriteState::Response)
-        );
-    }
-
-    #[test]
-    fn test_response_handler_task_response_matching() {
-        let (tx_state_change, _rx_state_change) = unbounded();
-        let (tx_incoming_response, rx_incoming_response) = channel(DEFAULT_RESPONSE_BUFFER_SIZE);
-        let (tx_pending_request, rx_pending_request) = unbounded();
-
-        let connection_state = Arc::new(Mutex::new(ConnectionState::new(vec![tx_state_change])));
-        let task = create_response_handler_task(
-            connection_state.clone(),
-            rx_incoming_response,
-            rx_pending_request,
-        );
-
-        // Add a pending request.
-
-        let (tx_pending_request_1, rx_pending_request_1) = oneshot::channel();
-        tx_pending_request
-            .unbounded_send(PendingRequestUpdate::AddPendingRequest((
-                CSeq::try_from(0).unwrap(),
-                tx_pending_request_1,
-            )))
-            .unwrap();
-
-        // Send a response after some delay.
-
-        let response = Response::builder()
-            .header(HeaderName::CSeq, "0")
-            .build("".into())
-            .unwrap();
-        let response_clone = response.clone();
-
-        let mut runtime = Runtime::new().unwrap();
-
-        runtime.spawn(
-            Delay::new(Instant::now() + Duration::from_millis(100))
-                .then(move |_| tx_incoming_response.send(response))
-                .then(|_| Ok(())),
-        );
-
-        // Wait for task to end.
-
-        runtime.spawn(rx_pending_request_1.then(move |pending_response| {
-            match pending_response.unwrap() {
-                PendingRequestResponse::Response(received_response) => {
-                    assert_eq!(received_response, response_clone);
-                }
-                _ => panic!("expected a response"),
             }
-            Ok(())
-        }));
 
-        runtime.spawn(task);
-        runtime.shutdown_on_idle().wait().unwrap();
+            // Handle one new message.
 
-        assert_eq!(
-            lock_state(&connection_state).state(),
-            (ReadState::Request, WriteState::Response)
-        );
+            match self.stream.poll() {
+                Ok(Async::Ready(Some(message))) => self.handle_message(message),
+                Ok(Async::Ready(None)) => {
+                    // The incoming message stream has ended. We can only write responses from this
+                    // point forward.
+
+                    lock_state(&self.state).update_state(ReadState::None, WriteState::Response);
+                    self.cleanup();
+                    return Ok(Async::Ready(()));
+                }
+                Ok(Async::NotReady) => break,
+                Err(error) => {
+                    // There was an error reading from the message stream that was irrecoverable. We
+                    // can no longer read anything, but we may be able to still write responses.
+                    // Requests cannot be written, since we would not be able to read their
+                    // responses.
+
+                    match error {
+                        ProtocolError::DecodeError(DecodeError::InvalidRequest(
+                            IrrecoverableInvalidRequest::UnsupportedVersion,
+                        ))
+                        | ProtocolError::DecodeError(DecodeError::InvalidResponse(
+                            IrrecoverableInvalidResponse::UnsupportedVersion,
+                        )) => {
+                            self.send_version_not_supported();
+                        }
+                        ProtocolError::DecodeError(_) => self.send_bad_request(),
+                        _ => {}
+                    }
+
+                    lock_state(&self.state)
+                        .update_state(ReadState::Error(error), WriteState::Response);
+                    self.cleanup();
+                    return Ok(Async::Ready(()));
+                }
+            }
+        }
+
+        Ok(Async::NotReady)
     }
+}
 
-    #[test]
-    fn test_response_handler_task_response_stream_ends() {
-        let (tx_state_change, _rx_state_change) = unbounded();
-        let (tx_incoming_response, rx_incoming_response) = channel(DEFAULT_RESPONSE_BUFFER_SIZE);
-        let (tx_pending_request, rx_pending_request) = unbounded();
+struct MessageSenderTask<S> {
+    buffered_message: Option<Message>,
+    rx_outgoing_message: UnboundedReceiver<Message>,
+    state: Arc<Mutex<ConnectionState>>,
+    sink: S,
+}
 
-        let connection_state = Arc::new(Mutex::new(ConnectionState::new(vec![tx_state_change])));
-        let task = create_response_handler_task(
-            connection_state.clone(),
-            rx_incoming_response,
-            rx_pending_request,
-        );
-
-        // Add a pending request that will not be fulfilled.
-
-        let (tx_pending_request_1, rx_pending_request_1) = oneshot::channel();
-        tx_pending_request
-            .unbounded_send(PendingRequestUpdate::AddPendingRequest((
-                CSeq::try_from(0).unwrap(),
-                tx_pending_request_1,
-            )))
-            .unwrap();
-
-        let mut runtime = Runtime::new().unwrap();
-
-        // Simulate ending the incoming response stream, but wait to do it so that the update above
-        // can be handled.
-
-        runtime.spawn(
-            Delay::new(Instant::now() + Duration::from_millis(100)).then(move |_| {
-                mem::drop(tx_incoming_response);
-                Ok(())
-            }),
-        );
-
-        // Wait for task to end.
-
-        runtime.spawn(task);
-        runtime.shutdown_on_idle().wait().unwrap();
-
-        // Wait for task to end.
-
-        let pending_request_response = current_thread::Runtime::new()
-            .unwrap()
-            .block_on(rx_pending_request_1)
-            .unwrap();
-        assert!(pending_request_response.is_none());
-
-        assert_eq!(
-            lock_state(&connection_state).state(),
-            (ReadState::Request, WriteState::Response)
-        );
-    }
-
-    #[test]
-    fn test_send_messages_task_sink_error() {
-        let (tx_state_change, rx_state_change) = unbounded();
-        let (tx_message, rx_message) = unbounded();
-        let (tx_outgoing_message, rx_outgoing_message) = unbounded();
-
-        let connection_state = Arc::new(Mutex::new(ConnectionState::new(vec![tx_state_change])));
-        let task = create_send_messages_task(
-            connection_state.clone(),
-            rx_state_change,
-            tx_message.sink_map_err(|_| {
-                ProtocolError::IO(Arc::new(io::Error::new(
-                    io::ErrorKind::Other,
-                    "dummy error",
-                )))
-            }),
+impl<S> MessageSenderTask<S>
+where
+    S: Sink<SinkItem = Message, SinkError = ProtocolError>,
+{
+    pub fn new(
+        state: Arc<Mutex<ConnectionState>>,
+        sink: S,
+        rx_outgoing_message: UnboundedReceiver<Message>,
+    ) -> Self {
+        MessageSenderTask {
+            buffered_message: None,
             rx_outgoing_message,
-        );
-
-        // Simulate sending a response.
-
-        let response = Response::builder().build("".into()).unwrap();
-        tx_outgoing_message
-            .unbounded_send(Message::Response(response))
-            .unwrap();
-
-        // Simulate dropping the stream.
-
-        mem::drop(rx_message);
-
-        // Wait for the task to end.
-
-        current_thread::Runtime::new()
-            .unwrap()
-            .block_on(task)
-            .unwrap();
-
-        assert_eq!(
-            lock_state(&connection_state).state(),
-            (
-                ReadState::Response,
-                WriteState::Error(ProtocolError::IO(Arc::new(io::Error::new(
-                    io::ErrorKind::Other,
-                    "dummy error",
-                ))))
-            )
-        );
-    }
-
-    #[test]
-    fn test_send_messages_task_state_change_no_writes() {
-        let dummy_error = ProtocolError::IO(Arc::new(io::Error::new(
-            io::ErrorKind::Other,
-            "dummy error",
-        )));
-
-        for new_write_state in [WriteState::None, WriteState::Error(dummy_error)].iter() {
-            let (tx_state_change, rx_state_change) = unbounded();
-            let (tx_message, _rx_message) = unbounded();
-            let (_tx_outgoing_message, rx_outgoing_message) = unbounded();
-
-            let connection_state =
-                Arc::new(Mutex::new(ConnectionState::new(vec![tx_state_change])));
-
-            {
-                lock_state(&connection_state).update_write_state(new_write_state.clone());
-            }
-
-            let task = create_send_messages_task(
-                connection_state.clone(),
-                rx_state_change,
-                tx_message.sink_map_err(|_| {
-                    ProtocolError::IO(Arc::new(io::Error::new(
-                        io::ErrorKind::Other,
-                        "dummy error",
-                    )))
-                }),
-                rx_outgoing_message,
-            );
-
-            // Wait for the task to end.
-
-            current_thread::Runtime::new()
-                .unwrap()
-                .block_on(task)
-                .unwrap();
-
-            assert_eq!(
-                lock_state(&connection_state).state(),
-                (ReadState::Response, new_write_state.clone())
-            );
+            state,
+            sink,
         }
     }
 
-    #[test]
-    fn test_send_messages_task_stream_ends() {
-        let (tx_state_change, rx_state_change) = unbounded();
-        let (tx_message, _rx_message) = unbounded();
-        let (tx_outgoing_message, rx_outgoing_message) = unbounded();
-
-        let connection_state = Arc::new(Mutex::new(ConnectionState::new(vec![tx_state_change])));
-        let task = create_send_messages_task(
-            connection_state.clone(),
-            rx_state_change,
-            tx_message.sink_map_err(|_| {
-                ProtocolError::IO(Arc::new(io::Error::new(
-                    io::ErrorKind::Other,
-                    "dummy error",
-                )))
-            }),
-            rx_outgoing_message,
-        );
-
-        // Simulate ending the stream.
-
-        mem::drop(tx_outgoing_message);
-
-        // Wait for the task to end.
-
-        current_thread::Runtime::new()
-            .unwrap()
-            .block_on(task)
-            .unwrap();
-
-        assert_eq!(
-            lock_state(&connection_state).state(),
-            (ReadState::Response, WriteState::None)
-        );
+    fn try_send_message(&mut self, message: Message) -> Poll<(), ()> {
+        match self.sink.start_send(message) {
+            Ok(AsyncSink::Ready) => Ok(Async::Ready(())),
+            Ok(AsyncSink::NotReady(message)) => {
+                self.buffered_message = Some(message);
+                Ok(Async::NotReady)
+            }
+            Err(error) => {
+                lock_state(&self.state).update_state(ReadState::Response, WriteState::Error(error));
+                Err(())
+            }
+        }
     }
+}
 
-    #[test]
-    fn test_split_messages_task_forward_request_error() {
-        let (tx_state_change, rx_state_change) = unbounded();
-        let (tx_message, rx_message) = unbounded();
-        let (tx_incoming_request, rx_incoming_request) = channel(DEFAULT_REQUEST_BUFFER_SIZE);
-        let (tx_incoming_response, _rx_incoming_response) = channel(DEFAULT_RESPONSE_BUFFER_SIZE);
-        let (tx_outgoing_message, _rx_outgoing_message) = unbounded();
+impl<S> Future for MessageSenderTask<S>
+where
+    S: Sink<SinkItem = Message, SinkError = ProtocolError>,
+{
+    type Item = ();
+    type Error = ();
 
-        let connection_state = Arc::new(Mutex::new(ConnectionState::new(vec![tx_state_change])));
-        let task = create_split_messages_task(
-            connection_state.clone(),
-            rx_state_change,
-            rx_message.map_err(|_| {
-                ProtocolError::IO(Arc::new(io::Error::new(
-                    io::ErrorKind::Other,
-                    "dummy error",
-                )))
-            }),
-            tx_incoming_request,
-            tx_incoming_response,
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        // Check if we have a buffered message waiting to be sent.
+
+        if let Some(message) = self.buffered_message.take() {
+            match self.try_send_message(message) {
+                Ok(Async::NotReady) => return Ok(Async::NotReady),
+                Err(_) => return Ok(Async::Ready(())),
+                _ => {}
+            }
+        }
+
+        loop {
+            match self
+                .rx_outgoing_message
+                .poll()
+                .expect("outgoing message receiver should not error")
+            {
+                Async::Ready(Some(message)) => match self.try_send_message(message) {
+                    Ok(Async::NotReady) => break,
+                    Err(_) => return Ok(Async::Ready(())),
+                    _ => {}
+                },
+                Async::Ready(None) => {
+                    if let Err(error) = self.sink.close() {
+                        lock_state(&self.state)
+                            .update_state(ReadState::Response, WriteState::Error(error));
+                    } else {
+                        lock_state(&self.state).update_state(ReadState::Response, WriteState::None);
+                    }
+
+                    return Ok(Async::Ready(()));
+                }
+                Async::NotReady => {
+                    if let Err(error) = self.sink.poll_complete() {
+                        lock_state(&self.state)
+                            .update_state(ReadState::Response, WriteState::Error(error));
+                    } else {
+                        break;
+                    }
+                }
+            }
+        }
+
+        Ok(Async::NotReady)
+    }
+}
+
+pub struct RequestHandlerTask<S>
+where
+    S: Service,
+{
+    rx_incoming_request: UnboundedReceiver<Request<BytesMut>>,
+    service: S,
+    serviced_request: Option<S::Future>,
+    state: Arc<Mutex<ConnectionState>>,
+    tx_outgoing_message: UnboundedSender<Message>,
+}
+
+impl<S> RequestHandlerTask<S>
+where
+    S: Service<RequestBody = BytesMut, ResponseBody = BytesMut> + Send + 'static,
+    S::Future: Send + 'static,
+{
+    pub fn new(
+        state: Arc<Mutex<ConnectionState>>,
+        service: S,
+        rx_incoming_request: UnboundedReceiver<Request<BytesMut>>,
+        tx_outgoing_message: UnboundedSender<Message>,
+    ) -> Self {
+        RequestHandlerTask {
+            rx_incoming_request,
+            service,
+            serviced_request: None,
+            state,
             tx_outgoing_message,
-        );
-
-        // Simulate sending a request.
-
-        let request = Request::builder()
-            .method(Method::Options)
-            .uri(URI::Any)
-            .build("".into())
-            .unwrap();
-
-        tx_message
-            .unbounded_send(Ok(Message::Request(request)))
-            .unwrap();
-
-        // Simulate dropping the forwarded request stream.
-
-        mem::drop(rx_incoming_request);
-
-        let mut runtime = Runtime::new().unwrap();
-
-        // Simulate ending the stream, but wait to do it so that the connection state can be checked
-        // after the task has handled a forwarding request error.
-
-        let connection_state_cloned = connection_state.clone();
-
-        runtime.spawn(
-            Delay::new(Instant::now() + Duration::from_millis(100)).then(move |_| {
-                assert_eq!(
-                    lock_state(&connection_state_cloned).state(),
-                    (ReadState::Response, WriteState::All)
-                );
-
-                mem::drop(tx_message);
-                Ok(())
-            }),
-        );
-
-        // Wait for task to end.
-
-        runtime.spawn(task);
-        runtime.shutdown_on_idle().wait().unwrap();
-
-        assert_eq!(
-            lock_state(&connection_state).state(),
-            (ReadState::None, WriteState::Response)
-        );
+        }
     }
+}
 
-    #[test]
-    fn test_split_messages_task_forward_response_error() {
-        let (tx_state_change, rx_state_change) = unbounded();
-        let (tx_message, rx_message) = unbounded();
-        let (tx_incoming_request, _rx_incoming_request) = channel(DEFAULT_REQUEST_BUFFER_SIZE);
-        let (tx_incoming_response, rx_incoming_response) = channel(DEFAULT_RESPONSE_BUFFER_SIZE);
-        let (tx_outgoing_message, _rx_outgoing_message) = unbounded();
+impl<S> Future for RequestHandlerTask<S>
+where
+    S: Service<RequestBody = BytesMut, ResponseBody = BytesMut> + Send + 'static,
+    S::Future: Send + 'static,
+{
+    type Item = ();
+    type Error = ();
 
-        let connection_state = Arc::new(Mutex::new(ConnectionState::new(vec![tx_state_change])));
-        let task = create_split_messages_task(
-            connection_state.clone(),
-            rx_state_change,
-            rx_message.map_err(|_| {
-                ProtocolError::IO(Arc::new(io::Error::new(
-                    io::ErrorKind::Other,
-                    "dummy error",
-                )))
-            }),
-            tx_incoming_request,
-            tx_incoming_response,
-            tx_outgoing_message,
-        );
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        loop {
+            if let Some(ref mut serviced_request) = self.serviced_request {
+                let response = match serviced_request.poll() {
+                    Ok(Async::Ready(response)) => response,
+                    Ok(Async::NotReady) => return Ok(Async::NotReady),
+                    Err(_) => Response::builder()
+                        .status_code(StatusCode::InternalServerError)
+                        .build(BytesMut::new())
+                        .expect("internal server error response should not be invalid"),
+                };
 
-        // Simulate sending a response.
+                if let Err(_) = self
+                    .tx_outgoing_message
+                    .unbounded_send(Message::Response(response))
+                {
+                    lock_state(&self.state).update_state(ReadState::Response, WriteState::Request);
+                    return Ok(Async::Ready(()));
+                }
+            }
 
-        let response = Response::builder().build("".into()).unwrap();
-        tx_message
-            .unbounded_send(Ok(Message::Response(response)))
-            .unwrap();
-
-        // Simulate dropping the forwarded responses stream.
-
-        mem::drop(rx_incoming_response);
-
-        let mut runtime = Runtime::new().unwrap();
-
-        // Simulate ending the stream, but wait to do it so that the connection state can be checked
-        // after the task has handled a forwarding request error.
-
-        let connection_state_cloned = connection_state.clone();
-
-        runtime.spawn(
-            Delay::new(Instant::now() + Duration::from_millis(100)).then(move |_| {
-                assert_eq!(
-                    lock_state(&connection_state_cloned).state(),
-                    (ReadState::Request, WriteState::Response)
-                );
-
-                mem::drop(tx_message);
-                Ok(())
-            }),
-        );
-
-        // Wait for task to end.
-
-        runtime.spawn(task);
-        runtime.shutdown_on_idle().wait().unwrap();
-
-        assert_eq!(
-            lock_state(&connection_state).state(),
-            (ReadState::None, WriteState::Response)
-        );
+            match self
+                .rx_incoming_request
+                .poll()
+                .expect("incoming request receiver should not error")
+            {
+                Async::Ready(Some(request)) => {
+                    self.serviced_request = Some(self.service.call(request));
+                }
+                Async::Ready(None) => {
+                    lock_state(&self.state).update_state(ReadState::Response, WriteState::Request);
+                    return Ok(Async::Ready(()));
+                }
+                Async::NotReady => return Ok(Async::NotReady),
+            }
+        }
     }
+}
 
-    #[test]
-    fn test_split_messages_task_forward_success() {
-        let (tx_state_change, rx_state_change) = unbounded();
-        let (tx_message, rx_message) = unbounded();
-        let (tx_incoming_request, rx_incoming_request) = channel(DEFAULT_REQUEST_BUFFER_SIZE);
-        let (tx_incoming_response, rx_incoming_response) = channel(DEFAULT_RESPONSE_BUFFER_SIZE);
-        let (tx_outgoing_message, _rx_outgoing_message) = unbounded();
+pub struct SendRequestFuture {
+    max_timer: Option<Delay>,
+    rx_response: oneshot::Receiver<PendingRequestResponse>,
+    sequence_number: CSeq,
+    timeout_duration: Option<Duration>,
+    timer: Option<Delay>,
+    tx_pending_request: UnboundedSender<PendingRequestUpdate>,
+}
 
-        let connection_state = Arc::new(Mutex::new(ConnectionState::new(vec![tx_state_change])));
-        let task = create_split_messages_task(
-            connection_state.clone(),
-            rx_state_change,
-            rx_message.map_err(|_| {
-                ProtocolError::IO(Arc::new(io::Error::new(
-                    io::ErrorKind::Other,
-                    "dummy error",
-                )))
-            }),
-            tx_incoming_request,
-            tx_incoming_response,
-            tx_outgoing_message,
-        );
+impl SendRequestFuture {
+    pub(self) fn new(
+        rx_response: oneshot::Receiver<PendingRequestResponse>,
+        tx_pending_request: UnboundedSender<PendingRequestUpdate>,
+        sequence_number: CSeq,
+        timeout_duration: Option<Duration>,
+        max_timeout_duration: Option<Duration>,
+    ) -> Self {
+        let max_timer = max_timeout_duration.map(|duration| Delay::new(Instant::now() + duration));
+        let timer = timeout_duration.map(|duration| Delay::new(Instant::now() + duration));
 
-        // Simulate sending a request and response.
-
-        let request = Request::builder()
-            .method(Method::Options)
-            .uri(URI::Any)
-            .build("".into())
-            .unwrap();
-
-        tx_message
-            .unbounded_send(Ok(Message::Request(request.clone())))
-            .unwrap();
-
-        let response = Response::builder().build("".into()).unwrap();
-        tx_message
-            .unbounded_send(Ok(Message::Response(response.clone())))
-            .unwrap();
-
-        // Simulate ending the stream.
-
-        mem::drop(tx_message);
-
-        // Wait for task to end.
-
-        let mut runtime = current_thread::Runtime::new().unwrap();
-
-        runtime.block_on(task).unwrap();
-        let incoming_requests = runtime.block_on(rx_incoming_request.collect()).unwrap();
-        let incoming_responses = runtime.block_on(rx_incoming_response.collect()).unwrap();
-
-        assert_eq!(
-            lock_state(&connection_state).state(),
-            (ReadState::None, WriteState::Response)
-        );
-        assert_eq!(incoming_requests, vec![request]);
-        assert_eq!(incoming_responses, vec![response]);
+        SendRequestFuture {
+            max_timer,
+            rx_response,
+            sequence_number,
+            timer,
+            timeout_duration,
+            tx_pending_request,
+        }
     }
+}
 
-    #[test]
-    fn test_split_messages_task_invalid_request_responses_not_allowed() {
-        let (tx_state_change, rx_state_change) = unbounded();
-        let (tx_message, rx_message) = unbounded();
-        let (tx_incoming_request, _rx_incoming_request) = channel(DEFAULT_REQUEST_BUFFER_SIZE);
-        let (tx_incoming_response, _rx_incoming_response) = channel(DEFAULT_RESPONSE_BUFFER_SIZE);
-        let (tx_outgoing_message, rx_outgoing_message) = unbounded();
+impl Future for SendRequestFuture {
+    type Item = Response<BytesMut>;
+    type Error = OperationError;
 
-        let connection_state = Arc::new(Mutex::new(ConnectionState::new(vec![tx_state_change])));
-
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        if let Async::Ready(response) = self
+            .rx_response
+            .poll()
+            .expect("pending request response receiver should not error")
         {
-            lock_state(&connection_state).update_write_state(WriteState::None);
-        }
-
-        let task = create_split_messages_task(
-            connection_state.clone(),
-            rx_state_change,
-            rx_message.map_err(|_| {
-                ProtocolError::IO(Arc::new(io::Error::new(
-                    io::ErrorKind::Other,
-                    "dummy error",
-                )))
-            }),
-            tx_incoming_request,
-            tx_incoming_response,
-            tx_outgoing_message,
-        );
-
-        // Simulate sending an invalid request.
-
-        tx_message
-            .unbounded_send(Err(InvalidMessage::InvalidRequest(
-                RecoverableInvalidRequest::InvalidURI,
-            )))
-            .unwrap();
-
-        // Simulate ending the stream.
-
-        mem::drop(tx_message);
-
-        // Wait for task to end.
-
-        let mut runtime = current_thread::Runtime::new().unwrap();
-
-        runtime.block_on(task).unwrap();
-        let outgoing_messages = runtime.block_on(rx_outgoing_message.collect()).unwrap();
-
-        assert_eq!(
-            lock_state(&connection_state).state(),
-            (ReadState::None, WriteState::None)
-        );
-        assert_eq!(outgoing_messages, vec![]);
-    }
-
-    #[test]
-    fn test_split_messages_task_invalid_request_responses_allowed() {
-        let (tx_state_change, rx_state_change) = unbounded();
-        let (tx_message, rx_message) = unbounded();
-        let (tx_incoming_request, _rx_incoming_request) = channel(DEFAULT_REQUEST_BUFFER_SIZE);
-        let (tx_incoming_response, _rx_incoming_response) = channel(DEFAULT_RESPONSE_BUFFER_SIZE);
-        let (tx_outgoing_message, rx_outgoing_message) = unbounded();
-
-        let connection_state = Arc::new(Mutex::new(ConnectionState::new(vec![tx_state_change])));
-        let task = create_split_messages_task(
-            connection_state.clone(),
-            rx_state_change,
-            rx_message.map_err(|_| {
-                ProtocolError::IO(Arc::new(io::Error::new(
-                    io::ErrorKind::Other,
-                    "dummy error",
-                )))
-            }),
-            tx_incoming_request,
-            tx_incoming_response,
-            tx_outgoing_message,
-        );
-
-        // Simulate sending an invalid request.
-
-        tx_message
-            .unbounded_send(Err(InvalidMessage::InvalidRequest(
-                RecoverableInvalidRequest::InvalidURI,
-            )))
-            .unwrap();
-
-        // Simulate ending the stream.
-
-        mem::drop(tx_message);
-
-        // Wait for task to end.
-
-        let mut runtime = current_thread::Runtime::new().unwrap();
-
-        runtime.block_on(task).unwrap();
-        let outgoing_messages = runtime.block_on(rx_outgoing_message.collect()).unwrap();
-
-        assert_eq!(
-            lock_state(&connection_state).state(),
-            (ReadState::None, WriteState::Response)
-        );
-
-        let expected_message = Message::Response(
-            Response::builder()
-                .status_code(StatusCode::BadRequest)
-                .build("".into())
-                .unwrap(),
-        );
-
-        assert_eq!(outgoing_messages, vec![expected_message]);
-    }
-
-    #[test]
-    fn test_split_messages_task_state_change_no_reads() {
-        let dummy_error = ProtocolError::IO(Arc::new(io::Error::new(
-            io::ErrorKind::Other,
-            "dummy error",
-        )));
-
-        for new_read_state in [ReadState::None, ReadState::Error(dummy_error)].iter() {
-            let (tx_state_change, rx_state_change) = unbounded();
-            let (_tx_message, rx_message) = unbounded();
-            let (tx_incoming_request, _rx_incoming_request) = channel(DEFAULT_REQUEST_BUFFER_SIZE);
-            let (tx_incoming_response, _rx_incoming_response) =
-                channel(DEFAULT_RESPONSE_BUFFER_SIZE);
-            let (tx_outgoing_message, _rx_outgoing_message) = unbounded();
-
-            let connection_state =
-                Arc::new(Mutex::new(ConnectionState::new(vec![tx_state_change])));
-
-            {
-                lock_state(&connection_state).update_read_state(new_read_state.clone());
-            }
-
-            let task = create_split_messages_task(
-                connection_state.clone(),
-                rx_state_change,
-                rx_message.map_err(|_| {
-                    ProtocolError::IO(Arc::new(io::Error::new(
-                        io::ErrorKind::Other,
-                        "dummy error",
-                    )))
-                }),
-                tx_incoming_request,
-                tx_incoming_response,
-                tx_outgoing_message,
-            );
-
-            // Wait for task to end.
-
-            current_thread::Runtime::new()
-                .unwrap()
-                .block_on(task)
-                .unwrap();
-
-            assert_eq!(
-                lock_state(&connection_state).state(),
-                (new_read_state.clone(), WriteState::Response)
-            );
-        }
-    }
-
-    #[test]
-    fn test_split_messages_task_state_change_no_requests() {
-        let dummy_error = ProtocolError::IO(Arc::new(io::Error::new(
-            io::ErrorKind::Other,
-            "dummy error",
-        )));
-
-        let mut new_states = [
-            (Some(ReadState::Response), None),
-            (None, Some(WriteState::None)),
-            (None, Some(WriteState::Error(dummy_error))),
-            (None, Some(WriteState::Request)),
-        ];
-
-        for new_state in new_states.iter_mut() {
-            let (tx_state_change, rx_state_change) = unbounded();
-            let (tx_message, rx_message) = unbounded();
-            let (tx_incoming_request, rx_incoming_request) = channel(DEFAULT_REQUEST_BUFFER_SIZE);
-            let (tx_incoming_response, _) = channel(DEFAULT_RESPONSE_BUFFER_SIZE);
-            let (tx_outgoing_message, _) = unbounded();
-
-            let connection_state =
-                Arc::new(Mutex::new(ConnectionState::new(vec![tx_state_change])));
-            let mut write_state = new_state.1.clone();
-
-            {
-                if let Some(new_read_state) = new_state.0.take() {
-                    lock_state(&connection_state).update_read_state(new_read_state);
+            match response {
+                PendingRequestResponse::Continue(rx_response) => {
+                    self.rx_response = rx_response;
+                    self.timer = self
+                        .timeout_duration
+                        .map(|duration| Delay::new(Instant::now() + duration));;
                 }
-
-                if let Some(new_write_state) = new_state.1.take() {
-                    lock_state(&connection_state).update_write_state(new_write_state);
+                PendingRequestResponse::None => {
+                    self.rx_response.close();
+                    return Err(OperationError::RequestCancelled);
+                }
+                PendingRequestResponse::Response(response) => {
+                    self.rx_response.close();
+                    return Ok(Async::Ready(response));
                 }
             }
+        }
 
-            let task = create_split_messages_task(
-                connection_state.clone(),
-                rx_state_change,
-                rx_message.map_err(|_| {
-                    ProtocolError::IO(Arc::new(io::Error::new(
-                        io::ErrorKind::Other,
-                        "dummy error",
-                    )))
-                }),
-                tx_incoming_request,
-                tx_incoming_response,
-                tx_outgoing_message,
-            );
+        if let Some(timer) = self.max_timer.as_mut() {
+            if let Async::Ready(_) = timer.poll().expect("max timer should not error") {
+                self.tx_pending_request
+                    .unbounded_send(PendingRequestUpdate::RemovePendingRequest(
+                        self.sequence_number,
+                    ))
+                    .ok();
+                self.rx_response.close();
+                return Err(OperationError::RequestTimedOut(RequestTimeoutType::Long));
+            }
+        }
 
-            let mut runtime = Runtime::new().unwrap();
+        if let Some(timer) = self.timer.as_mut() {
+            if let Async::Ready(_) = timer.poll().expect("timer should not error") {
+                self.tx_pending_request
+                    .unbounded_send(PendingRequestUpdate::RemovePendingRequest(
+                        self.sequence_number,
+                    ))
+                    .ok();
+                self.rx_response.close();
+                return Err(OperationError::RequestTimedOut(RequestTimeoutType::Short));
+            }
+        }
 
-            // Simulate sending a request but wait to do it so that the connection state change can
-            // be handled first.
+        Ok(Async::NotReady)
+    }
+}
 
-            runtime.spawn(
-                Delay::new(Instant::now() + Duration::from_millis(100)).then(move |_| {
-                    let request = Request::builder()
-                        .method(Method::Options)
-                        .uri(URI::Any)
-                        .build("".into())
-                        .unwrap();
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+enum ShutdownStatus {
+    Running,
+    Shutdown,
+    ShuttingDown,
+}
 
-                    tx_message
-                        .unbounded_send(Ok(Message::Request(request)))
-                        .unwrap();
-                    Ok(())
-                }),
-            );
+struct ShutdownTask {
+    rx_shutdown: oneshot::Receiver<ShutdownType>,
+    rx_state_change: Fuse<UnboundedReceiver<ReadWriteStatePair>>,
+    shutdown_future: Box<Future<Item = ShutdownType, Error = ()> + Send + 'static>,
+    shutdown_timer: Option<Delay>,
+    state: Arc<Mutex<ConnectionState>>,
+    status: ShutdownStatus,
+}
 
-            // Wait for task to end.
+impl ShutdownTask {
+    pub fn new(
+        state: Arc<Mutex<ConnectionState>>,
+        shutdown_future: Box<Future<Item = ShutdownType, Error = ()> + Send + 'static>,
+        rx_shutdown: oneshot::Receiver<ShutdownType>,
+    ) -> Self {
+        let rx_state_change = lock_state(&state).add_listener().fuse();
 
-            runtime.spawn(task);
-            runtime.shutdown_on_idle().wait().unwrap();
+        ShutdownTask {
+            rx_shutdown,
+            rx_state_change,
+            shutdown_future,
+            shutdown_timer: None,
+            state,
+            status: ShutdownStatus::Running,
+        }
+    }
 
-            let incoming_requests = current_thread::Runtime::new()
-                .unwrap()
-                .block_on(rx_incoming_request.collect())
-                .unwrap();
+    fn handle_state_change(&mut self, new_state: ReadWriteStatePair) -> bool {
+        (new_state.0.is_none() || new_state.0.is_error())
+            && (new_state.1.is_none() || new_state.1.is_error())
+    }
 
-            let expected_write_state = if let Some(new_write_state) = write_state.take() {
-                if new_write_state.is_request() {
-                    WriteState::None
-                } else {
-                    new_write_state
+    fn shutdown(&mut self, shutdown_type: ShutdownType) {
+        match shutdown_type {
+            ShutdownType::Hard => {
+                self.status = ShutdownStatus::Shutdown;
+                self.rx_shutdown.close();
+                lock_state(&self.state).update_state(ReadState::None, WriteState::None);
+            }
+            ShutdownType::Soft(duration) => {
+                let expire_time = Instant::now() + duration;
+                self.shutdown_timer = Some(Delay::new(expire_time));
+                self.status = ShutdownStatus::ShuttingDown;
+                self.rx_shutdown.close();
+                lock_state(&self.state).update_state(ReadState::Response, WriteState::Response);
+            }
+        }
+    }
+}
+
+impl Future for ShutdownTask {
+    type Item = ();
+    type Error = ();
+
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        loop {
+            match self.status {
+                ShutdownStatus::Running => {
+                    // Check if the shutdown future has fired.
+
+                    match self.shutdown_future.poll() {
+                        Ok(Async::Ready(shutdown_type)) => self.shutdown(shutdown_type),
+                        Err(_) => self.shutdown(ShutdownType::Hard),
+                        _ => {}
+                    }
+
+                    // Check if the shutdown receiver has received a signal.
+
+                    if let Async::Ready(shutdown_type) = self
+                        .rx_shutdown
+                        .poll()
+                        .expect("shutdown receiver should not error")
+                    {
+                        self.shutdown(shutdown_type);
+                    }
+
+                    if self.status == ShutdownStatus::Running {
+                        break;
+                    }
                 }
-            } else {
-                WriteState::Response
-            };
+                ShutdownStatus::ShuttingDown => {
+                    // Handle state changes.
 
-            assert_eq!(
-                lock_state(&connection_state).state(),
-                (ReadState::None, expected_write_state)
-            );
-            assert!(incoming_requests.is_empty());
+                    while let Async::Ready(Some(new_state)) = self
+                        .rx_state_change
+                        .poll()
+                        .expect("state change receiver should not error")
+                    {
+                        if self.handle_state_change(new_state) {
+                            self.status = ShutdownStatus::Shutdown;
+                        }
+                    }
+
+                    if let Async::Ready(_) = self
+                        .shutdown_timer
+                        .as_mut()
+                        .expect("timer should exist during shutdown")
+                        .poll()
+                        .expect("shutdown timer should not error")
+                    {
+                        lock_state(&self.state).update_state(ReadState::None, WriteState::None);
+                        self.status = ShutdownStatus::Shutdown;
+                    }
+
+                    if self.status == ShutdownStatus::ShuttingDown {
+                        break;
+                    }
+                }
+                ShutdownStatus::Shutdown => {
+                    if !self.rx_state_change.is_done() {
+                        self.rx_state_change.get_mut().close();
+                    }
+
+                    return Ok(Async::Ready(()));
+                }
+            }
         }
+
+        Ok(Async::NotReady)
     }
+}
 
-    #[test]
-    fn test_split_messages_task_state_change_no_responses() {
-        let (tx_state_change, rx_state_change) = unbounded();
-        let (tx_message, rx_message) = unbounded();
-        let (tx_incoming_request, _rx_incoming_request) = channel(DEFAULT_REQUEST_BUFFER_SIZE);
-        let (tx_incoming_response, rx_incoming_response) = channel(DEFAULT_RESPONSE_BUFFER_SIZE);
-        let (tx_outgoing_message, _rx_outgoing_message) = unbounded();
-
-        let connection_state = Arc::new(Mutex::new(ConnectionState::new(vec![tx_state_change])));
-
-        {
-            lock_state(&connection_state).update_read_state(ReadState::Request);
-        }
-
-        let task = create_split_messages_task(
-            connection_state.clone(),
-            rx_state_change,
-            rx_message.map_err(|_| {
-                ProtocolError::IO(Arc::new(io::Error::new(
-                    io::ErrorKind::Other,
-                    "dummy error",
-                )))
-            }),
-            tx_incoming_request,
-            tx_incoming_response,
-            tx_outgoing_message,
-        );
-
-        let mut runtime = Runtime::new().unwrap();
-
-        // Simulate sending a response but wait to do it so that the connection state change can be
-        // handled first.
-
-        let connection_state_cloned = connection_state.clone();
-
-        runtime.spawn(
-            Delay::new(Instant::now() + Duration::from_millis(100)).then(move |_| {
-                assert_eq!(
-                    lock_state(&connection_state_cloned).state(),
-                    (ReadState::Request, WriteState::Response)
-                );
-
-                let response = Response::builder().build("".into()).unwrap();
-                tx_message
-                    .unbounded_send(Ok(Message::Response(response)))
-                    .unwrap();
-                Ok(())
-            }),
-        );
-
-        // Wait for task to end.
-
-        runtime.spawn(task);
-        runtime.shutdown_on_idle().wait().unwrap();
-
-        let incoming_responses = current_thread::Runtime::new()
-            .unwrap()
-            .block_on(rx_incoming_response.collect())
-            .unwrap();
-
-        assert_eq!(
-            lock_state(&connection_state).state(),
-            (ReadState::None, WriteState::Response)
-        );
-        assert!(incoming_responses.is_empty());
-    }
-
-    #[test]
-    fn test_split_messages_task_stream_ends() {
-        let (tx_state_change, rx_state_change) = unbounded();
-        let (tx_message, rx_message) = unbounded();
-        let (tx_incoming_request, _rx_incoming_request) = channel(DEFAULT_REQUEST_BUFFER_SIZE);
-        let (tx_incoming_response, _rx_incoming_response) = channel(DEFAULT_RESPONSE_BUFFER_SIZE);
-        let (tx_outgoing_message, _rx_outgoing_message) = unbounded();
-
-        let connection_state = Arc::new(Mutex::new(ConnectionState::new(vec![tx_state_change])));
-        let task = create_split_messages_task(
-            connection_state.clone(),
-            rx_state_change,
-            rx_message.map_err(|_| {
-                ProtocolError::IO(Arc::new(io::Error::new(
-                    io::ErrorKind::Other,
-                    "dummy error",
-                )))
-            }),
-            tx_incoming_request,
-            tx_incoming_response,
-            tx_outgoing_message,
-        );
-
-        // Simulate ending the stream.
-
-        mem::drop(tx_message);
-
-        // Wait for task to end.
-
-        current_thread::Runtime::new()
-            .unwrap()
-            .block_on(task)
-            .unwrap();
-
-        assert_eq!(
-            lock_state(&connection_state).state(),
-            (ReadState::None, WriteState::Response)
-        );
-    }
-
-    #[test]
-    fn test_split_messages_task_stream_error() {
-        let (tx_state_change, rx_state_change) = unbounded();
-        let (tx_message, rx_message) = unbounded();
-        let (tx_incoming_request, _rx_incoming_request) = channel(DEFAULT_REQUEST_BUFFER_SIZE);
-        let (tx_incoming_response, _rx_incoming_response) = channel(DEFAULT_RESPONSE_BUFFER_SIZE);
-        let (tx_outgoing_message, _rx_outgoing_message) = unbounded();
-
-        let connection_state = Arc::new(Mutex::new(ConnectionState::new(vec![tx_state_change])));
-        let task = create_split_messages_task(
-            connection_state.clone(),
-            rx_state_change,
-            rx_message.then(|_: Result<Result<Message, InvalidMessage>, ()>| {
-                Err(ProtocolError::IO(Arc::new(io::Error::new(
-                    io::ErrorKind::Other,
-                    "dummy error",
-                ))))
-            }),
-            tx_incoming_request,
-            tx_incoming_response,
-            tx_outgoing_message,
-        );
-
-        // Simulate sending an error. Since we cannot actually send an error, we send whatever here
-        // and use the `then` combinator to force an error.
-
-        let message = Message::Response(Response::builder().build("".into()).unwrap());
-        tx_message.unbounded_send(Ok(message)).unwrap();
-
-        // Wait for the task to end.
-
-        current_thread::Runtime::new()
-            .unwrap()
-            .block_on(task)
-            .unwrap();
-
-        assert_eq!(
-            lock_state(&connection_state).state(),
-            (
-                ReadState::Error(ProtocolError::IO(Arc::new(io::Error::new(
-                    io::ErrorKind::Other,
-                    "dummy error",
-                )))),
-                WriteState::Response
-            )
-        );
-    }
+fn lock_state(state: &Arc<Mutex<ConnectionState>>) -> MutexGuard<ConnectionState> {
+    state.lock().expect("acquiring state lock should not fail")
 }

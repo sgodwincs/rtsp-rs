@@ -287,6 +287,9 @@ where
     }
 }
 
+/// Alias for a request using typed headers.
+pub type TypedRequest<B> = Request<B, TypedHeaderMap>;
+
 /// An RTSP request builder
 ///
 /// This type can be used to construct a `Request` through a builder-like pattern.

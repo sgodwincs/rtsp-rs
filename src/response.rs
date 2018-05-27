@@ -172,6 +172,9 @@ where
     }
 }
 
+/// Alias for a request using typed headers.
+pub type TypedResponse<B> = Response<B, TypedHeaderMap>;
+
 /// An RTSP response builder
 ///
 /// This type can be used to construct a `Response` through a builder-like pattern.
