@@ -22,13 +22,12 @@ use tokio_timer::Delay;
 struct DummyService;
 
 impl Service for DummyService {
-    type RequestBody = BytesMut;
-    type ResponseBody = BytesMut;
+    type Request = Request<BytesMut>;
+    type Response = Response<BytesMut>;
     type Error = io::Error;
-    type Future =
-        Box<Future<Item = Response<Self::ResponseBody>, Error = Self::Error> + Send + 'static>;
+    type Future = Box<Future<Item = Self::Response, Error = Self::Error> + Send + 'static>;
 
-    fn call(&mut self, request: Request<Self::RequestBody>) -> Self::Future {
+    fn call(&mut self, request: Self::Request) -> Self::Future {
         let response = Response::builder()
             .header(
                 HeaderName::CSeq,
