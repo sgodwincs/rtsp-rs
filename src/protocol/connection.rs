@@ -15,7 +15,7 @@ use tokio_io::{AsyncRead, AsyncWrite};
 use tokio_timer::{Delay, Error as TimerError};
 
 use header::types::CSeq;
-use header::{HeaderName, HeaderValue, TypedHeader};
+use header::{HeaderMap, HeaderName, HeaderValue, TypedHeader};
 use protocol::{
     Codec, CodecEvent, DecodeError, InvalidMessage, IrrecoverableInvalidRequest,
     IrrecoverableInvalidResponse, Message, MessageResult, OperationError, ProtocolError,
@@ -48,8 +48,9 @@ impl Connection {
     pub fn new<IO, S>(io: IO, service: Option<S>) -> Result<Self, SpawnError>
     where
         IO: AsyncRead + AsyncWrite + Send + 'static,
-        S: Service<RequestBody = BytesMut, ResponseBody = BytesMut> + Send + 'static,
+        S: Service<Request = Request<BytesMut>> + Send + 'static,
         S::Future: Send + 'static,
+        S::Response: Into<Response<BytesMut, HeaderMap>>,
     {
         Connection::with_config(io, service, Config::default())
     }
@@ -61,8 +62,9 @@ impl Connection {
     ) -> Result<Self, SpawnError>
     where
         IO: AsyncRead + AsyncWrite + Send + 'static,
-        S: Service<RequestBody = BytesMut, ResponseBody = BytesMut> + Send + 'static,
+        S: Service<Request = Request<BytesMut>> + Send + 'static,
         S::Future: Send + 'static,
+        S::Response: Into<Response<BytesMut, HeaderMap>>,
     {
         // Create all channels needed for communication from task to task and from connection to
         // task.
@@ -1433,8 +1435,9 @@ where
 
 impl<S> RequestHandlerTask<S>
 where
-    S: Service<RequestBody = BytesMut, ResponseBody = BytesMut> + Send + 'static,
+    S: Service<Request = Request<BytesMut>> + Send + 'static,
     S::Future: Send + 'static,
+    S::Response: Into<Response<BytesMut, HeaderMap>>,
 {
     pub fn new(
         state: Arc<Mutex<ConnectionState>>,
@@ -1454,8 +1457,9 @@ where
 
 impl<S> Future for RequestHandlerTask<S>
 where
-    S: Service<RequestBody = BytesMut, ResponseBody = BytesMut> + Send + 'static,
+    S: Service<Request = Request<BytesMut>> + Send + 'static,
     S::Future: Send + 'static,
+    S::Response: Into<Response<BytesMut, HeaderMap>>,
 {
     type Item = ();
     type Error = ();
@@ -1464,7 +1468,7 @@ where
         loop {
             if let Some(ref mut serviced_request) = self.serviced_request {
                 let response = match serviced_request.poll() {
-                    Ok(Async::Ready(response)) => response,
+                    Ok(Async::Ready(response)) => response.into(),
                     Ok(Async::NotReady) => return Ok(Async::NotReady),
                     Err(_) => Response::builder()
                         .status_code(StatusCode::InternalServerError)
