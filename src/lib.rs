@@ -13,6 +13,7 @@ extern crate regex;
 extern crate tokio;
 extern crate tokio_executor;
 extern crate tokio_io;
+extern crate tokio_tcp;
 extern crate tokio_timer;
 extern crate url;
 
@@ -32,6 +33,7 @@ pub mod version;
 
 pub use header::{HeaderMap, HeaderName, HeaderValue, TypedHeader, TypedHeaderMap};
 pub use method::Method;
+pub use protocol::Service;
 pub use reason::ReasonPhrase;
 pub use request::Request;
 pub use response::Response;
