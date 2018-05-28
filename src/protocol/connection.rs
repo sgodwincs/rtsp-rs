@@ -38,6 +38,7 @@ pub const DEFAULT_SOFT_SHUTDOWN_TIMEOUT_DURATION: Duration = Duration::from_secs
 pub struct Connection {
     request_default_max_timeout_duration: Option<Duration>,
     request_default_timeout_duration: Option<Duration>,
+    soft_shutdown_default_timeout_duration: Duration,
     state: Arc<Mutex<ConnectionState>>,
 }
 
@@ -77,6 +78,7 @@ impl Connection {
             tx_pending_request,
             tx_outgoing_message.clone(),
             tx_shutdown,
+            config.soft_shutdown_default_timeout_duration,
         )));
         let (sink, stream) = io.framed(Codec::with_events(tx_codec_event)).split();
 
@@ -126,6 +128,7 @@ impl Connection {
         Ok(Connection {
             request_default_max_timeout_duration: config.request_default_max_timeout_duration,
             request_default_timeout_duration: config.request_default_timeout_duration,
+            soft_shutdown_default_timeout_duration: config.soft_shutdown_default_timeout_duration,
             state: state,
         })
     }
@@ -188,7 +191,8 @@ impl Drop for Connection {
     fn drop(&mut self) {
         // Connection is being dropped, start a soft shutdown.
 
-        self.shutdown(ShutdownType::Soft(DEFAULT_SOFT_SHUTDOWN_TIMEOUT_DURATION));
+        let duration = self.soft_shutdown_default_timeout_duration;
+        self.shutdown(ShutdownType::Soft(duration));
     }
 }
 
@@ -199,6 +203,7 @@ pub struct Config {
     pub(crate) request_default_timeout_duration: Option<Duration>,
     pub(crate) shutdown_future:
         Option<Box<Future<Item = ShutdownType, Error = ()> + Send + 'static>>,
+    pub(crate) soft_shutdown_default_timeout_duration: Duration,
 }
 
 impl Config {
@@ -225,6 +230,10 @@ impl Config {
     pub fn request_default_timeout_duration(&self) -> Option<Duration> {
         self.request_default_timeout_duration
     }
+
+    pub fn soft_shutdown_default_timeout_duration(&self) -> Duration {
+        self.soft_shutdown_default_timeout_duration
+    }
 }
 
 impl Default for Config {
@@ -241,6 +250,7 @@ pub struct ConfigBuilder {
     request_default_max_timeout_duration: Option<Duration>,
     request_default_timeout_duration: Option<Duration>,
     shutdown_future: Box<Future<Item = ShutdownType, Error = ()> + Send + 'static>,
+    soft_shutdown_default_timeout_duration: Duration,
 }
 
 impl ConfigBuilder {
@@ -275,6 +285,7 @@ impl ConfigBuilder {
             request_default_max_timeout_duration: self.request_default_max_timeout_duration,
             request_default_timeout_duration: self.request_default_timeout_duration,
             shutdown_future: Some(self.shutdown_future),
+            soft_shutdown_default_timeout_duration: self.soft_shutdown_default_timeout_duration,
         })
     }
 
@@ -308,6 +319,11 @@ impl ConfigBuilder {
         self.shutdown_future = Box::new(future);
         self
     }
+
+    pub fn soft_shutdown_default_timeout_duration(&mut self, duration: Duration) -> &mut Self {
+        self.soft_shutdown_default_timeout_duration = duration;
+        self
+    }
 }
 
 impl Default for ConfigBuilder {
@@ -318,6 +334,7 @@ impl Default for ConfigBuilder {
             request_default_max_timeout_duration: Some(DEFAULT_REQUEST_MAX_TIMEOUT_DURATION),
             request_default_timeout_duration: Some(DEFAULT_REQUEST_TIMEOUT_DURATION),
             shutdown_future: Box::new(future::empty()),
+            soft_shutdown_default_timeout_duration: DEFAULT_SOFT_SHUTDOWN_TIMEOUT_DURATION,
         }
     }
 }
@@ -594,6 +611,7 @@ pub type ReadWriteStatePair = (ReadState, WriteState);
 struct ConnectionState {
     read_state: ReadState,
     sequence_number: CSeq,
+    soft_shutdown_default_timeout_duration: Duration,
     state_changes: Vec<UnboundedSender<ReadWriteStatePair>>,
     tx_outgoing_message: Option<UnboundedSender<Message>>,
     tx_pending_request: Option<UnboundedSender<PendingRequestUpdate>>,
@@ -606,10 +624,12 @@ impl ConnectionState {
         tx_pending_request: UnboundedSender<PendingRequestUpdate>,
         tx_outgoing_message: UnboundedSender<Message>,
         tx_shutdown: oneshot::Sender<ShutdownType>,
+        soft_shutdown_default_timeout_duration: Duration,
     ) -> Self {
         ConnectionState {
             read_state: ReadState::All,
             sequence_number: CSeq::try_from(0).expect("sequence number `0` should not be invalid"),
+            soft_shutdown_default_timeout_duration,
             state_changes: vec![],
             tx_outgoing_message: Some(tx_outgoing_message),
             tx_pending_request: Some(tx_pending_request),
@@ -673,7 +693,8 @@ impl ConnectionState {
                 || self.write_state.is_response();
 
             if read_state_shutdown && write_state_shutdown {
-                self.shutdown(ShutdownType::Soft(DEFAULT_SOFT_SHUTDOWN_TIMEOUT_DURATION));
+                let duration = self.soft_shutdown_default_timeout_duration;
+                self.shutdown(ShutdownType::Soft(duration));
             }
         }
     }
