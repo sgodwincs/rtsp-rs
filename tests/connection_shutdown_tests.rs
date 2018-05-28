@@ -316,7 +316,7 @@ fn test_connection_shutdown_forced_soft_with_no_service_and_requests() {
         tokio::spawn(timer.then(|_| {
             connection.shutdown(ShutdownType::Soft(DEFAULT_SOFT_SHUTDOWN_TIMEOUT_DURATION));
             Delay::new(Instant::now() + Duration::from_millis(500)).then(move |_| {
-                assert_eq!(connection.state(), (ReadState::None, WriteState::None));
+                assert!(connection.is_shutdown());
                 Ok(())
             })
         }));
@@ -363,7 +363,7 @@ fn test_connection_shutdown_forced_soft_with_service_and_requests() {
         tokio::spawn(timer.then(|_| {
             connection.shutdown(ShutdownType::Soft(DEFAULT_SOFT_SHUTDOWN_TIMEOUT_DURATION));
             Delay::new(Instant::now() + Duration::from_millis(500)).then(|_| {
-                assert_eq!(connection.state(), (ReadState::None, WriteState::None));
+                assert!(connection.is_shutdown());
                 mem::drop(connection);
                 Ok(())
             })

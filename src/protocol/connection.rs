@@ -1,7 +1,9 @@
 use bytes::BytesMut;
 use futures::future::{self, Either};
 use futures::stream::Fuse;
-use futures::sync::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
+use futures::sync::mpsc::{
+    channel, unbounded, Receiver, Sender, UnboundedReceiver, UnboundedSender,
+};
 use futures::sync::oneshot;
 use futures::{Async, AsyncSink, Future, Poll, Sink, Stream};
 use std::collections::HashMap;
@@ -30,18 +32,13 @@ pub const DEFAULT_DECODE_TIMEOUT_DURATION: Duration = Duration::from_secs(10);
 pub const DEFAULT_REQUEST_BUFFER_SIZE: usize = 10;
 pub const DEFAULT_REQUEST_MAX_TIMEOUT_DURATION: Duration = Duration::from_secs(10);
 pub const DEFAULT_REQUEST_TIMEOUT_DURATION: Duration = Duration::from_secs(5);
-pub const DEFAULT_RESPONSE_BUFFER_SIZE: usize = 10;
 pub const DEFAULT_SOFT_SHUTDOWN_TIMEOUT_DURATION: Duration = Duration::from_secs(10);
 
 #[derive(Debug)]
 pub struct Connection {
     request_default_max_timeout_duration: Option<Duration>,
     request_default_timeout_duration: Option<Duration>,
-    sequence_number: CSeq,
     state: Arc<Mutex<ConnectionState>>,
-    tx_pending_request: Option<UnboundedSender<PendingRequestUpdate>>,
-    tx_outgoing_message: Option<UnboundedSender<Message>>,
-    tx_shutdown: Option<oneshot::Sender<ShutdownType>>,
 }
 
 impl Connection {
@@ -71,12 +68,16 @@ impl Connection {
 
         let (tx_codec_event, rx_codec_event) = unbounded();
         let (tx_pending_request, rx_pending_request) = unbounded();
-        let (tx_incoming_request, rx_incoming_request) = unbounded();
+        let (tx_incoming_request, rx_incoming_request) = channel(config.request_buffer_size);
         let (tx_outgoing_message, rx_outgoing_message) = unbounded();
         let (tx_shutdown, rx_shutdown) = oneshot::channel();
 
         let mut executor = DefaultExecutor::current();
-        let state = Arc::new(Mutex::new(ConnectionState::new()));
+        let state = Arc::new(Mutex::new(ConnectionState::new(
+            tx_pending_request,
+            tx_outgoing_message.clone(),
+            tx_shutdown,
+        )));
         let (sink, stream) = io.framed(Codec::with_events(tx_codec_event)).split();
 
         executor.spawn(Box::new(DecodingTimerTask::new(
@@ -116,7 +117,7 @@ impl Connection {
                 state.clone(),
                 service,
                 rx_incoming_request,
-                tx_outgoing_message.clone(),
+                tx_outgoing_message,
             )))?;
         } else {
             lock_state(&state).update_state(ReadState::Response, WriteState::Request);
@@ -125,31 +126,12 @@ impl Connection {
         Ok(Connection {
             request_default_max_timeout_duration: config.request_default_max_timeout_duration,
             request_default_timeout_duration: config.request_default_timeout_duration,
-            sequence_number: CSeq::try_from(0).expect("sequence number `0` should not be invalid"),
             state: state,
-            tx_pending_request: Some(tx_pending_request),
-            tx_outgoing_message: Some(tx_outgoing_message),
-            tx_shutdown: Some(tx_shutdown),
         })
     }
 
     pub fn is_shutdown(&self) -> bool {
-        let state = lock_state(&self.state).state();
-        state.0.is_none() || state.0.is_error() && state.1.is_none() || state.1.is_error()
-    }
-
-    fn pending_request(&self) -> &UnboundedSender<PendingRequestUpdate> {
-        self.tx_pending_request
-            .as_ref()
-            .take()
-            .expect("pending request sender should not be `None`")
-    }
-
-    fn outgoing_message(&self) -> &UnboundedSender<Message> {
-        self.tx_outgoing_message
-            .as_ref()
-            .take()
-            .expect("outgoing message sender should not be `None`")
+        lock_state(&self.state).is_shutdown()
     }
 
     pub fn read_state(&self) -> ReadState {
@@ -186,64 +168,11 @@ impl Connection {
         R: Into<Request<B>>,
         B: AsRef<[u8]>,
     {
-        // Check if the write state allows sending requests. We should also probably check whether
-        // the read state allows reading responses, but if everything is working correctly, it
-        // should agree with the write state.
-
-        if !self.write_state().requests_allowed() {
-            return Either::A(future::err(OperationError::Closed));
-        }
-
-        let sequence_number = self.sequence_number;
-        self.sequence_number = self.sequence_number.increment();
-
-        let mut request = request.into().map(|body| BytesMut::from(body.as_ref()));
-        let cseq_header = CSeq::to_header_raw(&sequence_number)
-            .into_iter()
-            .nth(0)
-            .expect("`CSeq` header should always have one header");
-        request.headers_mut().insert(HeaderName::CSeq, cseq_header);
-
-        let (tx_response, rx_response) = oneshot::channel();
-        let update = PendingRequestUpdate::AddPendingRequest((sequence_number, tx_response));
-
-        if let Err(_) = self.pending_request().unbounded_send(update) {
-            // This really should not happen, since we checked the write state above. But if it
-            // does, make sure that the state is updated correctly.
-
-            lock_state(&self.state).update_state(ReadState::Request, WriteState::Response);
-            return Either::A(future::err(OperationError::Closed));
-        }
-
-        if let Err(_) = self
-            .outgoing_message()
-            .unbounded_send(Message::Request(request))
-        {
-            // This also should not happen. And if it does, we need to remove the pending request we
-            // just sent. Also update the state to be what it should be.
-
-            self.pending_request()
-                .unbounded_send(PendingRequestUpdate::RemovePendingRequest(sequence_number))
-                .ok();
-            lock_state(&self.state).update_state(ReadState::Response, WriteState::None);
-            return Either::A(future::err(OperationError::Closed));
-        }
-
-        Either::B(SendRequestFuture::new(
-            rx_response,
-            self.pending_request().clone(),
-            sequence_number,
-            options.timeout_duration(),
-            options.max_timeout_duration(),
-        ))
+        lock_state(&self.state).try_send_request(request, options)
     }
 
     pub fn shutdown(&mut self, shutdown_type: ShutdownType) {
-        if let Some(tx_shutdown) = self.tx_shutdown.take() {
-            self.tx_outgoing_message = None;
-            self.tx_pending_request = None;
-            tx_shutdown.send(shutdown_type).ok();
-        }
+        lock_state(&self.state).shutdown(shutdown_type);
     }
 
     pub fn state(&self) -> ReadWriteStatePair {
@@ -268,7 +197,6 @@ pub struct Config {
     pub(crate) request_buffer_size: usize,
     pub(crate) request_default_max_timeout_duration: Option<Duration>,
     pub(crate) request_default_timeout_duration: Option<Duration>,
-    pub(crate) response_buffer_size: usize,
     pub(crate) shutdown_future:
         Option<Box<Future<Item = ShutdownType, Error = ()> + Send + 'static>>,
 }
@@ -297,10 +225,6 @@ impl Config {
     pub fn request_default_timeout_duration(&self) -> Option<Duration> {
         self.request_default_timeout_duration
     }
-
-    pub fn response_buffer_size(&self) -> usize {
-        self.response_buffer_size
-    }
 }
 
 impl Default for Config {
@@ -316,7 +240,6 @@ pub struct ConfigBuilder {
     request_buffer_size: usize,
     request_default_max_timeout_duration: Option<Duration>,
     request_default_timeout_duration: Option<Duration>,
-    response_buffer_size: usize,
     shutdown_future: Box<Future<Item = ShutdownType, Error = ()> + Send + 'static>,
 }
 
@@ -346,16 +269,11 @@ impl ConfigBuilder {
             }
         }
 
-        if self.response_buffer_size == 0 {
-            return Err(ConfigBuilderError::InvalidResponseBufferSize);
-        }
-
         Ok(Config {
             decode_timeout_duration: self.decode_timeout_duration,
             request_buffer_size: self.request_buffer_size,
             request_default_max_timeout_duration: self.request_default_max_timeout_duration,
             request_default_timeout_duration: self.request_default_timeout_duration,
-            response_buffer_size: self.response_buffer_size,
             shutdown_future: Some(self.shutdown_future),
         })
     }
@@ -383,11 +301,6 @@ impl ConfigBuilder {
         self
     }
 
-    pub fn response_buffer_size(&mut self, size: usize) -> &mut Self {
-        self.response_buffer_size = size;
-        self
-    }
-
     pub fn shutdown_future<F>(&mut self, future: F) -> &mut Self
     where
         F: Future<Item = ShutdownType, Error = ()> + Send + 'static,
@@ -404,7 +317,6 @@ impl Default for ConfigBuilder {
             request_buffer_size: DEFAULT_REQUEST_BUFFER_SIZE,
             request_default_max_timeout_duration: Some(DEFAULT_REQUEST_MAX_TIMEOUT_DURATION),
             request_default_timeout_duration: Some(DEFAULT_REQUEST_TIMEOUT_DURATION),
-            response_buffer_size: DEFAULT_RESPONSE_BUFFER_SIZE,
             shutdown_future: Box::new(future::empty()),
         }
     }
@@ -416,7 +328,6 @@ pub enum ConfigBuilderError {
     InvalidRequestBufferSize,
     InvalidRequestDefaultMaxTimeoutDuration,
     InvalidRequestDefaultTimeoutDuration,
-    InvalidResponseBufferSize,
 }
 
 impl fmt::Display for ConfigBuilderError {
@@ -436,7 +347,6 @@ impl Error for ConfigBuilderError {
                 "invalid request default max timeout duration"
             }
             InvalidRequestDefaultTimeoutDuration => "invalid request default timeout duration",
-            InvalidResponseBufferSize => "invalid response buffer size",
         }
     }
 }
@@ -681,24 +591,30 @@ state_type!(WriteState);
 pub type ReadWriteStatePair = (ReadState, WriteState);
 
 #[derive(Debug)]
-pub struct ConnectionState {
+struct ConnectionState {
     read_state: ReadState,
+    sequence_number: CSeq,
     state_changes: Vec<UnboundedSender<ReadWriteStatePair>>,
+    tx_outgoing_message: Option<UnboundedSender<Message>>,
+    tx_pending_request: Option<UnboundedSender<PendingRequestUpdate>>,
+    tx_shutdown: Option<oneshot::Sender<ShutdownType>>,
     write_state: WriteState,
 }
 
 impl ConnectionState {
-    pub fn new() -> Self {
+    pub fn new(
+        tx_pending_request: UnboundedSender<PendingRequestUpdate>,
+        tx_outgoing_message: UnboundedSender<Message>,
+        tx_shutdown: oneshot::Sender<ShutdownType>,
+    ) -> Self {
         ConnectionState {
             read_state: ReadState::All,
+            sequence_number: CSeq::try_from(0).expect("sequence number `0` should not be invalid"),
             state_changes: vec![],
+            tx_outgoing_message: Some(tx_outgoing_message),
+            tx_pending_request: Some(tx_pending_request),
+            tx_shutdown: Some(tx_shutdown),
             write_state: WriteState::All,
-        }
-    }
-
-    fn send_state_change(&self) {
-        for state_change in self.state_changes.iter() {
-            state_change.unbounded_send(self.state()).ok();
         }
     }
 
@@ -708,17 +624,125 @@ impl ConnectionState {
         rx_state_change
     }
 
+    pub fn is_shutdown(&self) -> bool {
+        (self.read_state.is_none() || self.read_state.is_error())
+            && (self.write_state.is_none() || self.write_state.is_error())
+    }
+
+    fn pending_request(&self) -> &UnboundedSender<PendingRequestUpdate> {
+        self.tx_pending_request
+            .as_ref()
+            .take()
+            .expect("pending request sender should not be `None`")
+    }
+
+    fn outgoing_message(&self) -> &UnboundedSender<Message> {
+        self.tx_outgoing_message
+            .as_ref()
+            .take()
+            .expect("outgoing message sender should not be `None`")
+    }
+
     pub fn read_state(&self) -> ReadState {
         self.read_state.clone()
+    }
+
+    fn send_state_change(&self) {
+        for state_change in self.state_changes.iter() {
+            state_change.unbounded_send(self.state()).ok();
+        }
+    }
+
+    pub fn shutdown(&mut self, shutdown_type: ShutdownType) {
+        if let Some(tx_shutdown) = self.tx_shutdown.take() {
+            self.tx_outgoing_message = None;
+            self.tx_pending_request = None;
+            tx_shutdown.send(shutdown_type).ok();
+        }
+    }
+
+    fn shutdown_if_needed(&mut self) {
+        if self.is_shutdown() {
+            self.shutdown(ShutdownType::Hard);
+        } else {
+            let read_state_shutdown = self.read_state.is_none()
+                || self.read_state.is_error()
+                || self.read_state.is_response();
+            let write_state_shutdown = self.write_state.is_none()
+                || self.write_state.is_error()
+                || self.write_state.is_response();
+
+            if read_state_shutdown && write_state_shutdown {
+                self.shutdown(ShutdownType::Soft(DEFAULT_SOFT_SHUTDOWN_TIMEOUT_DURATION));
+            }
+        }
     }
 
     pub fn state(&self) -> ReadWriteStatePair {
         (self.read_state(), self.write_state())
     }
 
+    pub fn try_send_request<R, B>(
+        &mut self,
+        request: R,
+        options: RequestOptions,
+    ) -> impl Future<Item = Response<BytesMut>, Error = OperationError>
+    where
+        R: Into<Request<B>>,
+        B: AsRef<[u8]>,
+    {
+        if !self.write_state.requests_allowed() {
+            return Either::A(future::err(OperationError::Closed));
+        }
+
+        let sequence_number = self.sequence_number;
+        self.sequence_number = self.sequence_number.increment();
+
+        let mut request = request.into().map(|body| BytesMut::from(body.as_ref()));
+        let cseq_header = CSeq::to_header_raw(&sequence_number)
+            .into_iter()
+            .nth(0)
+            .expect("`CSeq` header should always have one header");
+        request.headers_mut().insert(HeaderName::CSeq, cseq_header);
+
+        let (tx_response, rx_response) = oneshot::channel();
+        let update = PendingRequestUpdate::AddPendingRequest((sequence_number, tx_response));
+
+        if let Err(_) = self.pending_request().unbounded_send(update) {
+            // This really should not happen, since we checked the write state above. But if it
+            // does, make sure that the state is updated correctly.
+
+            self.update_state(ReadState::Request, WriteState::Response);
+            return Either::A(future::err(OperationError::Closed));
+        }
+
+        if let Err(_) = self
+            .outgoing_message()
+            .unbounded_send(Message::Request(request))
+        {
+            // This also should not happen. And if it does, we need to remove the pending request we
+            // just sent. Also update the state to be what it should be.
+
+            self.pending_request()
+                .unbounded_send(PendingRequestUpdate::RemovePendingRequest(sequence_number))
+                .ok();
+            self.update_state(ReadState::Response, WriteState::None);
+            return Either::A(future::err(OperationError::Closed));
+        }
+
+        Either::B(SendRequestFuture::new(
+            rx_response,
+            self.pending_request().clone(),
+            sequence_number,
+            options.timeout_duration(),
+            options.max_timeout_duration(),
+        ))
+    }
+
     pub fn update_read_state(&mut self, read_state: ReadState) {
         if self.read_state.try_update_state(read_state) {
             self.send_state_change();
+            self.shutdown_if_needed();
         }
     }
 
@@ -735,12 +759,14 @@ impl ConnectionState {
 
         if state_changed {
             self.send_state_change();
+            self.shutdown_if_needed();
         }
     }
 
     pub fn update_write_state(&mut self, write_state: WriteState) {
         if self.write_state.try_update_state(write_state) {
             self.send_state_change();
+            self.shutdown_if_needed();
         }
     }
 
@@ -905,7 +931,7 @@ struct MessageReceiverTask<S> {
     request_buffer_size: usize,
     rx_pending_request: Fuse<UnboundedReceiver<PendingRequestUpdate>>,
     rx_state_change: Fuse<UnboundedReceiver<ReadWriteStatePair>>,
-    tx_incoming_request: Option<UnboundedSender<Request<BytesMut>>>,
+    tx_incoming_request: Option<Sender<Request<BytesMut>>>,
     tx_outgoing_message: Option<UnboundedSender<Message>>,
     stream: S,
     state: Arc<Mutex<ConnectionState>>,
@@ -919,7 +945,7 @@ where
         state: Arc<Mutex<ConnectionState>>,
         stream: S,
         rx_pending_request: UnboundedReceiver<PendingRequestUpdate>,
-        tx_incoming_request: UnboundedSender<Request<BytesMut>>,
+        tx_incoming_request: Sender<Request<BytesMut>>,
         tx_outgoing_message: UnboundedSender<Message>,
         request_buffer_size: usize,
     ) -> Self {
@@ -940,6 +966,7 @@ where
     }
 
     fn cleanup(&mut self) {
+        self.flush_incoming_requests();
         self.remove_pending_requests();
         self.tx_incoming_request = None;
         self.tx_outgoing_message = None;
@@ -950,6 +977,19 @@ where
 
         if !self.rx_state_change.is_done() {
             self.rx_state_change.get_mut().close();
+        }
+    }
+
+    fn flush_incoming_requests(&mut self) {
+        let mut errored = false;
+
+        if let Some(ref mut tx_incoming_request) = self.tx_incoming_request {
+            errored = tx_incoming_request.poll_complete().is_err();
+        }
+
+        if errored {
+            lock_state(&self.state).update_read_state(ReadState::Response);
+            self.tx_incoming_request = None;
         }
     }
 
@@ -1036,12 +1076,12 @@ where
                     while let Some(request) = self.buffered_requests.remove(&sequence_number) {
                         if self
                             .tx_incoming_request
-                            .as_ref()
+                            .as_mut()
                             .expect("incoming request sender should not be `None`")
-                            .unbounded_send(request)
+                            .start_send(request)
                             .is_err()
                         {
-                            lock_state(&self.state).update_read_state(ReadState::None);
+                            lock_state(&self.state).update_read_state(ReadState::Response);
                             self.tx_incoming_request = None;
                         }
 
@@ -1325,6 +1365,7 @@ where
             }
         }
 
+        self.flush_incoming_requests();
         Ok(Async::NotReady)
     }
 }
@@ -1353,6 +1394,11 @@ where
         }
     }
 
+    fn cleanup(&mut self, write_state: WriteState) {
+        self.rx_outgoing_message.close();
+        lock_state(&self.state).update_state(ReadState::Response, write_state);
+    }
+
     fn try_send_message(&mut self, message: Message) -> Poll<(), ()> {
         match self.sink.start_send(message) {
             Ok(AsyncSink::Ready) => Ok(Async::Ready(())),
@@ -1361,7 +1407,7 @@ where
                 Ok(Async::NotReady)
             }
             Err(error) => {
-                lock_state(&self.state).update_state(ReadState::Response, WriteState::Error(error));
+                self.cleanup(WriteState::Error(error));
                 Err(())
             }
         }
@@ -1398,19 +1444,19 @@ where
                     _ => {}
                 },
                 Async::Ready(None) => {
-                    if let Err(error) = self.sink.close() {
-                        lock_state(&self.state)
-                            .update_state(ReadState::Response, WriteState::Error(error));
+                    let write_state = if let Err(error) = self.sink.close() {
+                        WriteState::Error(error)
                     } else {
-                        lock_state(&self.state).update_state(ReadState::Response, WriteState::None);
-                    }
+                        WriteState::None
+                    };
 
+                    self.cleanup(write_state);
                     return Ok(Async::Ready(()));
                 }
                 Async::NotReady => {
                     if let Err(error) = self.sink.poll_complete() {
-                        lock_state(&self.state)
-                            .update_state(ReadState::Response, WriteState::Error(error));
+                        self.cleanup(WriteState::Error(error));
+                        return Ok(Async::Ready(()));
                     } else {
                         break;
                     }
@@ -1422,11 +1468,11 @@ where
     }
 }
 
-pub struct RequestHandlerTask<S>
+struct RequestHandlerTask<S>
 where
     S: Service,
 {
-    rx_incoming_request: UnboundedReceiver<Request<BytesMut>>,
+    rx_incoming_request: Receiver<Request<BytesMut>>,
     service: S,
     serviced_request: Option<S::Future>,
     state: Arc<Mutex<ConnectionState>>,
@@ -1442,7 +1488,7 @@ where
     pub fn new(
         state: Arc<Mutex<ConnectionState>>,
         service: S,
-        rx_incoming_request: UnboundedReceiver<Request<BytesMut>>,
+        rx_incoming_request: Receiver<Request<BytesMut>>,
         tx_outgoing_message: UnboundedSender<Message>,
     ) -> Self {
         RequestHandlerTask {
@@ -1637,11 +1683,13 @@ impl ShutdownTask {
                 lock_state(&self.state).update_state(ReadState::None, WriteState::None);
             }
             ShutdownType::Soft(duration) => {
-                let expire_time = Instant::now() + duration;
-                self.shutdown_timer = Some(Delay::new(expire_time));
-                self.status = ShutdownStatus::ShuttingDown;
-                self.rx_shutdown.close();
-                lock_state(&self.state).update_state(ReadState::Response, WriteState::Response);
+                if self.status == ShutdownStatus::Running {
+                    let expire_time = Instant::now() + duration;
+                    self.shutdown_timer = Some(Delay::new(expire_time));
+                    self.status = ShutdownStatus::ShuttingDown;
+                    self.rx_shutdown.close();
+                    lock_state(&self.state).update_state(ReadState::Response, WriteState::Response);
+                }
             }
         }
     }
