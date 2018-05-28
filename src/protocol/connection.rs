@@ -803,29 +803,6 @@ enum PendingRequestResponse {
     Response(Response<BytesMut>),
 }
 
-impl PendingRequestResponse {
-    pub fn is_continue(&self) -> bool {
-        match self {
-            PendingRequestResponse::Continue(_) => true,
-            _ => false,
-        }
-    }
-
-    pub fn is_none(&self) -> bool {
-        match self {
-            PendingRequestResponse::None => true,
-            _ => false,
-        }
-    }
-
-    pub fn is_response(&self) -> bool {
-        match self {
-            PendingRequestResponse::Response(_) => true,
-            _ => false,
-        }
-    }
-}
-
 #[derive(Debug)]
 enum PendingRequestUpdate {
     AddPendingRequest((CSeq, oneshot::Sender<PendingRequestResponse>)),
