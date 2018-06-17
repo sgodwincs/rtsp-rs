@@ -5,6 +5,7 @@ extern crate ascii;
 extern crate bytes;
 extern crate chrono;
 extern crate fnv;
+#[macro_use]
 extern crate futures;
 #[macro_use]
 extern crate lazy_static;
