@@ -65,7 +65,7 @@ impl Connection {
     pub fn with_config<IO, S>(
         io: IO,
         service: Option<S>,
-        mut config: Config,
+        config: Config,
     ) -> (Self, Option<RequestHandler<S>>, ConnectionHandle)
     where
         IO: AsyncRead + AsyncWrite + Send + 'static,
@@ -74,9 +74,10 @@ impl Connection {
         S::Response: Into<Response<BytesMut, HeaderMap>>,
     {
         let (tx_codec_event, rx_codec_event) = unbounded();
-        let (tx_incoming_request, rx_incoming_request) = channel(config.request_buffer_size);
+        let (tx_incoming_request, rx_incoming_request) = channel(config.request_buffer_size());
         let (tx_pending_request, rx_pending_request) = unbounded();
-        let (tx_shutdown, rx_shutdown) = oneshot::channel();
+        let (tx_initiate_shutdown, rx_initiate_shutdown) = oneshot::channel();
+        let (tx_shutdown_event, rx_shutdown_event) = oneshot::channel();
         let (sink, stream) = io.framed(Codec::with_events(tx_codec_event)).split();
 
         let receiver = Receiver::new(
@@ -84,8 +85,8 @@ impl Connection {
             rx_pending_request,
             rx_codec_event,
             tx_incoming_request,
-            config.decode_timeout_duration,
-            config.request_buffer_size,
+            config.decode_timeout_duration(),
+            config.request_buffer_size(),
         );
         let (sender, sender_handle) = Sender::new(Box::new(sink));
         let handler = if let Some(service) = service {
@@ -97,26 +98,23 @@ impl Connection {
         } else {
             None
         };
-        let shutdown_future = config
-            .shutdown_future
-            .take()
-            .expect("config shutdown future should not be `None`");
 
         let connection = Connection {
             allow_requests: Arc::new(AtomicBool::new(true)),
             receiver: Some(receiver),
             sender: Some(sender),
             sender_handle: Some(sender_handle.clone()),
-            shutdown: Shutdown::new(rx_shutdown, shutdown_future),
+            shutdown: Shutdown::new(rx_initiate_shutdown, tx_shutdown_event),
         };
         let connection_handle = ConnectionHandle::new(
             connection.allow_requests.clone(),
-            config.graceful_shutdown_default_timeout_duration,
-            config.request_default_max_timeout_duration,
-            config.request_default_timeout_duration,
+            config.graceful_shutdown_default_timeout_duration(),
+            config.request_default_max_timeout_duration(),
+            config.request_default_timeout_duration(),
             sender_handle,
             tx_pending_request,
-            tx_shutdown,
+            tx_initiate_shutdown,
+            rx_shutdown_event,
         );
 
         (connection, handler, connection_handle)
@@ -250,6 +248,7 @@ pub struct ConnectionHandle {
     allow_requests: Arc<AtomicBool>,
     request_default_max_timeout_duration: Option<Duration>,
     request_default_timeout_duration: Option<Duration>,
+    rx_shutdown_event: Arc<Mutex<Option<oneshot::Receiver<()>>>>,
     sender_handle: SenderHandle,
     sequence_number: Arc<Mutex<CSeq>>,
     shutdown: Arc<Mutex<ConnectionShutdown>>,
@@ -264,21 +263,25 @@ impl ConnectionHandle {
         request_default_timeout_duration: Option<Duration>,
         sender_handle: SenderHandle,
         tx_pending_request: UnboundedSender<PendingRequestUpdate>,
-        tx_shutdown: oneshot::Sender<ShutdownType>,
+        tx_initiate_shutdown: oneshot::Sender<ShutdownType>,
+        rx_shutdown_event: oneshot::Receiver<()>,
     ) -> Self {
-        let shutdown =
-            ConnectionShutdown::new(graceful_shutdown_default_timeout_duration, tx_shutdown);
+        let shutdown = ConnectionShutdown::new(
+            graceful_shutdown_default_timeout_duration,
+            tx_initiate_shutdown,
+        );
 
         ConnectionHandle {
             allow_requests,
             request_default_max_timeout_duration,
             request_default_timeout_duration,
+            rx_shutdown_event: Arc::new(Mutex::new(Some(rx_shutdown_event))),
             sender_handle,
             sequence_number: Arc::new(Mutex::new(
                 CSeq::try_from(0).expect("sequence number `0` should not be invalid"),
             )),
-            tx_pending_request,
             shutdown: Arc::new(Mutex::new(shutdown)),
+            tx_pending_request,
         }
     }
 
@@ -362,27 +365,34 @@ impl ConnectionHandle {
             .expect("locking `shutdown` should not error")
             .shutdown(shutdown_type)
     }
+
+    pub fn take_shutdown(&mut self) -> Option<oneshot::Receiver<()>> {
+        self.rx_shutdown_event
+            .lock()
+            .expect("locking `rx_shutdown_event` should not error")
+            .take()
+    }
 }
 
 struct ConnectionShutdown {
     graceful_shutdown_default_timeout_duration: Duration,
-    tx_shutdown: Option<oneshot::Sender<ShutdownType>>,
+    tx_initiate_shutdown: Option<oneshot::Sender<ShutdownType>>,
 }
 
 impl ConnectionShutdown {
     pub fn new(
         graceful_shutdown_default_timeout_duration: Duration,
-        tx_shutdown: oneshot::Sender<ShutdownType>,
+        tx_initiate_shutdown: oneshot::Sender<ShutdownType>,
     ) -> Self {
         ConnectionShutdown {
             graceful_shutdown_default_timeout_duration,
-            tx_shutdown: Some(tx_shutdown),
+            tx_initiate_shutdown: Some(tx_initiate_shutdown),
         }
     }
 
     pub fn shutdown(&mut self, shutdown_type: ShutdownType) {
-        if let Some(tx_shutdown) = self.tx_shutdown.take() {
-            tx_shutdown.send(shutdown_type).ok();
+        if let Some(tx_initiate_shutdown) = self.tx_initiate_shutdown.take() {
+            tx_initiate_shutdown.send(shutdown_type).ok();
         }
     }
 }
@@ -395,13 +405,11 @@ impl Drop for ConnectionShutdown {
 }
 
 pub struct Config {
-    pub(crate) decode_timeout_duration: Duration,
-    pub(crate) graceful_shutdown_default_timeout_duration: Duration,
-    pub(crate) request_buffer_size: usize,
-    pub(crate) request_default_max_timeout_duration: Option<Duration>,
-    pub(crate) request_default_timeout_duration: Option<Duration>,
-    pub(crate) shutdown_future:
-        Option<Box<Future<Item = ShutdownType, Error = ()> + Send + 'static>>,
+    decode_timeout_duration: Duration,
+    graceful_shutdown_default_timeout_duration: Duration,
+    request_buffer_size: usize,
+    request_default_max_timeout_duration: Option<Duration>,
+    request_default_timeout_duration: Option<Duration>,
 }
 
 impl Config {
@@ -448,7 +456,6 @@ pub struct ConfigBuilder {
     request_buffer_size: usize,
     request_default_max_timeout_duration: Option<Duration>,
     request_default_timeout_duration: Option<Duration>,
-    shutdown_future: Box<Future<Item = ShutdownType, Error = ()> + Send + 'static>,
 }
 
 impl ConfigBuilder {
@@ -484,7 +491,6 @@ impl ConfigBuilder {
             request_buffer_size: self.request_buffer_size,
             request_default_max_timeout_duration: self.request_default_max_timeout_duration,
             request_default_timeout_duration: self.request_default_timeout_duration,
-            shutdown_future: Some(self.shutdown_future),
         })
     }
 
@@ -515,14 +521,6 @@ impl ConfigBuilder {
         self.request_default_timeout_duration = duration;
         self
     }
-
-    pub fn shutdown_future<F>(&mut self, future: F) -> &mut Self
-    where
-        F: Future<Item = ShutdownType, Error = ()> + Send + 'static,
-    {
-        self.shutdown_future = Box::new(future);
-        self
-    }
 }
 
 impl Default for ConfigBuilder {
@@ -533,7 +531,6 @@ impl Default for ConfigBuilder {
             request_buffer_size: DEFAULT_REQUEST_BUFFER_SIZE,
             request_default_max_timeout_duration: Some(DEFAULT_REQUEST_MAX_TIMEOUT_DURATION),
             request_default_timeout_duration: Some(DEFAULT_REQUEST_TIMEOUT_DURATION),
-            shutdown_future: Box::new(future::empty()),
         }
     }
 }
