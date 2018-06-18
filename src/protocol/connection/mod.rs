@@ -231,11 +231,13 @@ impl Future for Connection {
             ShutdownState::Shutdown => {
                 self.shutdown_receiver();
                 self.shutdown_sender();
+                self.allow_requests.store(false, Ordering::SeqCst);
                 return Ok(Async::Ready(()));
             }
         }
 
         if self.should_shutdown() {
+            self.shutdown.ensure_shutdown();
             Ok(Async::Ready(()))
         } else {
             Ok(Async::NotReady)

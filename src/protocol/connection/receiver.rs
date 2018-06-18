@@ -610,6 +610,7 @@ impl ResponseReceiver {
 
 impl Drop for ResponseReceiver {
     fn drop(&mut self) {
+        self.poll_pending_request_update().ok();
         self.remove_pending_requests();
     }
 }

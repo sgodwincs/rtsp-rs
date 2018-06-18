@@ -21,12 +21,17 @@ impl Shutdown {
         }
     }
 
+    pub fn ensure_shutdown(&mut self) {
+        self.handle_shutdown(ShutdownType::Immediate);
+    }
+
     fn handle_shutdown(&mut self, shutdown_type: ShutdownType) {
         match shutdown_type {
             ShutdownType::Graceful(duration) => {
                 let expire_time = Instant::now() + duration;
                 self.rx_initiate_shutdown = None;
                 self.timer = Some(Delay::new(expire_time));
+                self.poll_shutting_down().ok();
             }
             ShutdownType::Immediate => {
                 self.rx_initiate_shutdown = None;
