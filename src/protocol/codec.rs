@@ -98,7 +98,7 @@ impl Codec {
     /// * If there was not enough data but no error
     ///   occurred, then `Ok(None)` will be returned indicating that more data is needed.
     /// * If the decoder encountered an error while decoding that was irrecoverable, then
-    ///   `Err(`[`Error`]`)` will be returned.
+    ///   `Err(`[`ProtocolError`]`)` will be returned.
     /// * If the decoder encountered an error while decoding that was recoverable, then
     ///   `Ok(Some(Err(`[`InvalidMessage`]`)))` will be returned.
     fn decode_request(
@@ -151,7 +151,7 @@ impl Codec {
     /// * If there was not enough data but no error
     ///   occurred, then `Ok(None)` will be returned indicating that more data is needed.
     /// * If the decoder encountered an error while decoding that was irrecoverable, then
-    ///   `Err(`[`Error`]`)` will be returned.
+    ///   `Err(`[`ProtocolError`]`)` will be returned.
     /// * If the decoder encountered an error while decoding that was recoverable, then
     ///   `Ok(Some(Err(`[`InvalidMessage`]`)))` will be returned.
     fn decode_response(
@@ -210,7 +210,7 @@ impl Decoder for Codec {
     /// * If there was not enough data but no error
     ///   occurred, then `Ok(None)` will be returned indicating that more data is needed.
     /// * If the decoder encountered an error that was irrecoverable, then
-    ///   `Err(`[`Error`]`)` will be returned.
+    ///   `Err(`[`ProtocolError`]`)` will be returned.
     /// * If the decoder encountered an error that was recoverable, then
     ///   `Ok(Some(Err(`[`InvalidMessage`]`)))` will be returned.
     fn decode(&mut self, buffer: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
@@ -253,7 +253,8 @@ impl Decoder for Codec {
     /// # Return Value
     ///
     /// This function will attempt to decode a message as described in `Codec::decode()`. If there
-    /// is not enough data to do so, then `Err(`[`Error::UnexpectedEOF`]`)` will be returned.
+    /// is not enough data to do so, then `Err(`[`ProtocolError::UnexpectedEOF`]`)` will be
+    /// returned.
     fn decode_eof(&mut self, buffer: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         match self.decode(buffer)? {
             Some(message) => Ok(Some(message)),
