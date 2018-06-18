@@ -8,13 +8,17 @@ pub struct Shutdown(ShutdownInner);
 impl Shutdown {
     pub fn new(
         rx_shutdown: oneshot::Receiver<ShutdownType>,
-        shutdown_future: Box<Future<Item = ShutdownType, Error = ()> + 'static>,
+        shutdown_future: Box<Future<Item = ShutdownType, Error = ()> + Send + 'static>,
     ) -> Self {
         Shutdown(ShutdownInner::new(rx_shutdown, shutdown_future))
     }
 
-    pub fn poll(&mut self) -> Poll<ShutdownType, ()> {
+    pub fn poll(&mut self) -> Poll<(), ()> {
         self.0.poll()
+    }
+
+    pub fn state(&self) -> ShutdownState {
+        self.0.state()
     }
 }
 
@@ -27,7 +31,7 @@ enum ShutdownInner {
 impl ShutdownInner {
     pub fn new(
         rx_shutdown: oneshot::Receiver<ShutdownType>,
-        shutdown_future: Box<Future<Item = ShutdownType, Error = ()> + 'static>,
+        shutdown_future: Box<Future<Item = ShutdownType, Error = ()> + Send + 'static>,
     ) -> Self {
         ShutdownInner::Running(RunningState {
             rx_shutdown,
@@ -45,21 +49,20 @@ impl ShutdownInner {
         }
     }
 
-    pub fn poll(&mut self) -> Poll<ShutdownType, ()> {
-        match self {
-            ShutdownInner::Running(ref mut inner) => match self.poll_shutdown(inner) {
-                Ok(Async::Ready(shutdown_type)) => Ok(Async::Ready(shutdown_type)),
-                Ok(Async::NotReady) => Ok(Async::NotReady),
-                Err(_) => {
-                    self.handle_shutdown(ShutdownType::Immediate);
-                    Ok(Async::Ready(ShutdownType::Immediate))
-                }
-            },
-            ShutdownInner::ShuttingDown(ref mut timer) => match timer.poll() {
-                Ok(Async::Ready(_)) | Err(_) => Ok(Async::Ready(ShutdownType::Immediate)),
-                Ok(Async::NotReady) => Ok(Async::NotReady),
-            },
-            ShutdownInner::Shutdown => Ok(Async::Ready(ShutdownType::Immediate)),
+    pub fn poll(&mut self) -> Poll<(), ()> {
+        loop {
+            match self {
+                ShutdownInner::Running(ref mut inner) => match self.poll_shutdown(inner) {
+                    Ok(Async::Ready(shutdown_type)) => self.handle_shutdown(shutdown_type),
+                    Ok(Async::NotReady) => return Ok(Async::NotReady),
+                    Err(_) => self.handle_shutdown(ShutdownType::Immediate),
+                },
+                ShutdownInner::ShuttingDown(ref mut timer) => match timer.poll() {
+                    Ok(Async::Ready(_)) | Err(_) => self.handle_shutdown(ShutdownType::Immediate),
+                    Ok(Async::NotReady) => return Ok(Async::NotReady),
+                },
+                ShutdownInner::Shutdown => return Ok(Async::Ready(())),
+            }
         }
     }
 
@@ -76,11 +79,25 @@ impl ShutdownInner {
 
         Ok(Async::NotReady)
     }
+
+    pub fn state(&self) -> ShutdownState {
+        match self {
+            ShutdownInner::Running(_) => ShutdownState::Running,
+            ShutdownInner::ShuttingDown(_) => ShutdownState::ShuttingDown,
+            ShutdownInner::Shutdown => ShutdownState::Shutdown,
+        }
+    }
 }
 
 struct RunningState {
     pub rx_shutdown: oneshot::Receiver<ShutdownType>,
-    pub shutdown_future: Box<Future<Item = ShutdownType, Error = ()> + 'static>,
+    pub shutdown_future: Box<Future<Item = ShutdownType, Error = ()> + Send + 'static>,
+}
+
+pub enum ShutdownState {
+    Running,
+    Shutdown,
+    ShuttingDown,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]

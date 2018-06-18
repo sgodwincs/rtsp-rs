@@ -7,7 +7,7 @@ mod shutdown;
 use self::pending::{PendingRequestResponse, PendingRequestUpdate};
 use self::receiver::Receiver;
 use self::sender::{Sender, SenderHandle};
-use self::shutdown::Shutdown;
+use self::shutdown::{Shutdown, ShutdownState};
 
 pub use self::handler::RequestHandler;
 pub use self::pending::{
@@ -54,9 +54,9 @@ impl Connection {
         service: Option<S>,
     ) -> (Self, Option<RequestHandler<S>>, ConnectionHandle)
     where
-        IO: AsyncRead + AsyncWrite + 'static,
-        S: Service<Request = Request<BytesMut>>,
-        // S::Future: Send + 'static,
+        IO: AsyncRead + AsyncWrite + Send + 'static,
+        S: Service<Request = Request<BytesMut>> + Send + 'static,
+        S::Future: Send + 'static,
         S::Response: Into<Response<BytesMut, HeaderMap>>,
     {
         Connection::with_config(io, service, Config::default())
@@ -68,9 +68,9 @@ impl Connection {
         mut config: Config,
     ) -> (Self, Option<RequestHandler<S>>, ConnectionHandle)
     where
-        IO: AsyncRead + AsyncWrite + 'static,
-        S: Service<Request = Request<BytesMut>>,
-        // S::Future: Send + 'static,
+        IO: AsyncRead + AsyncWrite + Send + 'static,
+        S: Service<Request = Request<BytesMut>> + Send + 'static,
+        S::Future: Send + 'static,
         S::Response: Into<Response<BytesMut, HeaderMap>>,
     {
         let (tx_codec_event, rx_codec_event) = unbounded();
@@ -158,6 +158,8 @@ impl Connection {
         if let Some(mut receiver) = self.receiver.take() {
             if !receiver.shutdown_request_receiver() {
                 self.receiver = Some(receiver);
+            } else {
+                self.shutdown_sender();
             }
         }
     }
@@ -172,6 +174,7 @@ impl Connection {
 
     fn shutdown_sender(&mut self) {
         self.sender = None;
+        self.sender_handle = None;
     }
 }
 
@@ -207,27 +210,31 @@ impl Future for Connection {
             _ => (),
         }
 
-        match self.shutdown.poll() {
-            Ok(Async::Ready(ShutdownType::Immediate)) | Err(_) => {
+        self.shutdown
+            .poll()
+            .expect("polling `shutdown` should not error");
+
+        match self.shutdown.state() {
+            ShutdownState::Running => {
+                let allow_responses = if let Some(ref receiver) = self.receiver {
+                    !receiver.is_response_receiver_shutdown()
+                } else {
+                    false
+                };
+
+                if !allow_responses || self.is_sender_shutdown() {
+                    self.allow_requests.store(false, Ordering::SeqCst);
+                }
+            }
+            ShutdownState::ShuttingDown => {
+                self.shutdown_request_receiver();
+                self.allow_requests.store(false, Ordering::SeqCst);
+            }
+            ShutdownState::Shutdown => {
                 self.shutdown_receiver();
                 self.shutdown_sender();
                 return Ok(Async::Ready(()));
             }
-            Ok(Async::Ready(ShutdownType::Graceful(_))) => {
-                self.shutdown_request_receiver();
-                self.allow_requests.store(false, Ordering::SeqCst);
-            }
-            _ => (),
-        }
-
-        let allow_responses = if let Some(ref receiver) = self.receiver {
-            !receiver.is_response_receiver_shutdown()
-        } else {
-            false
-        };
-
-        if !allow_responses || self.is_sender_shutdown() {
-            self.allow_requests.store(false, Ordering::SeqCst);
         }
 
         if self.should_shutdown() {
@@ -393,7 +400,8 @@ pub struct Config {
     pub(crate) request_buffer_size: usize,
     pub(crate) request_default_max_timeout_duration: Option<Duration>,
     pub(crate) request_default_timeout_duration: Option<Duration>,
-    pub(crate) shutdown_future: Option<Box<Future<Item = ShutdownType, Error = ()> + 'static>>,
+    pub(crate) shutdown_future:
+        Option<Box<Future<Item = ShutdownType, Error = ()> + Send + 'static>>,
 }
 
 impl Config {
@@ -440,7 +448,7 @@ pub struct ConfigBuilder {
     request_buffer_size: usize,
     request_default_max_timeout_duration: Option<Duration>,
     request_default_timeout_duration: Option<Duration>,
-    shutdown_future: Box<Future<Item = ShutdownType, Error = ()> + 'static>,
+    shutdown_future: Box<Future<Item = ShutdownType, Error = ()> + Send + 'static>,
 }
 
 impl ConfigBuilder {
@@ -510,7 +518,7 @@ impl ConfigBuilder {
 
     pub fn shutdown_future<F>(&mut self, future: F) -> &mut Self
     where
-        F: Future<Item = ShutdownType, Error = ()> + 'static,
+        F: Future<Item = ShutdownType, Error = ()> + Send + 'static,
     {
         self.shutdown_future = Box::new(future);
         self

@@ -23,7 +23,7 @@ where
 impl<S> RequestHandler<S>
 where
     S: Service<Request = Request<BytesMut>>,
-    // S::Future: Send + 'static,
+    S::Future: Send + 'static,
     S::Response: Into<Response<BytesMut, HeaderMap>>,
 {
     pub(crate) fn new(
@@ -62,7 +62,7 @@ where
 impl<S> Future for RequestHandler<S>
 where
     S: Service<Request = Request<BytesMut>>,
-    // S::Future: Send + 'static,
+    S::Future: Send + 'static,
     S::Response: Into<Response<BytesMut, HeaderMap>>,
 {
     type Item = ();

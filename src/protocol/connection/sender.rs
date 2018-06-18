@@ -6,12 +6,12 @@ use protocol::{Message, ProtocolError};
 pub struct Sender {
     buffered_message: Option<Message>,
     rx_outgoing_message: Option<UnboundedReceiver<Message>>,
-    sink: Box<Sink<SinkItem = Message, SinkError = ProtocolError> + 'static>,
+    sink: Box<Sink<SinkItem = Message, SinkError = ProtocolError> + Send + 'static>,
 }
 
 impl Sender {
     pub fn new(
-        sink: Box<Sink<SinkItem = Message, SinkError = ProtocolError> + 'static>,
+        sink: Box<Sink<SinkItem = Message, SinkError = ProtocolError> + Send + 'static>,
     ) -> (Self, SenderHandle) {
         let (tx_outgoing_message, rx_outgoing_message) = unbounded();
         let sender = Sender {

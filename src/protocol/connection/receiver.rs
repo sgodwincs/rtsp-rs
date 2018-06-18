@@ -27,7 +27,7 @@ pub struct Receiver {
 
 impl Receiver {
     pub fn new(
-        stream: Box<Stream<Item = MessageResult, Error = ProtocolError> + 'static>,
+        stream: Box<Stream<Item = MessageResult, Error = ProtocolError> + Send + 'static>,
         rx_pending_request: UnboundedReceiver<PendingRequestUpdate>,
         rx_codec_event: UnboundedReceiver<CodecEvent>,
         tx_incoming_request: Sender<Request<BytesMut>>,
@@ -101,8 +101,8 @@ impl Receiver {
         mut forwarding_receiver: ForwardingReceiver,
     ) -> Option<ForwardingReceiver> {
         match forwarding_receiver.poll_forward() {
-            Ok(Async::Ready(_)) | Err(_) => None,
-            _ if self.is_request_receiver_shutdown() => None,
+            Err(_) => None,
+            Ok(Async::Ready(_)) if self.is_request_receiver_shutdown() => None,
             _ => Some(forwarding_receiver),
         }
     }
@@ -114,7 +114,7 @@ impl Receiver {
     ) -> Option<ReceiverInner> {
         match inner.poll_pending_request_update() {
             Ok(Async::Ready(_)) | Err(_) => {
-                self.shutdown_response_receiver();
+                inner.shutdown_response_receiver();
             }
             _ => (),
         }
@@ -145,6 +145,12 @@ impl Receiver {
             } else {
                 self.inner = Some(inner);
             }
+
+            if let Some(forwarding_receiver) = self.forwarding_receiver.take() {
+                if forwarding_receiver.number_buffered() > 0 {
+                    self.forwarding_receiver = Some(forwarding_receiver);
+                }
+            }
         }
 
         self.should_shutdown()
@@ -169,7 +175,7 @@ struct ReceiverInner {
     request_receiver: Option<RequestReceiver>,
     response_receiver: Option<ResponseReceiver>,
     rx_codec_event: UnboundedReceiver<CodecEvent>,
-    stream: Box<Stream<Item = MessageResult, Error = ProtocolError> + 'static>,
+    stream: Box<Stream<Item = MessageResult, Error = ProtocolError> + Send + 'static>,
 }
 
 impl ReceiverInner {
@@ -207,7 +213,7 @@ impl ReceiverInner {
     }
 
     pub fn new(
-        stream: Box<Stream<Item = MessageResult, Error = ProtocolError> + 'static>,
+        stream: Box<Stream<Item = MessageResult, Error = ProtocolError> + Send + 'static>,
         rx_codec_event: UnboundedReceiver<CodecEvent>,
         rx_pending_request: UnboundedReceiver<PendingRequestUpdate>,
         decode_timeout_duration: Duration,
@@ -469,6 +475,10 @@ impl ForwardingReceiver {
         self.buffered_requests.len() >= self.request_buffer_size
     }
 
+    pub fn number_buffered(&self) -> usize {
+        self.buffered_requests.len()
+    }
+
     pub fn poll_forward(&mut self) -> Poll<(), ()> {
         if let Some(mut incoming_sequence_number) = self.incoming_sequence_number {
             while let Some(request) = self.buffered_requests.remove(&incoming_sequence_number) {
@@ -490,7 +500,7 @@ impl ForwardingReceiver {
             }
         }
 
-        Ok(Async::NotReady)
+        Ok(Async::Ready(()))
     }
 
     pub fn request_buffer_size(&self) -> usize {
