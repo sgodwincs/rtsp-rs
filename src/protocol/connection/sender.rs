@@ -72,6 +72,12 @@ impl Sender {
     }
 }
 
+impl Drop for Sender {
+    fn drop(&mut self) {
+        self.poll_write().ok();
+    }
+}
+
 #[derive(Clone)]
 pub struct SenderHandle(UnboundedSender<Message>);
 
