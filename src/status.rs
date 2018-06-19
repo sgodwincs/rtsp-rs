@@ -87,6 +87,12 @@ macro_rules! status_codes {
             pub fn canonical_reason(&self) -> Option<ReasonPhrase> {
                 use self::StatusCode::*;
 
+                // Unsafe Justification
+                // 
+                // Since the phrases used here are defined at compile time, we can be sure that they
+                // are all valid reason phrases. Perhaps this use of unsafe can eventually be
+                // replaced using a constant function constructor.
+
                 match *self {
                 $(
                     $variant => Some(unsafe { ReasonPhrase::from_str_unchecked($phrase) }),
@@ -97,15 +103,19 @@ macro_rules! status_codes {
 
             /// Constructs a new `StatusCode` from a given `u16`. It is assumed that the `u16` is
             /// in the allowed range.
-            unsafe fn from_u16(status_code: u16) -> Self {
+            fn from_u16(status_code: u16) -> Result<Self, InvalidStatusCode> {
                 use self::StatusCode::*;
 
-                match status_code {
+                if status_code < 100 || status_code >= 600 {
+                    return Err(InvalidStatusCode);
+                }
+
+                Ok(match status_code {
                 $(
                     $code => $variant,
                 )+
                     _ => Extension(ExtensionStatusCode(status_code))
-                }
+                })
             }
         }
 
@@ -325,13 +335,9 @@ impl<'a> TryFrom<&'a [u8]> for StatusCode {
         let a = u16::from(value[0].wrapping_sub(b'0'));
         let b = u16::from(value[1].wrapping_sub(b'0'));
         let c = u16::from(value[2].wrapping_sub(b'0'));
-
-        if a == 0 || a > 5 || b > 9 || c > 9 {
-            return Err(InvalidStatusCode);
-        }
-
         let status_code = (a * 100) + (b * 10) + c;
-        Ok(unsafe { StatusCode::from_u16(status_code) })
+
+        StatusCode::from_u16(status_code)
     }
 }
 
@@ -390,11 +396,7 @@ impl TryFrom<u16> for StatusCode {
     /// assert!(error.is_err());
     /// ```
     fn try_from(value: u16) -> Result<Self, Self::Error> {
-        if value < 100 || value >= 600 {
-            return Err(InvalidStatusCode);
-        }
-
-        Ok(unsafe { StatusCode::from_u16(value) })
+        StatusCode::from_u16(value)
     }
 }
 

@@ -30,7 +30,7 @@ impl Receiver {
         stream: Box<Stream<Item = MessageResult, Error = ProtocolError> + Send + 'static>,
         rx_pending_request: UnboundedReceiver<PendingRequestUpdate>,
         rx_codec_event: UnboundedReceiver<CodecEvent>,
-        tx_incoming_request: Sender<Request<BytesMut>>,
+        tx_incoming_request: Sender<(CSeq, Request<BytesMut>)>,
         decode_timeout_duration: Duration,
         request_buffer_size: usize,
     ) -> Self {
@@ -439,11 +439,14 @@ struct ForwardingReceiver {
     buffered_requests: HashMap<CSeq, Request<BytesMut>>,
     incoming_sequence_number: Option<CSeq>,
     request_buffer_size: usize,
-    tx_incoming_request: Sender<Request<BytesMut>>,
+    tx_incoming_request: Sender<(CSeq, Request<BytesMut>)>,
 }
 
 impl ForwardingReceiver {
-    pub fn new(tx_incoming_request: Sender<Request<BytesMut>>, request_buffer_size: usize) -> Self {
+    pub fn new(
+        tx_incoming_request: Sender<(CSeq, Request<BytesMut>)>,
+        request_buffer_size: usize,
+    ) -> Self {
         ForwardingReceiver {
             buffered_requests: HashMap::with_capacity(request_buffer_size),
             incoming_sequence_number: None,
@@ -484,13 +487,13 @@ impl ForwardingReceiver {
             while let Some(request) = self.buffered_requests.remove(&incoming_sequence_number) {
                 match self
                     .tx_incoming_request
-                    .start_send(request)
+                    .start_send((incoming_sequence_number, request))
                     .map_err(|_| ())?
                 {
                     AsyncSink::Ready => {
                         incoming_sequence_number = incoming_sequence_number.increment()
                     }
-                    AsyncSink::NotReady(request) => {
+                    AsyncSink::NotReady((_, request)) => {
                         self.buffered_requests
                             .insert(incoming_sequence_number, request);
                         self.incoming_sequence_number = Some(incoming_sequence_number);

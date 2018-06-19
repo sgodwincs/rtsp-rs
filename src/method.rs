@@ -129,6 +129,11 @@ impl Method {
             return Err(InvalidMethod);
         }
 
+        // Unsafe Justification
+        //
+        // The method above [`Method::is_valid_method_name`] ensures that the name is valid which
+        // implies that it is a valid ASCII string.
+
         let name = unsafe { AsciiString::from_ascii_unchecked(name) };
         Ok(Method::Extension(ExtensionMethod(name)))
     }

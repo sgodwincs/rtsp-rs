@@ -4,12 +4,12 @@ use futures::sync::oneshot;
 use futures::{Async, Future, Poll, Stream};
 
 use super::SenderHandle;
-use header::{HeaderMap, HeaderName, HeaderValue};
+use header::types::CSeq;
+use header::{HeaderMap, HeaderName, TypedHeader};
 use protocol::{Message, Service};
 use request::Request;
 use response::Response;
 use status::StatusCode;
-use syntax::trim_whitespace;
 use uri::URI;
 
 #[must_use = "futures do nothing unless polled"]
@@ -17,10 +17,10 @@ pub struct RequestHandler<S>
 where
     S: Service,
 {
-    rx_incoming_request: Receiver<Request<BytesMut>>,
+    rx_incoming_request: Receiver<(CSeq, Request<BytesMut>)>,
     sender_handle: SenderHandle,
     service: S,
-    serviced_request: Option<(HeaderValue, S::Future)>,
+    serviced_request: Option<(CSeq, S::Future)>,
     tx_shutdown_event: Option<oneshot::Sender<()>>,
 }
 
@@ -32,7 +32,7 @@ where
 {
     pub(crate) fn new(
         service: S,
-        rx_incoming_request: Receiver<Request<BytesMut>>,
+        rx_incoming_request: Receiver<(CSeq, Request<BytesMut>)>,
         sender_handle: SenderHandle,
         tx_shutdown_event: oneshot::Sender<()>,
     ) -> Self {
@@ -61,21 +61,12 @@ where
         }
     }
 
-    fn process_request(&mut self, mut request: Request<BytesMut>) {
+    fn process_request(&mut self, cseq: CSeq, mut request: Request<BytesMut>) {
         // Remove a fragment from URI if there is one.
 
         if let URI::URI(uri) = request.uri_mut() {
             uri.uri_mut().set_fragment(None);
         }
-
-        // Save the sequence number for later when a response is given.
-
-        let cseq = request
-            .headers()
-            .get(HeaderName::CSeq)
-            .expect("request handler should not receive a request with an invalid cseq")
-            .clone();
-        let cseq = unsafe { HeaderValue::from_str_unchecked(trim_whitespace(cseq.as_str())) };
 
         // Start servicing the request.
 
@@ -112,6 +103,7 @@ where
 
                 match self.poll_serviced_request(&mut serviced_request) {
                     Ok(Async::Ready(mut response)) => {
+                        let cseq = cseq.to_header_raw().remove(0);
                         response.headers_mut().insert(HeaderName::CSeq, cseq);
                         self.sender_handle
                             .try_send_message(Message::Response(response))?;
@@ -129,7 +121,7 @@ where
                 .poll()
                 .expect("receiver `rx_incoming_request` should not error")
             {
-                Async::Ready(Some(request)) => self.process_request(request),
+                Async::Ready(Some((cseq, request))) => self.process_request(cseq, request),
                 Async::Ready(None) => return Ok(Async::Ready(())),
                 Async::NotReady => return Ok(Async::NotReady),
             }

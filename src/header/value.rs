@@ -46,6 +46,12 @@ impl HeaderValue {
     }
 
     /// Converts a string representation into a `HeaderValue` with no validation.
+    ///
+    /// # Unsafe Use
+    ///
+    /// This function is to only be used when the input is UTF-8 encoded (which is already
+    /// guaranteed by the signature) but only contains the subset of ASCII-US characters which are
+    /// printable. Also, all linebreaks of the form `"\r\n"` must be followed by a space or tab.
     pub(crate) unsafe fn from_str_unchecked<S>(value: S) -> Self
     where
         S: Into<String>,
@@ -237,7 +243,7 @@ impl<'a> TryFrom<&'a str> for HeaderValue {
 
     /// Converts a `&str` to an RTSP header value. The header value is encoded using UTF-8 with some
     /// slight restrictions. Only visible characters from the ASCII character set are allowed and
-    /// line breaks `\r\n` must be followed by either a space or tab.
+    /// line breaks `"\r\n"` must be followed by either a space or tab.
     ///
     /// All case sensitivity is perserved.
     ///
@@ -309,7 +315,7 @@ impl<'a> TryFrom<&'a [u8]> for HeaderValue {
 
     /// Converts a `&[u8]` to an RTSP header value. The header value is encoded using UTF-8 with
     /// some slight restrictions. Only visible characters from the ASCII character set are allowed
-    /// and line breaks `\r\n` must be followed by either a space or tab.
+    /// and line breaks `"\r\n"` must be followed by either a space or tab.
     ///
     /// All case sensitivity is perserved.
     ///

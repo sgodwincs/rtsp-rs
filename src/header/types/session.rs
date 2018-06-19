@@ -133,6 +133,14 @@ impl TypedHeader for Session {
             format!("{}; timeout = {}", self.id.as_str(), self.timeout.as_secs())
         };
 
+        // Unsafe Justification
+        //
+        // In order for this to be safe, we must ensure that `value` contains no unprintable
+        // ASCII-US characters and that all linebreaks of the form `"\r\n"` are followed by a space
+        // or tab. In the above construction, the only thing that could violate this constraint
+        // would be the serialization of the session ID. However, a session ID can only have a
+        // subset of printable ASCII-US characters and cannot have newlines or carriage returns.
+
         vec![unsafe { HeaderValue::from_str_unchecked(value) }]
     }
 

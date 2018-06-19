@@ -128,6 +128,12 @@ impl TypedHeader for CSeq {
     /// assert_eq!(typed_header.to_header_raw(), raw_header);
     /// ```
     fn to_header_raw(&self) -> Vec<HeaderValue> {
+        // Unsafe Justification
+        //
+        // In order for this to be safe, we must ensure that `value` contains no unprintable
+        // ASCII-US characters and that all linebreaks of the form `"\r\n"` are followed by a space
+        // or tab. Since [`CSeq`] serializes into a number, it satisfies the constraints.
+
         vec![unsafe { HeaderValue::from_str_unchecked(self.0.to_string().as_str()) }]
     }
 

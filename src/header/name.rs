@@ -86,10 +86,22 @@ impl HeaderName {
     /// A helper function that creates a new `HeaderName` instance with the given header name
     /// extension. It first checks to see if the header name is valid, and if not, it will return an
     /// error.
+    ///
+    /// It is assumed that `name_lower` is the lowercase equivalent of `name`. Breaking this
+    /// constraint can lead to invalid header names.
     fn extension(name: &[u8], name_lower: &[u8]) -> Result<HeaderName, InvalidHeaderName> {
         if !is_token(name) {
             return Err(InvalidHeaderName);
         }
+
+        debug_assert_eq!(name.to_ascii_lowercase().as_slice(), name_lower);
+        debug_assert!(is_token(name_lower));
+
+        // Unsafe Justification
+        //
+        // We need to make sure that `name` and `name_lower` are valid ASCII-US strings. The
+        // [`syntax::is_token`] function ensures that it is a proper subset, but it is a constraint
+        // of this function that `name_lower` *must* be the lowercase equivalent of `name`.
 
         let name = unsafe { AsciiString::from_ascii_unchecked(name) };
         let name_lower = unsafe { AsciiString::from_ascii_unchecked(name_lower) };
