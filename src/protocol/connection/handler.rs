@@ -10,6 +10,7 @@ use request::Request;
 use response::Response;
 use status::StatusCode;
 use syntax::trim_whitespace;
+use uri::URI;
 
 #[must_use = "futures do nothing unless polled"]
 pub struct RequestHandler<S>
@@ -59,6 +60,27 @@ where
             )),
         }
     }
+
+    fn process_request(&mut self, mut request: Request<BytesMut>) {
+        // Remove a fragment from URI if there is one.
+
+        if let URI::URI(uri) = request.uri_mut() {
+            uri.uri_mut().set_fragment(None);
+        }
+
+        // Save the sequence number for later when a response is given.
+
+        let cseq = request
+            .headers()
+            .get(HeaderName::CSeq)
+            .expect("request handler should not receive a request with an invalid cseq")
+            .clone();
+        let cseq = unsafe { HeaderValue::from_str_unchecked(trim_whitespace(cseq.as_str())) };
+
+        // Start servicing the request.
+
+        self.serviced_request = Some((cseq, self.service.call(request)))
+    }
 }
 
 impl<S> Drop for RequestHandler<S>
@@ -107,17 +129,7 @@ where
                 .poll()
                 .expect("receiver `rx_incoming_request` should not error")
             {
-                Async::Ready(Some(request)) => {
-                    let cseq = request
-                        .headers()
-                        .get(HeaderName::CSeq)
-                        .expect("request handler should not receive a request with an invalid cseq")
-                        .clone();
-                    let cseq =
-                        unsafe { HeaderValue::from_str_unchecked(trim_whitespace(cseq.as_str())) };
-
-                    self.serviced_request = Some((cseq, self.service.call(request)))
-                }
+                Async::Ready(Some(request)) => self.process_request(request),
                 Async::Ready(None) => return Ok(Async::Ready(())),
                 Async::NotReady => return Ok(Async::NotReady),
             }

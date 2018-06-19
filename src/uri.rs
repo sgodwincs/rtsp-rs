@@ -209,6 +209,11 @@ impl URIInner {
     pub fn uri(&self) -> &Url {
         &self.0
     }
+
+    /// Retrieves the underlying `Url` type mutably.
+    pub(crate) fn uri_mut(&mut self) -> &mut Url {
+        &mut self.0
+    }
 }
 
 impl fmt::Debug for URIInner {
