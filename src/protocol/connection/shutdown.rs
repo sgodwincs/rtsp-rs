@@ -190,18 +190,22 @@ impl Shutdown {
     }
 }
 
-/// The shutdown state of a connection.
+/// The shutdown state of a connection. This does not have any relation to the shutdown state of the
+/// request handler. But if the connection is shutdown, this does imply an eventual shutdown of the
+/// request handler once all buffered requests have been processed.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum ShutdownState {
     /// The connection is running normally.
     Running,
 
-    /// The connection is shutdown. No more reading or writing will occur.
+    /// The connection is shutdown. No more reading or writing will occur. Despite no more writing
+    /// being possible, all buffered requests will be processed, there just will not be any
+    /// responses sent back.
     Shutdown,
 
     /// The connection is shutting down. Only responses can be read or written and all pending
     /// requests must be matched within a time interval. Otherwise, they will be dropped and the
-    /// connection will transition to shutdown state.
+    /// connection will transition to a shutdown state.
     ShuttingDown,
 }
 
