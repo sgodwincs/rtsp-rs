@@ -63,6 +63,8 @@ impl Shutdown {
     fn handle_shutdown(&mut self, shutdown_type: ShutdownType) {
         match shutdown_type {
             ShutdownType::Graceful(duration) => {
+                debug_assert!(self.state() != ShutdownState::Shutdown);
+
                 let expire_time = Instant::now() + duration;
                 self.rx_initiate_shutdown = None;
                 self.timer = Some(Delay::new(expire_time));
