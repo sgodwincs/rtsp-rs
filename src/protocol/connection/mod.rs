@@ -49,26 +49,26 @@ pub struct Connection {
 }
 
 impl Connection {
-    pub fn new<IO, S>(
-        io: IO,
+    pub fn new<Transport, S>(
+        transport: Transport,
         service: Option<S>,
     ) -> (Self, Option<RequestHandler<S>>, ConnectionHandle)
     where
-        IO: AsyncRead + AsyncWrite + Send + 'static,
+        Transport: AsyncRead + AsyncWrite + Send + 'static,
         S: Service<Request = Request<BytesMut>> + Send + 'static,
         S::Future: Send + 'static,
         S::Response: Into<Response<BytesMut, HeaderMap>>,
     {
-        Connection::with_config(io, service, Config::default())
+        Connection::with_config(transport, service, Config::default())
     }
 
-    pub fn with_config<IO, S>(
-        io: IO,
+    pub fn with_config<Transport, S>(
+        transport: Transport,
         service: Option<S>,
         config: Config,
     ) -> (Self, Option<RequestHandler<S>>, ConnectionHandle)
     where
-        IO: AsyncRead + AsyncWrite + Send + 'static,
+        Transport: AsyncRead + AsyncWrite + Send + 'static,
         S: Service<Request = Request<BytesMut>> + Send + 'static,
         S::Future: Send + 'static,
         S::Response: Into<Response<BytesMut, HeaderMap>>,
@@ -78,7 +78,7 @@ impl Connection {
         let (tx_pending_request, rx_pending_request) = unbounded();
         let (tx_initiate_shutdown, rx_initiate_shutdown) = oneshot::channel();
         let (tx_shutdown_event, rx_shutdown_event) = oneshot::channel();
-        let (sink, stream) = io.framed(Codec::with_events(tx_codec_event)).split();
+        let (sink, stream) = transport.framed(Codec::with_events(tx_codec_event)).split();
 
         let receiver = Receiver::new(
             Box::new(stream),
