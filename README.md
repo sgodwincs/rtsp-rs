@@ -7,4 +7,9 @@ An incomplete [RTSP 2.0](https://tools.ietf.org/html/rfc7826) implementation bui
 
 A lot of the design is based on the [http](https://github.com/hyperium/http) and [hyper](https://github.com/hyperium/hyper) crates, since RTSP and HTTP have a lot of similarities.
 
-Encoders and decoders exist for requests and responses, but server and client implementations do not yet.
+Only low-level servers and clients can be made at the moment. For an example of a low-level server
+with minimal processing, see [examples/server.rs](https://github.com/sgodwincs/rtsp-rs/blob/master/examples/server.rs).
+I am currently considering an interface for a higher-level server abstraction that easily allows defining
+media sources.
+
+A client example will be added shortly.
