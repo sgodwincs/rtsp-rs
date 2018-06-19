@@ -35,7 +35,7 @@ impl ReasonPhrase {
     /// # Unsafe Use
     ///
     /// This function is to only be used when the input is UTF-8 encoded (which is already
-    /// guaranteed by the signatude) but only contains the subset of ASCII-US characters which are
+    /// guaranteed by the signature) but only contains the subset of ASCII-US characters which are
     /// printable.
     pub(crate) unsafe fn from_str_unchecked<S>(value: S) -> Self
     where
