@@ -90,7 +90,11 @@ where
                 .expect("receiver `rx_incoming_request` should not error")
             {
                 Async::Ready(Some(request)) => {
-                    let cseq = request.headers().get(HeaderName::CSeq).unwrap().clone();
+                    let cseq = request
+                        .headers()
+                        .get(HeaderName::CSeq)
+                        .expect("request handler should not receive a request with an invalid CSeq")
+                        .clone();
                     self.serviced_request = Some((cseq, self.service.call(request)))
                 }
                 Async::Ready(None) => return Ok(Async::Ready(())),
