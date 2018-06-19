@@ -8,6 +8,7 @@ use protocol::{Message, Service};
 use request::Request;
 use response::Response;
 use status::StatusCode;
+use syntax::trim_whitespace;
 
 #[must_use = "futures do nothing unless polled"]
 pub struct RequestHandler<S>
@@ -93,8 +94,11 @@ where
                     let cseq = request
                         .headers()
                         .get(HeaderName::CSeq)
-                        .expect("request handler should not receive a request with an invalid CSeq")
+                        .expect("request handler should not receive a request with an invalid cseq")
                         .clone();
+                    let cseq =
+                        unsafe { HeaderValue::from_str_unchecked(trim_whitespace(cseq.as_str())) };
+
                     self.serviced_request = Some((cseq, self.service.call(request)))
                 }
                 Async::Ready(None) => return Ok(Async::Ready(())),
