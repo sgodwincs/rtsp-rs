@@ -3,7 +3,7 @@ use futures::sync::mpsc::Receiver;
 use futures::{Async, Future, Poll, Stream};
 
 use super::SenderHandle;
-use header::HeaderMap;
+use header::{HeaderMap, HeaderName, HeaderValue};
 use protocol::{Message, Service};
 use request::Request;
 use response::Response;
@@ -17,7 +17,7 @@ where
     rx_incoming_request: Receiver<Request<BytesMut>>,
     sender_handle: SenderHandle,
     service: S,
-    serviced_request: Option<S::Future>,
+    serviced_request: Option<(HeaderValue, S::Future)>,
 }
 
 impl<S> RequestHandler<S>
@@ -41,14 +41,11 @@ where
 
     fn poll_serviced_request(
         &mut self,
-        mut serviced_request: S::Future,
+        serviced_request: &mut S::Future,
     ) -> Poll<Response<BytesMut>, ()> {
         match serviced_request.poll() {
             Ok(Async::Ready(response)) => Ok(Async::Ready(response.into())),
-            Ok(Async::NotReady) => {
-                self.serviced_request = Some(serviced_request);
-                Ok(Async::NotReady)
-            }
+            Ok(Async::NotReady) => Ok(Async::NotReady),
             Err(_) => Ok(Async::Ready(
                 Response::builder()
                     .status_code(StatusCode::InternalServerError)
@@ -71,9 +68,20 @@ where
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         loop {
             if let Some(serviced_request) = self.serviced_request.take() {
-                let response = try_ready!(self.poll_serviced_request(serviced_request));
-                self.sender_handle
-                    .try_send_message(Message::Response(response))?;
+                let (cseq, mut serviced_request) = serviced_request;
+
+                match self.poll_serviced_request(&mut serviced_request) {
+                    Ok(Async::Ready(mut response)) => {
+                        response.headers_mut().insert(HeaderName::CSeq, cseq);
+                        self.sender_handle
+                            .try_send_message(Message::Response(response))?;
+                    }
+                    Ok(Async::NotReady) => {
+                        self.serviced_request = Some((cseq, serviced_request));
+                        return Ok(Async::NotReady);
+                    }
+                    Err(_) => panic!("calling `poll_serviced_request` should not error"),
+                }
             }
 
             match self
@@ -82,7 +90,8 @@ where
                 .expect("receiver `rx_incoming_request` should not error")
             {
                 Async::Ready(Some(request)) => {
-                    self.serviced_request = Some(self.service.call(request))
+                    let cseq = request.headers().get(HeaderName::CSeq).unwrap().clone();
+                    self.serviced_request = Some((cseq, self.service.call(request)))
                 }
                 Async::Ready(None) => return Ok(Async::Ready(())),
                 Async::NotReady => return Ok(Async::NotReady),
