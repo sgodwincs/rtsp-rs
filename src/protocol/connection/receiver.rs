@@ -498,6 +498,8 @@ impl ForwardingReceiver {
                     }
                 }
             }
+
+            self.incoming_sequence_number = Some(incoming_sequence_number);
         }
 
         Ok(Async::Ready(()))
