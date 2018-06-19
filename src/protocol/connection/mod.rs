@@ -77,7 +77,8 @@ impl Connection {
         let (tx_incoming_request, rx_incoming_request) = channel(config.request_buffer_size());
         let (tx_pending_request, rx_pending_request) = unbounded();
         let (tx_initiate_shutdown, rx_initiate_shutdown) = oneshot::channel();
-        let (tx_shutdown_event, rx_shutdown_event) = oneshot::channel();
+        let (tx_connection_shutdown_event, rx_connection_shutdown_event) = oneshot::channel();
+        let (tx_handler_shutdown_event, rx_handler_shutdown_event) = oneshot::channel();
         let (sink, stream) = transport.framed(Codec::with_events(tx_codec_event)).split();
 
         let receiver = Receiver::new(
@@ -94,7 +95,13 @@ impl Connection {
                 service,
                 rx_incoming_request,
                 sender_handle.clone(),
+                tx_handler_shutdown_event,
             ))
+        } else {
+            None
+        };
+        let rx_handler_shutdown_event = if handler.is_some() {
+            Some(rx_handler_shutdown_event)
         } else {
             None
         };
@@ -104,17 +111,18 @@ impl Connection {
             receiver: Some(receiver),
             sender: Some(sender),
             sender_handle: Some(sender_handle.clone()),
-            shutdown: Shutdown::new(rx_initiate_shutdown, tx_shutdown_event),
+            shutdown: Shutdown::new(rx_initiate_shutdown, tx_connection_shutdown_event),
         };
         let connection_handle = ConnectionHandle::new(
             connection.allow_requests.clone(),
             config.graceful_shutdown_default_timeout_duration(),
             config.request_default_max_timeout_duration(),
             config.request_default_timeout_duration(),
+            rx_connection_shutdown_event,
+            rx_handler_shutdown_event,
             sender_handle,
             tx_pending_request,
             tx_initiate_shutdown,
-            rx_shutdown_event,
         );
 
         (connection, handler, connection_handle)
@@ -250,10 +258,10 @@ pub struct ConnectionHandle {
     allow_requests: Arc<AtomicBool>,
     request_default_max_timeout_duration: Option<Duration>,
     request_default_timeout_duration: Option<Duration>,
-    rx_shutdown_event: Arc<Mutex<Option<oneshot::Receiver<()>>>>,
     sender_handle: SenderHandle,
     sequence_number: Arc<Mutex<CSeq>>,
-    shutdown: Arc<Mutex<ConnectionShutdown>>,
+    shutdown_receiver: Arc<Mutex<Option<ConnectionShutdownReceiver>>>,
+    shutdown_sender: Arc<Mutex<ConnectionShutdownSender>>,
     tx_pending_request: UnboundedSender<PendingRequestUpdate>,
 }
 
@@ -263,12 +271,17 @@ impl ConnectionHandle {
         graceful_shutdown_default_timeout_duration: Duration,
         request_default_max_timeout_duration: Option<Duration>,
         request_default_timeout_duration: Option<Duration>,
+        rx_connection_shutdown_event: oneshot::Receiver<()>,
+        rx_handler_shutdown_event: Option<oneshot::Receiver<()>>,
         sender_handle: SenderHandle,
         tx_pending_request: UnboundedSender<PendingRequestUpdate>,
         tx_initiate_shutdown: oneshot::Sender<ShutdownType>,
-        rx_shutdown_event: oneshot::Receiver<()>,
     ) -> Self {
-        let shutdown = ConnectionShutdown::new(
+        let shutdown_receiver = ConnectionShutdownReceiver::new(
+            rx_connection_shutdown_event,
+            rx_handler_shutdown_event,
+        );
+        let shutdown_sender = ConnectionShutdownSender::new(
             graceful_shutdown_default_timeout_duration,
             tx_initiate_shutdown,
         );
@@ -277,12 +290,12 @@ impl ConnectionHandle {
             allow_requests,
             request_default_max_timeout_duration,
             request_default_timeout_duration,
-            rx_shutdown_event: Arc::new(Mutex::new(Some(rx_shutdown_event))),
             sender_handle,
             sequence_number: Arc::new(Mutex::new(
                 CSeq::try_from(0).expect("sequence number `0` should not be invalid"),
             )),
-            shutdown: Arc::new(Mutex::new(shutdown)),
+            shutdown_receiver: Arc::new(Mutex::new(Some(shutdown_receiver))),
+            shutdown_sender: Arc::new(Mutex::new(shutdown_sender)),
             tx_pending_request,
         }
     }
@@ -362,31 +375,77 @@ impl ConnectionHandle {
     }
 
     pub fn shutdown(&mut self, shutdown_type: ShutdownType) {
-        self.shutdown
+        self.shutdown_sender
             .lock()
-            .expect("locking `shutdown` should not error")
+            .expect("locking `shutdown_sender` should not error")
             .shutdown(shutdown_type)
     }
 
-    pub fn take_shutdown(&mut self) -> Option<oneshot::Receiver<()>> {
-        self.rx_shutdown_event
+    pub fn take_shutdown(&mut self) -> Option<ConnectionShutdownReceiver> {
+        self.shutdown_receiver
             .lock()
-            .expect("locking `rx_shutdown_event` should not error")
+            .expect("locking `shutdown_receiver` should not error")
             .take()
     }
 }
 
-struct ConnectionShutdown {
+pub struct ConnectionShutdownReceiver {
+    rx_connection_shutdown_event: Option<oneshot::Receiver<()>>,
+    rx_handler_shutdown_event: Option<oneshot::Receiver<()>>,
+}
+
+impl ConnectionShutdownReceiver {
+    pub(self) fn new(
+        rx_connection_shutdown_event: oneshot::Receiver<()>,
+        rx_handler_shutdown_event: Option<oneshot::Receiver<()>>,
+    ) -> Self {
+        ConnectionShutdownReceiver {
+            rx_connection_shutdown_event: Some(rx_connection_shutdown_event),
+            rx_handler_shutdown_event,
+        }
+    }
+}
+
+impl Future for ConnectionShutdownReceiver {
+    type Item = ();
+    type Error = ();
+
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        if let Some(mut receiver) = self.rx_connection_shutdown_event.take() {
+            match receiver.poll() {
+                Ok(Async::NotReady) => self.rx_connection_shutdown_event = Some(receiver),
+                Err(_) => panic!("connection shutdown event receiver should not error"),
+                _ => (),
+            }
+        }
+
+        if let Some(mut receiver) = self.rx_handler_shutdown_event.take() {
+            match receiver.poll() {
+                Ok(Async::NotReady) => self.rx_handler_shutdown_event = Some(receiver),
+                Err(_) => panic!("handler shutdown event receiver should not error"),
+                _ => (),
+            }
+        }
+
+        if self.rx_connection_shutdown_event.is_none() && self.rx_handler_shutdown_event.is_none() {
+            Ok(Async::Ready(()))
+        } else {
+            Ok(Async::NotReady)
+        }
+    }
+}
+
+struct ConnectionShutdownSender {
     graceful_shutdown_default_timeout_duration: Duration,
     tx_initiate_shutdown: Option<oneshot::Sender<ShutdownType>>,
 }
 
-impl ConnectionShutdown {
+impl ConnectionShutdownSender {
     pub fn new(
         graceful_shutdown_default_timeout_duration: Duration,
         tx_initiate_shutdown: oneshot::Sender<ShutdownType>,
     ) -> Self {
-        ConnectionShutdown {
+        ConnectionShutdownSender {
             graceful_shutdown_default_timeout_duration,
             tx_initiate_shutdown: Some(tx_initiate_shutdown),
         }
@@ -399,7 +458,7 @@ impl ConnectionShutdown {
     }
 }
 
-impl Drop for ConnectionShutdown {
+impl Drop for ConnectionShutdownSender {
     fn drop(&mut self) {
         let duration = self.graceful_shutdown_default_timeout_duration;
         self.shutdown(ShutdownType::Graceful(duration));

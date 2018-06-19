@@ -1,6 +1,8 @@
 //! Connection Shutdown Handler
 //!
-//! This module contains the logic for dealing with shutdown events.
+//! This module contains the logic for dealing with connection shutdown events. Specifically, this
+//! module only handles the shutdown of the the [`super::Connection`] task and is not involved with
+//! the shutdown of the [`super::RequestHandler`] task.
 
 use futures::sync::oneshot;
 use futures::{Async, Future, Poll};
@@ -15,7 +17,9 @@ pub struct Shutdown {
     rx_initiate_shutdown: Option<oneshot::Receiver<ShutdownType>>,
 
     /// When a graceful shutdown has been started, a timer is set for which the connection must end
-    /// before switching to an immediate shutdown.
+    /// before switching to an immediate shutdown. This timer does not apply to the request handler
+    /// task. All requests that are forwarded to the request handler will always be processed before
+    /// it shuts down.
     timer: Option<Delay>,
 
     /// It is possible that a shutdown can occur without an explicit call from a
@@ -208,9 +212,15 @@ pub enum ShutdownType {
     /// be read or written. If all pending requests have not been matched by the end of this
     /// duration, they will be dropped, and the shutdown state will transition to
     /// [`ShutdownState::Shutdown`].
+    ///
+    /// This timer does not apply to the request handler task. All requests that are forwarded to
+    /// the request handler will always be processed before it shuts down. But once a graceful
+    /// shutdown starts, no more requests will be forwarded from that point onwards.
     Graceful(Duration),
 
     /// A complete and immediate shutdown of the connection is to occur. All pending requests will
-    /// be dropped and no more messages can be read or written.
+    /// be dropped and no more messages can be read or written. All currently buffered requests will
+    /// be processed before the request handler is shutdown, but the connection itself will shutdown
+    /// immediately.
     Immediate,
 }

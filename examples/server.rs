@@ -27,7 +27,8 @@ fn main() {
 
         tokio::spawn(handler.unwrap());
 
-        // Only shutdown when the client has finished.
+        // Only shutdown when the client has finished. The shutdown will be fired when both the
+        // connection and handler spawned above have finished.
 
         tokio::spawn(handle.take_shutdown().unwrap().then(|_| {
             std::mem::drop(handle);

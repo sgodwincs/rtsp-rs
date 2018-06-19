@@ -1,5 +1,6 @@
 use bytes::BytesMut;
 use futures::sync::mpsc::Receiver;
+use futures::sync::oneshot;
 use futures::{Async, Future, Poll, Stream};
 
 use super::SenderHandle;
@@ -19,6 +20,7 @@ where
     sender_handle: SenderHandle,
     service: S,
     serviced_request: Option<(HeaderValue, S::Future)>,
+    tx_shutdown_event: Option<oneshot::Sender<()>>,
 }
 
 impl<S> RequestHandler<S>
@@ -31,12 +33,14 @@ where
         service: S,
         rx_incoming_request: Receiver<Request<BytesMut>>,
         sender_handle: SenderHandle,
+        tx_shutdown_event: oneshot::Sender<()>,
     ) -> Self {
         RequestHandler {
             rx_incoming_request,
             sender_handle,
             service,
             serviced_request: None,
+            tx_shutdown_event: Some(tx_shutdown_event),
         }
     }
 
@@ -54,6 +58,19 @@ where
                     .expect("internal server error response should not be invalid"),
             )),
         }
+    }
+}
+
+impl<S> Drop for RequestHandler<S>
+where
+    S: Service,
+{
+    fn drop(&mut self) {
+        self.tx_shutdown_event
+            .take()
+            .expect("request handler should only send shutdown event on drop")
+            .send(())
+            .ok();
     }
 }
 
