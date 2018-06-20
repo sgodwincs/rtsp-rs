@@ -468,7 +468,7 @@ impl Drop for ConnectionShutdownSender {
 }
 
 pub struct Config {
-    continue_wait_duration: Duration,
+    continue_wait_duration: Option<Duration>,
     decode_timeout_duration: Duration,
     graceful_shutdown_default_timeout_duration: Duration,
     request_buffer_size: usize,
@@ -485,7 +485,7 @@ impl Config {
         Config::default()
     }
 
-    pub fn continue_wait_duration(&self) -> Duration {
+    pub fn continue_wait_duration(&self) -> Option<Duration> {
         self.continue_wait_duration
     }
 
@@ -519,7 +519,7 @@ impl Default for Config {
 }
 
 pub struct ConfigBuilder {
-    continue_wait_duration: Duration,
+    continue_wait_duration: Option<Duration>,
     decode_timeout_duration: Duration,
     graceful_shutdown_default_timeout_duration: Duration,
     request_buffer_size: usize,
@@ -533,8 +533,10 @@ impl ConfigBuilder {
     }
 
     pub fn build(self) -> Result<Config, ConfigBuilderError> {
-        if self.continue_wait_duration.as_secs() == 0 {
-            return Err(ConfigBuilderError::InvalidContinueWaitDuration);
+        if let Some(continue_wait_duration) = self.continue_wait_duration {
+            if continue_wait_duration.as_secs() == 0 {
+                return Err(ConfigBuilderError::InvalidContinueWaitDuration);
+            }
         }
 
         if self.decode_timeout_duration.as_secs() == 0 {
@@ -568,7 +570,7 @@ impl ConfigBuilder {
         })
     }
 
-    pub fn continue_wait_duration(&mut self, duration: Duration) -> &mut Self {
+    pub fn continue_wait_duration(&mut self, duration: Option<Duration>) -> &mut Self {
         self.continue_wait_duration = duration;
         self
     }
@@ -605,7 +607,7 @@ impl ConfigBuilder {
 impl Default for ConfigBuilder {
     fn default() -> Self {
         ConfigBuilder {
-            continue_wait_duration: DEFAULT_CONTINUE_WAIT_DURATION,
+            continue_wait_duration: Some(DEFAULT_CONTINUE_WAIT_DURATION),
             decode_timeout_duration: DEFAULT_DECODE_TIMEOUT_DURATION,
             graceful_shutdown_default_timeout_duration: DEFAULT_GRACEFUL_SHUTDOWN_TIMEOUT_DURATION,
             request_buffer_size: DEFAULT_REQUEST_BUFFER_SIZE,

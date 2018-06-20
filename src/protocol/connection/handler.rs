@@ -20,7 +20,7 @@ where
     S: Service,
 {
     continue_timer: Option<Delay>,
-    continue_wait_duration: Duration,
+    continue_wait_duration: Option<Duration>,
     rx_incoming_request: Receiver<(CSeq, Request<BytesMut>)>,
     sender_handle: SenderHandle,
     service: S,
@@ -39,7 +39,7 @@ where
         rx_incoming_request: Receiver<(CSeq, Request<BytesMut>)>,
         sender_handle: SenderHandle,
         tx_shutdown_event: oneshot::Sender<()>,
-        continue_wait_duration: Duration,
+        continue_wait_duration: Option<Duration>,
     ) -> Self {
         RequestHandler {
             continue_timer: None,
@@ -49,6 +49,28 @@ where
             service,
             serviced_request: None,
             tx_shutdown_event: Some(tx_shutdown_event),
+        }
+    }
+
+    fn poll_continue_timer(&mut self, cseq: CSeq) {
+        while let Some(mut continue_timer) = self.continue_timer.take() {
+            match continue_timer
+                .poll()
+                .expect("polling `continue_timer` should not error")
+            {
+                Async::Ready(_) => {
+                    let response = Response::builder()
+                        .status_code(StatusCode::Continue)
+                        .build(BytesMut::new())
+                        .expect("continue response should not be invalid");
+                    self.send_response(cseq, response);
+                    self.reset_continue_timer();
+                }
+                Async::NotReady => {
+                    self.continue_timer = Some(continue_timer);
+                    break;
+                }
+            }
         }
     }
 
@@ -64,26 +86,7 @@ where
                 Ok(Async::Ready(()))
             }
             Ok(Async::NotReady) => {
-                loop {
-                    match self
-                        .continue_timer
-                        .as_mut()
-                        .expect("continue timer should be set while a request is being serviced")
-                        .poll()
-                        .expect("polling `continue_timer` should not error")
-                    {
-                        Async::Ready(_) => {
-                            let response = Response::builder()
-                                .status_code(StatusCode::Continue)
-                                .build(BytesMut::new())
-                                .expect("continue response should not be invalid");
-                            self.send_response(cseq, response);
-                            self.reset_continue_timer();
-                        }
-                        Async::NotReady => break,
-                    }
-                }
-
+                self.poll_continue_timer(cseq);
                 self.serviced_request = Some((cseq, serviced_request));
                 Ok(Async::NotReady)
             }
@@ -113,8 +116,10 @@ where
     }
 
     fn reset_continue_timer(&mut self) {
-        let expire_time = Instant::now() + self.continue_wait_duration;
-        self.continue_timer = Some(Delay::new(expire_time));
+        if let Some(duration) = self.continue_wait_duration {
+            let expire_time = Instant::now() + duration;
+            self.continue_timer = Some(Delay::new(expire_time));
+        }
     }
 
     fn send_response(&mut self, cseq: CSeq, mut response: Response<BytesMut>) {
