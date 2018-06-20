@@ -2,7 +2,6 @@ extern crate bytes;
 extern crate futures;
 extern crate rtsp;
 extern crate tokio;
-extern crate tokio_timer;
 
 use bytes::BytesMut;
 use futures::{future, Future, Stream};
