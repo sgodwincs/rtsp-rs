@@ -589,7 +589,7 @@ pub enum RecoverableInvalidRequest {
     InvalidHeaderName,
     InvalidHeaderValue,
     InvalidMethod,
-    InvalidURI,
+    InvalidRequestURI,
 }
 
 impl fmt::Display for RecoverableInvalidRequest {
@@ -606,7 +606,7 @@ impl Error for RecoverableInvalidRequest {
             InvalidHeaderName => "invalid RTSP request - invalid header name",
             InvalidHeaderValue => "invalid RTSP request - invalid header value",
             InvalidMethod => "invalid RTSP request - invalid method",
-            InvalidURI => "invalid RTSP request - invalid uri",
+            InvalidRequestURI => "invalid RTSP request - invalid request URI",
         }
     }
 }
@@ -621,7 +621,7 @@ impl TryFrom<InvalidRequest> for RecoverableInvalidRequest {
             InvalidRequest::InvalidHeaderName => Ok(InvalidHeaderName),
             InvalidRequest::InvalidHeaderValue => Ok(InvalidHeaderValue),
             InvalidRequest::InvalidMethod => Ok(InvalidMethod),
-            InvalidRequest::InvalidURI => Ok(InvalidURI),
+            InvalidRequest::InvalidRequestURI => Ok(InvalidRequestURI),
             _ => Err(()),
         }
     }

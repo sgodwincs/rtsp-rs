@@ -488,7 +488,8 @@ impl RequestDecoder {
                 Header => self.parse_header(&mut buffer),
                 Body => self.parse_body(&mut buffer),
                 End => {
-                    let request = self.builder
+                    let request = self
+                        .builder
                         .build(replace(&mut self.body, None).unwrap())
                         .map_err(|error| {
                             InvalidRequest::try_from(error).expect("unexpected `BuilderError`")
@@ -538,7 +539,8 @@ impl RequestDecoder {
             Incomplete => Incomplete,
             Complete(None) => {
                 self.state = ParseState::Body;
-                let entry = self.builder
+                let entry = self
+                    .builder
                     .headers
                     .entry(HeaderName::ContentLength)
                     .expect("`ContentLength` should be a valid `HeaderName`");
@@ -682,7 +684,7 @@ pub enum InvalidRequest {
     InvalidHeaderValue,
     InvalidMethod,
     InvalidRequestLine,
-    InvalidURI,
+    InvalidRequestURI,
     InvalidVersion,
     UnsupportedVersion,
 }
@@ -726,9 +728,9 @@ impl error::Error for InvalidRequest {
             InvalidHeaderLine => "invalid RTSP request - invalid header line",
             InvalidHeaderName => "invalid RTSP request - invalid header name",
             InvalidHeaderValue => "invalid RTSP request - invalid header value",
-            InvalidMethod => "invalid RTSP request - invalid reason phrase",
+            InvalidMethod => "invalid RTSP request - invalid method",
             InvalidRequestLine => "invalid RTSP request - invalid request line",
-            InvalidURI => "invalid RTSP request - invalid status code",
+            InvalidRequestURI => "invalid RTSP request - invalid request URI",
             InvalidVersion => "invalid RTSP request - invalid version",
             UnsupportedVersion => "invalid RTSP request - unsupported version",
         }
@@ -745,7 +747,7 @@ impl TryFrom<RequestBuilderError> for InvalidRequest {
             RequestBuilderError::InvalidHeaderName => Ok(InvalidHeaderName),
             RequestBuilderError::InvalidHeaderValue => Ok(InvalidHeaderValue),
             RequestBuilderError::InvalidMethod => Ok(InvalidMethod),
-            RequestBuilderError::InvalidURI => Ok(InvalidURI),
+            RequestBuilderError::InvalidRequestURI => Ok(InvalidRequestURI),
             _ => Err(()),
         }
     }
@@ -917,7 +919,8 @@ impl ResponseDecoder {
                 Header => self.parse_header(&mut buffer),
                 Body => self.parse_body(&mut buffer),
                 End => {
-                    let response = self.builder
+                    let response = self
+                        .builder
                         .build(replace(&mut self.body, None).unwrap())
                         .map_err(|error| {
                             InvalidResponse::try_from(error).expect("unexpected `BuilderError`")
@@ -967,7 +970,8 @@ impl ResponseDecoder {
             Incomplete => Incomplete,
             Complete(None) => {
                 self.state = ParseState::Body;
-                let entry = self.builder
+                let entry = self
+                    .builder
                     .headers
                     .entry(HeaderName::ContentLength)
                     .expect("`ContentLength` should be a valid `HeaderName`");

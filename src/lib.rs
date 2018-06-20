@@ -1,9 +1,12 @@
 #![feature(non_exhaustive)]
 #![feature(try_from)]
+#![recursion_limit = "256"]
 
 extern crate ascii;
 extern crate bytes;
 extern crate chrono;
+#[macro_use]
+extern crate delegate;
 extern crate fnv;
 #[macro_use]
 extern crate futures;
@@ -43,5 +46,5 @@ pub use response::Response;
 pub use server::Server;
 pub use session::SessionID;
 pub use status::{StatusCode, StatusCodeClass};
-pub use uri::URI;
+pub use uri::{RequestURI, RequestURIField};
 pub use version::Version;

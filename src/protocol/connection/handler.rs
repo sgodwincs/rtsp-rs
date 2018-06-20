@@ -12,7 +12,6 @@ use protocol::{Message, Service};
 use request::Request;
 use response::Response;
 use status::StatusCode;
-use uri::URI;
 
 #[must_use = "futures do nothing unless polled"]
 pub struct RequestHandler<S>
@@ -102,15 +101,7 @@ where
         }
     }
 
-    fn process_request(&mut self, cseq: CSeq, mut request: Request<BytesMut>) {
-        // Remove a fragment from URI if there is one.
-
-        if let URI::URI(uri) = request.uri_mut() {
-            uri.uri_mut().set_fragment(None);
-        }
-
-        // Start servicing the request.
-
+    fn process_request(&mut self, cseq: CSeq, request: Request<BytesMut>) {
         self.reset_continue_timer();
         self.serviced_request = Some((cseq, self.service.call(request)))
     }

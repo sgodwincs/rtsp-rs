@@ -11,7 +11,7 @@ use std::mem::replace;
 
 use header::{HeaderMap, HeaderName, HeaderValue, TypedHeader, TypedHeaderMap};
 use method::Method;
-use uri::URI;
+use uri::RequestURIField;
 use version::Version;
 
 /// Represents an RTSP request.
@@ -40,13 +40,13 @@ where
     /// an extension method.
     method: Method,
 
-    /// The absolute RTSP URI (including scheme, host, and port) for the target resource. IPv6
-    /// literals are supported.
+    /// The absolute RTSP request URI (including scheme, host, and port) for the target resource.
+    /// IPv6 literals are supported.
     ///
     /// RTSP also supports specifying just `*` for the URI in the request line indicating that the
     /// request does not apply to a particular resource but to the server or proxy itself. This is
     /// only allowed when the request method does not necessarily apply to a resource.
-    uri: URI,
+    uri: RequestURIField,
 
     /// The protocol version that is being used.
     version: Version,
@@ -64,10 +64,10 @@ impl Request<()> {
     }
 
     /// A convenience function for quickly creating a new builder with the method set to
-    /// `"DESCRIBE"` and the URI set to `uri`.
+    /// `"DESCRIBE"` and the request URI field set to `uri`.
     pub fn describe<T>(uri: T) -> Builder
     where
-        URI: TryFrom<T>,
+        RequestURIField: TryFrom<T>,
     {
         let mut b = Builder::new();
         b.method(Method::Describe).uri(uri);
@@ -75,10 +75,10 @@ impl Request<()> {
     }
 
     /// A convenience function for quickly creating a new builder with the method set to
-    /// `"GET_PARAMETER"` and the URI set to `uri`.
+    /// `"GET_PARAMETER"` and the request URI field set to `uri`.
     pub fn get_parameter<T>(uri: T) -> Builder
     where
-        URI: TryFrom<T>,
+        RequestURIField: TryFrom<T>,
     {
         let mut b = Builder::new();
         b.method(Method::GetParameter).uri(uri);
@@ -86,10 +86,10 @@ impl Request<()> {
     }
 
     /// A convenience function for quickly creating a new builder with the method set to `"OPTIONS"`
-    /// and the URI set to `uri`.
+    /// and the request URI field set to `uri`.
     pub fn options<T>(uri: T) -> Builder
     where
-        URI: TryFrom<T>,
+        RequestURIField: TryFrom<T>,
     {
         let mut b = Builder::new();
         b.method(Method::Options).uri(uri);
@@ -97,10 +97,10 @@ impl Request<()> {
     }
 
     /// A convenience function for quickly creating a new builder with the method set to `"PAUSE"`
-    /// and the URI set to `uri`.
+    /// and the request URI set to `uri`.
     pub fn pause<T>(uri: T) -> Builder
     where
-        URI: TryFrom<T>,
+        RequestURIField: TryFrom<T>,
     {
         let mut b = Builder::new();
         b.method(Method::Pause).uri(uri);
@@ -108,10 +108,10 @@ impl Request<()> {
     }
 
     /// A convenience function for quickly creating a new builder with the method set to `"PLAY"`
-    /// and the URI set to `uri`.
+    /// and the request URI set to `uri`.
     pub fn play<T>(uri: T) -> Builder
     where
-        URI: TryFrom<T>,
+        RequestURIField: TryFrom<T>,
     {
         let mut b = Builder::new();
         b.method(Method::Play).uri(uri);
@@ -119,10 +119,10 @@ impl Request<()> {
     }
 
     /// A convenience function for quickly creating a new builder with the method set to
-    /// `"PLAY_NOTIFY"` and the URI set to `uri`.
+    /// `"PLAY_NOTIFY"` and the request URI set to `uri`.
     pub fn play_notify<T>(uri: T) -> Builder
     where
-        URI: TryFrom<T>,
+        RequestURIField: TryFrom<T>,
     {
         let mut b = Builder::new();
         b.method(Method::PlayNotify).uri(uri);
@@ -130,10 +130,10 @@ impl Request<()> {
     }
 
     /// A convenience function for quickly creating a new builder with the method set to
-    /// `"REDIRECT"` and the URI set to `uri`.
+    /// `"REDIRECT"` and the request URI set to `uri`.
     pub fn redirect<T>(uri: T) -> Builder
     where
-        URI: TryFrom<T>,
+        RequestURIField: TryFrom<T>,
     {
         let mut b = Builder::new();
         b.method(Method::Redirect).uri(uri);
@@ -141,10 +141,10 @@ impl Request<()> {
     }
 
     /// A convenience function for quickly creating a new builder with the method set to
-    /// `"SET_PARAMETER"` and the URI set to `uri`.
+    /// `"SET_PARAMETER"` and the request URI set to `uri`.
     pub fn set_parameter<T>(uri: T) -> Builder
     where
-        URI: TryFrom<T>,
+        RequestURIField: TryFrom<T>,
     {
         let mut b = Builder::new();
         b.method(Method::SetParameter).uri(uri);
@@ -152,10 +152,10 @@ impl Request<()> {
     }
 
     /// A convenience function for quickly creating a new builder with the method set to `"SETUP"`
-    /// and the URI set to `uri`.
+    /// and the request URI set to `uri`.
     pub fn setup<T>(uri: T) -> Builder
     where
-        URI: TryFrom<T>,
+        RequestURIField: TryFrom<T>,
     {
         let mut b = Builder::new();
         b.method(Method::Setup).uri(uri);
@@ -163,10 +163,10 @@ impl Request<()> {
     }
 
     /// A convenience function for quickly creating a new builder with the method set to
-    /// `"TEARDOWN"` and the URI set to `uri`.
+    /// `"TEARDOWN"` and the request URI set to `uri`.
     pub fn teardown<T>(uri: T) -> Builder
     where
-        URI: TryFrom<T>,
+        RequestURIField: TryFrom<T>,
     {
         let mut b = Builder::new();
         b.method(Method::Teardown).uri(uri);
@@ -224,12 +224,12 @@ where
     }
 
     /// Returns an immutable reference to the request URI.
-    pub fn uri(&self) -> &URI {
+    pub fn uri(&self) -> &RequestURIField {
         &self.uri
     }
 
     /// Returns a mutable reference to the request URI.
-    pub fn uri_mut(&mut self) -> &mut URI {
+    pub fn uri_mut(&mut self) -> &mut RequestURIField {
         &mut self.uri
     }
 
@@ -314,7 +314,7 @@ where
     /// RTSP also supports specifying just `*` for the URI in the request line indicating that the
     /// request does not apply to a particular resource but to the server or proxy itself. This is
     /// only allowed when the request method does not necessarily apply to a resource.
-    pub(crate) uri: Option<URI>,
+    pub(crate) uri: Option<RequestURIField>,
 
     /// The protocol version that is being used.
     pub(crate) version: Version,
@@ -363,7 +363,7 @@ where
                     version: self.version,
                 })
             } else {
-                Err(BuilderError::MissingURI)
+                Err(BuilderError::MissingRequestURI)
             }
         } else {
             Err(BuilderError::MissingMethod)
@@ -420,11 +420,11 @@ where
     /// ```
     pub fn uri<T>(&mut self, uri: T) -> &mut Self
     where
-        URI: TryFrom<T>,
+        RequestURIField: TryFrom<T>,
     {
-        match URI::try_from(uri) {
+        match RequestURIField::try_from(uri) {
             Ok(uri) => self.uri = Some(uri),
-            Err(_) => self.error = Some(BuilderError::InvalidURI),
+            Err(_) => self.error = Some(BuilderError::InvalidRequestURI),
         }
 
         self
@@ -626,8 +626,8 @@ pub enum BuilderError {
     /// This error indicates that the given method was invalid.
     InvalidMethod,
 
-    /// This error indicates that the given URI was invalid.
-    InvalidURI,
+    /// This error indicates that the given request URI was invalid.
+    InvalidRequestURI,
 
     /// This error indicates that the version was invalid.
     InvalidVersion,
@@ -635,8 +635,8 @@ pub enum BuilderError {
     /// This error indicates that a method was not specified.
     MissingMethod,
 
-    /// This error indicates that a URI was not specified.
-    MissingURI,
+    /// This error indicates that a request URI was not specified.
+    MissingRequestURI,
 
     /// This error indicates that the version was unsupported. The only supported version is
     /// RTSP 2.0.
@@ -657,10 +657,10 @@ impl Error for BuilderError {
             &InvalidHeaderName => "invalid RTSP header name",
             &InvalidHeaderValue => "invalid RTSP header value",
             &InvalidMethod => "invalid RTSP method",
-            &InvalidURI => "invalid RTSP URI",
+            &InvalidRequestURI => "invalid RTSP request URI",
             &InvalidVersion => "invalid RTSP version",
             &MissingMethod => "missing RTSP method",
-            &MissingURI => "missing RTSP URI",
+            &MissingRequestURI => "missing RTSP request URI",
             &UnsupportedVersion => "unsupported RTSP version",
         }
     }
