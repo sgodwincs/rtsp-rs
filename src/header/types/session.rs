@@ -12,11 +12,37 @@ use syntax::trim_whitespace;
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct Session {
     id: SessionID,
-    timeout: Duration,
+    timeout: Option<Duration>,
 }
 
 impl Session {
-    /// Constructs a new `Session` instance with the specified session ID.
+    pub fn try_from_session_with_no_timeout<S>(value: S) -> Result<Self, ExpiredSession>
+    where
+        S: SessionData,
+    {
+        let mut session = Session::try_from_session_with_no_timeout(value);
+        session.timeout = None;
+        session
+    }
+
+    pub fn try_from_session_with_timeout<S>(value: S) -> Result<Self, ExpiredSession>
+    where
+        S: SessionData,
+    {
+        let timeout = value
+            .timeout()
+            .signed_duration_since(Utc::now())
+            .to_std()
+            .map_err(|_| ExpiredSession)?;
+
+        Ok(Session {
+            id: value.id().clone(),
+            timeout: Some(timeout),
+        })
+    }
+
+    /// Constructs a new `Session` instance with the specified session ID. No timeout is set for
+    /// this session.
     ///
     /// # Example
     ///
@@ -29,18 +55,21 @@ impl Session {
     /// use rtsp::SessionID;
     /// use rtsp::header::types::Session;
     ///
-    /// let session = Session::new("QKyjN8nt2WqbWw4tIYof52").unwrap();
+    /// let session = Session::with_no_timeout("QKyjN8nt2WqbWw4tIYof52").unwrap();
     /// assert_eq!(session.id(), &SessionID::try_from("QKyjN8nt2WqbWw4tIYof52").unwrap());
-    /// assert_eq!(session.timeout(), Duration::new(60, 0));
+    /// assert_eq!(session.timeout(), None);
     /// ```
-    pub fn new<T>(id: T) -> Result<Self, InvalidSessionID>
+    pub fn with_no_timeout<T>(id: T) -> Result<Self, InvalidSessionID>
     where
         SessionID: TryFrom<T, Error = InvalidSessionID>,
     {
-        Session::with_timeout(id, DEFAULT_TIMEOUT)
+        Ok(Session {
+            id: SessionID::try_from(id)?,
+            timeout: None,
+        })
     }
 
-    /// Constructs a new `Session` instance with the specified session ID.
+    /// Constructs a new `Session` instance with the specified session ID and timeout.
     ///
     /// # Example
     ///
@@ -55,7 +84,7 @@ impl Session {
     ///
     /// let session = Session::with_timeout("QKyjN8nt2WqbWw4tIYof52", 180).unwrap();
     /// assert_eq!(session.id(), &SessionID::try_from("QKyjN8nt2WqbWw4tIYof52").unwrap());
-    /// assert_eq!(session.timeout(), Duration::new(180, 0));
+    /// assert_eq!(session.timeout(), Some(Duration::new(180, 0)));
     /// ```
     pub fn with_timeout<T>(id: T, timeout: u64) -> Result<Self, InvalidSessionID>
     where
@@ -63,8 +92,12 @@ impl Session {
     {
         Ok(Session {
             id: SessionID::try_from(id)?,
-            timeout: Duration::new(timeout, 0),
+            timeout: Some(Duration::new(timeout, 0)),
         })
+    }
+
+    pub fn has_timeout(&self) -> bool {
+        self.timeout.is_some()
     }
 
     pub fn id(&self) -> &SessionID {
@@ -75,28 +108,12 @@ impl Session {
         &mut self.id
     }
 
-    pub fn timeout(&self) -> Duration {
+    pub fn timeout(&self) -> Option<Duration> {
         self.timeout
     }
 
-    pub fn timeout_mut(&mut self) -> &mut Duration {
+    pub fn timeout_mut(&mut self) -> &mut Option<Duration> {
         &mut self.timeout
-    }
-
-    pub fn try_from_session<S>(value: S) -> Result<Self, ExpiredSession>
-    where
-        S: SessionData,
-    {
-        let timeout = value
-            .timeout()
-            .signed_duration_since(Utc::now())
-            .to_std()
-            .map_err(|_| ExpiredSession)?;
-
-        Ok(Session {
-            id: value.id().clone(),
-            timeout: timeout,
-        })
     }
 }
 
@@ -123,14 +140,22 @@ impl TypedHeader for Session {
     /// assert_eq!(typed_header.to_header_raw(), raw_header);
     ///
     /// let typed_header = Session::with_timeout("QKyjN8nt2WqbWw4tIYof52", 180).unwrap();
-    /// let raw_header = vec![HeaderValue::try_from("QKyjN8nt2WqbWw4tIYof52; timeout = 180").unwrap()];
+    /// let raw_header = vec![
+    ///     HeaderValue::try_from("QKyjN8nt2WqbWw4tIYof52; timeout = 180").unwrap()
+    /// ];
     /// assert_eq!(typed_header.to_header_raw(), raw_header);
     /// ```
     fn to_header_raw(&self) -> Vec<HeaderValue> {
-        let value = if self.timeout.as_secs() == DEFAULT_TIMEOUT {
-            self.id.as_str().to_string()
+        let id = self.id.as_str();
+
+        let value = if let Some(timeout) = self.timeout {
+            if timeout.as_secs() == DEFAULT_TIMEOUT {
+                id.to_string()
+            } else {
+                format!("{}; timeout = {}", id, timeout.as_secs())
+            }
         } else {
-            format!("{}; timeout = {}", self.id.as_str(), self.timeout.as_secs())
+            id.to_string()
         };
 
         // Unsafe Justification
@@ -178,7 +203,9 @@ impl TypedHeader for Session {
     /// );
     ///
     /// let typed_header = Session::with_timeout("QKyjN8nt2WqbWw4tIYof52", 180).unwrap();
-    /// let raw_header = vec![HeaderValue::try_from("QKyjN8nt2WqbWw4tIYof52; timeout = 180").unwrap()];
+    /// let raw_header = vec![
+    ///     HeaderValue::try_from("QKyjN8nt2WqbWw4tIYof52; timeout = 180").unwrap()
+    /// ];
     ///
     /// assert_eq!(
     ///     Session::try_from_header_raw(&raw_header).unwrap(),
@@ -198,10 +225,7 @@ impl TypedHeader for Session {
         let id = SessionID::try_from(trim_whitespace(parts[0])).map_err(|_| InvalidTypedHeader)?;
 
         if parts.len() == 1 {
-            Ok(Session {
-                id,
-                timeout: Duration::new(DEFAULT_TIMEOUT, 0),
-            })
+            Ok(Session { id, timeout: None })
         } else {
             let parts = parts[1]
                 .splitn(2, '=')
@@ -220,7 +244,7 @@ impl TypedHeader for Session {
                         } else {
                             Ok(Session {
                                 id,
-                                timeout: Duration::new(delta, 0),
+                                timeout: Some(Duration::new(delta, 0)),
                             })
                         }
                     })
