@@ -56,6 +56,7 @@ impl HeaderValue {
     where
         S: Into<String>,
     {
+        debug_assert!(HeaderValue::try_from(value).is_ok());
         HeaderValue(value.into())
     }
 
