@@ -1,9 +1,9 @@
-//! RTSP Version
+//! Version
 //!
-//! This module contains a definition of the `Version` type. The `Version` type is intended to be
-//! accessed through the root of the crate (`rtsp::Version`) rather than this module.
+//! This module contains a definition of the [`Version`] type. The `Version` type is intended to be
+//! accessed through the root of the crate ([`Version`]) rather than this module.
 //!
-//! The `Version` enum type contains variants that represent the various versions of the the RTSP
+//! The [`Version`] enum type contains variants that represent the various versions of the the RTSP
 //! protocol. Note that although RTSP 1.0 and RTSP 2.0 are listed here, RTSP 2.0 obseletes RTSP 1.0
 //! and thus RTSP 1.0 is not actually supported by this library.
 //!
@@ -61,7 +61,7 @@ impl Version {
         }
     }
 
-    /// Returns whether or not the version is `RTSP10`.
+    /// Returns whether or not the version is [`Version::RTSP10`].
     ///
     /// # Examples
     ///
@@ -80,7 +80,7 @@ impl Version {
         }
     }
 
-    /// Returns whether or not the version is `RTSP20`.
+    /// Returns whether or not the version is [`Version::RTSP20`].
     ///
     /// # Examples
     ///
@@ -118,8 +118,9 @@ impl fmt::Display for Version {
     }
 }
 
-/// Provides a fallible conversion from a byte slice to a `Version`. Note that you cannot do the
-/// following:
+/// Provides a fallible conversion from a byte slice to a [`Version`].
+///
+/// Note that you cannot do the following:
 ///
 /// ```compile_fail
 /// let play = Version::try_from(b"RTSP/2.0").unwrap();
@@ -133,10 +134,10 @@ impl<'a> TryFrom<&'a [u8]> for Version {
 
     /// Converts a `&[u8]` to an RTSP version. The conversion is case insensitive.
     ///
-    /// # Errors
+    /// # Return Value
     ///
-    /// An error will be returned if the version is not of the form `"RTSP/*.*"` where the `*` are 1
-    /// digit numbers.
+    /// An error will be returned if the version is not of the form `b"RTSP/*.*"` where the `*` are
+    /// 1 digit numbers.
     ///
     /// # Examples
     ///
@@ -183,7 +184,7 @@ impl<'a> TryFrom<&'a str> for Version {
 
     /// Converts a `&str` to an RTSP version. The conversion is case insensitive.
     ///
-    /// # Errors
+    /// # Return Value
     ///
     /// An error will be returned if the version is not of the form `"RTSP/*.*"` where the `*` are 1
     /// digit numbers.
@@ -211,7 +212,7 @@ impl<'a> TryFrom<&'a str> for Version {
     }
 }
 
-/// A possible error value when converting to a `Version` from a `&[u8]` or `&str`.
+/// A possible error value when converting to a [`Version`] from a `&[u8]` or `&str`.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum Error {
     /// This error indicates that the version was not of the form `RTSP/*.*` where * are 1 digit

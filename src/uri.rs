@@ -1,6 +1,9 @@
 //! Request URI
 //!
-//! This is a wrapper around the [`Url`] type from the `url` crate. This is done because
+//! This module contains a definition of the [`RequestURIField`] and [`RequestURI`] types. These
+//! types are intended to be accessed through the root of the crate rather than this module.
+//!
+//! These types are wrappers around the [`Url`] type from the `url` crate. This is done because
 //! request URIs do not have to actually be URIs (can be `"*"`) and providing [`TryFrom`]
 //! implementations for this type makes it easier to deal with the `Request` type. Also, the
 //! [`Url`] type is a strict superset of valid URIs that are allowed in the request line,
