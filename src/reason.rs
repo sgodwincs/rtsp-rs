@@ -41,8 +41,9 @@ impl ReasonPhrase {
     where
         S: Into<String>,
     {
-        debug_assert!(ReasonPhrase::try_from(value).is_ok());
-        ReasonPhrase(value.into())
+        let value = value.into();
+        debug_assert!(ReasonPhrase::try_from(value.clone().as_str()).is_ok());
+        ReasonPhrase(value)
     }
 }
 

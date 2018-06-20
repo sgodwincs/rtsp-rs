@@ -56,8 +56,9 @@ impl HeaderValue {
     where
         S: Into<String>,
     {
-        debug_assert!(HeaderValue::try_from(value).is_ok());
-        HeaderValue(value.into())
+        let value = value.into();
+        debug_assert!(HeaderValue::try_from(value.clone().as_str()).is_ok());
+        HeaderValue(value)
     }
 
     /// Returns whether or not the length of the header value is 0.
