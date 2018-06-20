@@ -4,7 +4,9 @@ use std::time::Duration;
 
 use header::{HeaderName, HeaderValue, InvalidTypedHeader, TypedHeader};
 use session::Session as SessionData;
-use session::{ExpiredSession, InvalidSessionID, SessionID, DEFAULT_TIMEOUT, MAX_TIMEOUT};
+use session::{
+    ExpiredSession, InvalidSessionID, SessionID, DEFAULT_SESSION_TIMEOUT, MAX_SESSION_TIMEOUT,
+};
 use syntax::trim_whitespace;
 
 /// The `Session` typed header as described by
@@ -16,15 +18,6 @@ pub struct Session {
 }
 
 impl Session {
-    pub fn try_from_session_with_no_timeout<S>(value: S) -> Result<Self, ExpiredSession>
-    where
-        S: SessionData,
-    {
-        let mut session = Session::try_from_session_with_timeout(value)?;
-        session.timeout = None;
-        Ok(session)
-    }
-
     pub fn try_from_session_with_timeout<S>(value: S) -> Result<Self, ExpiredSession>
     where
         S: SessionData,
@@ -41,6 +34,15 @@ impl Session {
         })
     }
 
+    pub fn try_from_session_without_timeout<S>(value: S) -> Result<Self, ExpiredSession>
+    where
+        S: SessionData,
+    {
+        let mut session = Session::try_from_session_with_timeout(value)?;
+        session.timeout = None;
+        Ok(session)
+    }
+
     /// Constructs a new `Session` instance with the specified session ID. No timeout is set for
     /// this session.
     ///
@@ -55,11 +57,11 @@ impl Session {
     /// use rtsp::SessionID;
     /// use rtsp::header::types::Session;
     ///
-    /// let session = Session::with_no_timeout("QKyjN8nt2WqbWw4tIYof52").unwrap();
+    /// let session = Session::without_timeout("QKyjN8nt2WqbWw4tIYof52").unwrap();
     /// assert_eq!(session.id(), &SessionID::try_from("QKyjN8nt2WqbWw4tIYof52").unwrap());
     /// assert_eq!(session.timeout(), None);
     /// ```
-    pub fn with_no_timeout<T>(id: T) -> Result<Self, InvalidSessionID>
+    pub fn without_timeout<T>(id: T) -> Result<Self, InvalidSessionID>
     where
         SessionID: TryFrom<T, Error = InvalidSessionID>,
     {
@@ -134,8 +136,9 @@ impl TypedHeader for Session {
     ///
     /// use rtsp::*;
     /// use rtsp::header::types::Session;
+    /// use rtsp::session::DEFAULT_SESSION_TIMEOUT;
     ///
-    /// let typed_header = Session::new("QKyjN8nt2WqbWw4tIYof52").unwrap();
+    /// let typed_header = Session::without_timeout("QKyjN8nt2WqbWw4tIYof52").unwrap();
     /// let raw_header = vec![HeaderValue::try_from("QKyjN8nt2WqbWw4tIYof52").unwrap()];
     /// assert_eq!(typed_header.to_header_raw(), raw_header);
     ///
@@ -144,12 +147,19 @@ impl TypedHeader for Session {
     ///     HeaderValue::try_from("QKyjN8nt2WqbWw4tIYof52; timeout = 180").unwrap()
     /// ];
     /// assert_eq!(typed_header.to_header_raw(), raw_header);
+    ///
+    /// let typed_header =
+    ///     Session::with_timeout("QKyjN8nt2WqbWw4tIYof52", DEFAULT_SESSION_TIMEOUT).unwrap();
+    /// let raw_header = vec![
+    ///     HeaderValue::try_from("QKyjN8nt2WqbWw4tIYof52").unwrap()
+    /// ];
+    /// assert_eq!(typed_header.to_header_raw(), raw_header);
     /// ```
     fn to_header_raw(&self) -> Vec<HeaderValue> {
         let id = self.id.as_str();
 
         let value = if let Some(timeout) = self.timeout {
-            if timeout.as_secs() == DEFAULT_TIMEOUT {
+            if timeout.as_secs() == DEFAULT_SESSION_TIMEOUT {
                 id.to_string()
             } else {
                 format!("{}; timeout = {}", id, timeout.as_secs())
@@ -194,7 +204,7 @@ impl TypedHeader for Session {
     /// use rtsp::*;
     /// use rtsp::header::types::Session;
     ///
-    /// let typed_header = Session::new("QKyjN8nt2WqbWw4tIYof52").unwrap();
+    /// let typed_header = Session::without_timeout("QKyjN8nt2WqbWw4tIYof52").unwrap();
     /// let raw_header = vec![HeaderValue::try_from("QKyjN8nt2WqbWw4tIYof52").unwrap()];
     ///
     /// assert_eq!(
@@ -239,7 +249,7 @@ impl TypedHeader for Session {
                     .parse::<u64>()
                     .map_err(|_| InvalidTypedHeader)
                     .and_then(|delta| {
-                        if delta > MAX_TIMEOUT {
+                        if delta > MAX_SESSION_TIMEOUT {
                             Err(InvalidTypedHeader)
                         } else {
                             Ok(Session {

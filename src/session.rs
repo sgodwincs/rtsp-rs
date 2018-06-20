@@ -5,8 +5,8 @@ use std::convert::TryFrom;
 use std::error::Error;
 use std::{fmt, str};
 
-pub const DEFAULT_TIMEOUT: u64 = 60;
-pub const MAX_TIMEOUT: u64 = 9_999_999_999_999_999_999;
+pub const DEFAULT_SESSION_TIMEOUT: u64 = 60;
+pub const MAX_SESSION_TIMEOUT: u64 = 9_999_999_999_999_999_999;
 
 /// A wrapper type used to avoid users creating invalid session identifiers.
 #[derive(Clone, Eq, Hash, PartialEq)]
@@ -199,7 +199,7 @@ impl DefaultSession {
         SessionID: TryFrom<T, Error = InvalidSessionID>,
     {
         let timeout = offset::Utc::now()
-            .checked_add_signed(Duration::seconds(DEFAULT_TIMEOUT as i64))
+            .checked_add_signed(Duration::seconds(DEFAULT_SESSION_TIMEOUT as i64))
             .unwrap();
 
         DefaultSession::with_timeout(id, timeout)
