@@ -33,11 +33,12 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio_io::{AsyncRead, AsyncWrite};
 
+pub const DEFAULT_CONTINUE_WAIT_DURATION: Duration = Duration::from_secs(5);
 pub const DEFAULT_DECODE_TIMEOUT_DURATION: Duration = Duration::from_secs(10);
 pub const DEFAULT_GRACEFUL_SHUTDOWN_TIMEOUT_DURATION: Duration = Duration::from_secs(10);
 pub const DEFAULT_REQUEST_BUFFER_SIZE: usize = 10;
-pub const DEFAULT_REQUEST_MAX_TIMEOUT_DURATION: Duration = Duration::from_secs(10);
-pub const DEFAULT_REQUEST_TIMEOUT_DURATION: Duration = Duration::from_secs(5);
+pub const DEFAULT_REQUEST_MAX_TIMEOUT_DURATION: Duration = Duration::from_secs(20);
+pub const DEFAULT_REQUEST_TIMEOUT_DURATION: Duration = Duration::from_secs(10);
 
 #[must_use = "futures do nothing unless polled"]
 pub struct Connection {
@@ -96,6 +97,7 @@ impl Connection {
                 rx_incoming_request,
                 sender_handle.clone(),
                 tx_handler_shutdown_event,
+                config.continue_wait_duration(),
             ))
         } else {
             None
@@ -466,6 +468,7 @@ impl Drop for ConnectionShutdownSender {
 }
 
 pub struct Config {
+    continue_wait_duration: Duration,
     decode_timeout_duration: Duration,
     graceful_shutdown_default_timeout_duration: Duration,
     request_buffer_size: usize,
@@ -480,6 +483,10 @@ impl Config {
 
     pub fn new() -> Self {
         Config::default()
+    }
+
+    pub fn continue_wait_duration(&self) -> Duration {
+        self.continue_wait_duration
     }
 
     pub fn decode_timeout_duration(&self) -> Duration {
@@ -512,6 +519,7 @@ impl Default for Config {
 }
 
 pub struct ConfigBuilder {
+    continue_wait_duration: Duration,
     decode_timeout_duration: Duration,
     graceful_shutdown_default_timeout_duration: Duration,
     request_buffer_size: usize,
@@ -525,6 +533,10 @@ impl ConfigBuilder {
     }
 
     pub fn build(self) -> Result<Config, ConfigBuilderError> {
+        if self.continue_wait_duration.as_secs() == 0 {
+            return Err(ConfigBuilderError::InvalidContinueWaitDuration);
+        }
+
         if self.decode_timeout_duration.as_secs() == 0 {
             return Err(ConfigBuilderError::InvalidDecodeTimeoutDuration);
         }
@@ -546,6 +558,7 @@ impl ConfigBuilder {
         }
 
         Ok(Config {
+            continue_wait_duration: self.continue_wait_duration,
             decode_timeout_duration: self.decode_timeout_duration,
             graceful_shutdown_default_timeout_duration: self
                 .graceful_shutdown_default_timeout_duration,
@@ -553,6 +566,11 @@ impl ConfigBuilder {
             request_default_max_timeout_duration: self.request_default_max_timeout_duration,
             request_default_timeout_duration: self.request_default_timeout_duration,
         })
+    }
+
+    pub fn continue_wait_duration(&mut self, duration: Duration) -> &mut Self {
+        self.continue_wait_duration = duration;
+        self
     }
 
     pub fn decode_timeout_duration(&mut self, duration: Duration) -> &mut Self {
@@ -587,6 +605,7 @@ impl ConfigBuilder {
 impl Default for ConfigBuilder {
     fn default() -> Self {
         ConfigBuilder {
+            continue_wait_duration: DEFAULT_CONTINUE_WAIT_DURATION,
             decode_timeout_duration: DEFAULT_DECODE_TIMEOUT_DURATION,
             graceful_shutdown_default_timeout_duration: DEFAULT_GRACEFUL_SHUTDOWN_TIMEOUT_DURATION,
             request_buffer_size: DEFAULT_REQUEST_BUFFER_SIZE,
@@ -598,6 +617,7 @@ impl Default for ConfigBuilder {
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum ConfigBuilderError {
+    InvalidContinueWaitDuration,
     InvalidDecodeTimeoutDuration,
     InvalidRequestBufferSize,
     InvalidRequestDefaultMaxTimeoutDuration,
@@ -615,6 +635,7 @@ impl Error for ConfigBuilderError {
         use self::ConfigBuilderError::*;
 
         match self {
+            InvalidContinueWaitDuration => "invalid continue wait duration",
             InvalidDecodeTimeoutDuration => "invalid decode timeout duration",
             InvalidRequestBufferSize => "invalid request buffer size",
             InvalidRequestDefaultMaxTimeoutDuration => {

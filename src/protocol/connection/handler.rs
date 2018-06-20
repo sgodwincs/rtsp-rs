@@ -2,6 +2,8 @@ use bytes::BytesMut;
 use futures::sync::mpsc::Receiver;
 use futures::sync::oneshot;
 use futures::{Async, Future, Poll, Stream};
+use std::time::{Duration, Instant};
+use tokio_timer::Delay;
 
 use super::SenderHandle;
 use header::types::CSeq;
@@ -17,6 +19,8 @@ pub struct RequestHandler<S>
 where
     S: Service,
 {
+    continue_timer: Option<Delay>,
+    continue_wait_duration: Duration,
     rx_incoming_request: Receiver<(CSeq, Request<BytesMut>)>,
     sender_handle: SenderHandle,
     service: S,
@@ -35,8 +39,11 @@ where
         rx_incoming_request: Receiver<(CSeq, Request<BytesMut>)>,
         sender_handle: SenderHandle,
         tx_shutdown_event: oneshot::Sender<()>,
+        continue_wait_duration: Duration,
     ) -> Self {
         RequestHandler {
+            continue_timer: None,
+            continue_wait_duration,
             rx_incoming_request,
             sender_handle,
             service,
@@ -47,17 +54,48 @@ where
 
     fn poll_serviced_request(
         &mut self,
-        serviced_request: &mut S::Future,
-    ) -> Poll<Response<BytesMut>, ()> {
+        cseq: CSeq,
+        mut serviced_request: S::Future,
+    ) -> Poll<(), ()> {
         match serviced_request.poll() {
-            Ok(Async::Ready(response)) => Ok(Async::Ready(response.into())),
-            Ok(Async::NotReady) => Ok(Async::NotReady),
-            Err(_) => Ok(Async::Ready(
-                Response::builder()
+            Ok(Async::Ready(response)) => {
+                self.send_response(cseq, response.into());
+                self.continue_timer = None;
+                Ok(Async::Ready(()))
+            }
+            Ok(Async::NotReady) => {
+                loop {
+                    match self
+                        .continue_timer
+                        .as_mut()
+                        .expect("continue timer should be set while a request is being serviced")
+                        .poll()
+                        .expect("polling `continue_timer` should not error")
+                    {
+                        Async::Ready(_) => {
+                            let response = Response::builder()
+                                .status_code(StatusCode::Continue)
+                                .build(BytesMut::new())
+                                .expect("continue response should not be invalid");
+                            self.send_response(cseq, response);
+                            self.reset_continue_timer();
+                        }
+                        Async::NotReady => break,
+                    }
+                }
+
+                self.serviced_request = Some((cseq, serviced_request));
+                Ok(Async::NotReady)
+            }
+            Err(_) => {
+                let response = Response::builder()
                     .status_code(StatusCode::InternalServerError)
                     .build(BytesMut::new())
-                    .expect("internal server error response should not be invalid"),
-            )),
+                    .expect("internal server error response should not be invalid");
+                self.send_response(cseq, response);
+                self.continue_timer = None;
+                Ok(Async::Ready(()))
+            }
         }
     }
 
@@ -70,7 +108,25 @@ where
 
         // Start servicing the request.
 
+        self.reset_continue_timer();
         self.serviced_request = Some((cseq, self.service.call(request)))
+    }
+
+    fn reset_continue_timer(&mut self) {
+        let expire_time = Instant::now() + self.continue_wait_duration;
+        self.continue_timer = Some(Delay::new(expire_time));
+    }
+
+    fn send_response(&mut self, cseq: CSeq, mut response: Response<BytesMut>) {
+        let cseq = cseq.to_header_raw().remove(0);
+        response.headers_mut().insert(HeaderName::CSeq, cseq);
+
+        // We do not care if this fails. All requests that reach this handler will be processed
+        // regardless of whether or not a response can actually be sent.
+
+        self.sender_handle
+            .try_send_message(Message::Response(response))
+            .ok();
     }
 }
 
@@ -98,20 +154,10 @@ where
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         loop {
-            if let Some(serviced_request) = self.serviced_request.take() {
-                let (cseq, mut serviced_request) = serviced_request;
-
-                match self.poll_serviced_request(&mut serviced_request) {
-                    Ok(Async::Ready(mut response)) => {
-                        let cseq = cseq.to_header_raw().remove(0);
-                        response.headers_mut().insert(HeaderName::CSeq, cseq);
-                        self.sender_handle
-                            .try_send_message(Message::Response(response))?;
-                    }
-                    Ok(Async::NotReady) => {
-                        self.serviced_request = Some((cseq, serviced_request));
-                        return Ok(Async::NotReady);
-                    }
+            if let Some((cseq, serviced_request)) = self.serviced_request.take() {
+                match self.poll_serviced_request(cseq, serviced_request) {
+                    Ok(Async::Ready(_)) => (),
+                    Ok(Async::NotReady) => return Ok(Async::NotReady),
                     Err(_) => panic!("calling `poll_serviced_request` should not error"),
                 }
             }
