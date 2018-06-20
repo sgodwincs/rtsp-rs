@@ -20,24 +20,27 @@ extern crate url;
 
 mod syntax;
 
-//pub mod client;
+pub mod client;
 pub mod header;
 pub mod method;
 pub mod protocol;
 pub mod reason;
 pub mod request;
 pub mod response;
+pub mod server;
 pub mod session;
 pub mod status;
 pub mod uri;
 pub mod version;
 
+pub use client::Client;
 pub use header::{HeaderMap, HeaderName, HeaderValue, TypedHeader, TypedHeaderMap};
 pub use method::Method;
 pub use protocol::Service;
 pub use reason::ReasonPhrase;
 pub use request::Request;
 pub use response::Response;
+pub use server::Server;
 pub use session::SessionID;
 pub use status::{StatusCode, StatusCodeClass};
 pub use uri::URI;
