@@ -1,7 +1,8 @@
 use bytes::BytesMut;
-use futures::Future;
+use futures::{future, Future};
 use std::io;
 
+use protocol::Service;
 use request::Request;
 use response::Response;
 

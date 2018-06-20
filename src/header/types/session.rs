@@ -20,9 +20,9 @@ impl Session {
     where
         S: SessionData,
     {
-        let mut session = Session::try_from_session_with_no_timeout(value);
+        let mut session = Session::try_from_session_with_timeout(value)?;
         session.timeout = None;
-        session
+        Ok(session)
     }
 
     pub fn try_from_session_with_timeout<S>(value: S) -> Result<Self, ExpiredSession>
