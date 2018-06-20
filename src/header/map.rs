@@ -660,7 +660,8 @@ impl<T> HeaderMap<T> {
     pub fn reserve(&mut self, additional: usize) {
         // TODO: This can't overflow if done properly... since the max # of
         // elements is u16::MAX.
-        let cap = self.entries
+        let cap = self
+            .entries
             .len()
             .checked_add(additional)
             .expect("reserve overflow");
@@ -3377,7 +3378,7 @@ mod as_header_name {
 }
 
 #[cfg(test)]
-mod tests {
+mod test {
     use std::convert::TryInto;
 
     use super::*;

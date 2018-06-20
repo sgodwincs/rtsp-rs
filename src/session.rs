@@ -149,7 +149,11 @@ impl<'a> TryFrom<&'a str> for SessionID {
 
         for c in value.chars() {
             if !c.is_ascii()
-                || (!c.is_alphanumeric() && c != '$' && c != '-' && c != '_' && c != '.'
+                || (!c.is_alphanumeric()
+                    && c != '$'
+                    && c != '-'
+                    && c != '_'
+                    && c != '.'
                     && c != '+')
             {
                 return Err(InvalidSessionID);
