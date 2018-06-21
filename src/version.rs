@@ -21,7 +21,8 @@
 //!
 
 use std::convert::TryFrom;
-use std::{error, fmt};
+use std::error::Error;
+use std::fmt;
 
 /// Represents a version of the RTSP spec.
 #[derive(Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -130,7 +131,7 @@ impl fmt::Display for Version {
 /// order to perform the conversion. Another `TryFrom` implementation from `&[u8, N: usize]` will be
 /// provided once constant generics land on nightly.
 impl<'a> TryFrom<&'a [u8]> for Version {
-    type Error = Error;
+    type Error = InvalidVersion;
 
     /// Converts a `&[u8]` to an RTSP version. The conversion is case insensitive.
     ///
@@ -163,24 +164,24 @@ impl<'a> TryFrom<&'a [u8]> for Version {
         let value = value.to_ascii_uppercase();
 
         if value.len() != 8 || !value.starts_with(b"RTSP/") || value[6] != b'.' {
-            return Err(Error::InvalidVersion);
+            return Err(InvalidVersion::Invalid);
         }
 
-        let major = value[5].checked_sub(b'0').ok_or(Error::InvalidVersion)?;
-        let minor = value[7].checked_sub(b'0').ok_or(Error::InvalidVersion)?;
+        let major = value[5].checked_sub(b'0').ok_or(InvalidVersion::Invalid)?;
+        let minor = value[7].checked_sub(b'0').ok_or(InvalidVersion::Invalid)?;
 
         if major == 1 && minor == 0 {
             Ok(RTSP10)
         } else if major == 2 && minor == 0 {
             Ok(RTSP20)
         } else {
-            Err(Error::UnknownVersion)
+            Err(InvalidVersion::Unknown)
         }
     }
 }
 
 impl<'a> TryFrom<&'a str> for Version {
-    type Error = Error;
+    type Error = InvalidVersion;
 
     /// Converts a `&str` to an RTSP version. The conversion is case insensitive.
     ///
@@ -214,31 +215,29 @@ impl<'a> TryFrom<&'a str> for Version {
 
 /// A possible error value when converting to a [`Version`] from a `&[u8]` or `&str`.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum Error {
+pub enum InvalidVersion {
     /// This error indicates that the version was not of the form `RTSP/*.*` where * are 1 digit
     /// numbers.
-    InvalidVersion,
+    Invalid,
 
     /// This error indicates that the version was of the correct form but the version is not
     /// recognized.
-    UnknownVersion,
+    Unknown,
 }
 
-impl fmt::Display for Error {
+impl fmt::Display for InvalidVersion {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        use std::error::Error;
-
         formatter.write_str(self.description())
     }
 }
 
-impl error::Error for Error {
+impl Error for InvalidVersion {
     fn description(&self) -> &str {
-        use self::Error::*;
+        use self::InvalidVersion::*;
 
         match *self {
-            InvalidVersion => "invalid RTSP version",
-            UnknownVersion => "unknown RTSP version",
+            Invalid => "invalid RTSP version",
+            Unknown => "unknown RTSP version",
         }
     }
 }
