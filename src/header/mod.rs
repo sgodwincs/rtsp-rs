@@ -68,8 +68,10 @@ mod value;
 
 pub mod types;
 
-pub use self::map::{AsHeaderName, Drain, Entry, GetAll, HeaderMap, IntoHeaderName, IntoIter, Iter,
-                    Keys, OccupiedEntry, VacantEntry, ValueDrain, ValueIter, ValueIterMut, Values};
+pub use self::map::{
+    AsHeaderName, Drain, Entry, GetAll, HeaderMap, IntoHeaderName, IntoIter, Iter, Keys,
+    OccupiedEntry, VacantEntry, ValueDrain, ValueIter, ValueIterMut, Values,
+};
 pub use self::name::{HeaderName, InvalidHeaderName};
 pub use self::typed_map::{InvalidTypedHeader, TypedHeader, TypedHeaderMap};
 pub use self::value::{HeaderValue, InvalidHeaderValue};
