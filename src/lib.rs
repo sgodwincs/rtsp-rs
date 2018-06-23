@@ -5,6 +5,7 @@
 extern crate ascii;
 extern crate bytes;
 extern crate chrono;
+extern crate itertools;
 #[macro_use]
 extern crate delegate;
 extern crate fnv;
