@@ -110,6 +110,8 @@ mod test {
 
     #[test]
     fn test_extract_quoted_string() {
+        assert_eq!(Some(""), extract_quoted_string(r#""""#));
+        assert_eq!(Some("a"), extract_quoted_string(r#""a""#));
         assert_eq!(None, extract_quoted_string(r#""this is a test value"#));
         assert_eq!(
             Some("this is a test value"),
