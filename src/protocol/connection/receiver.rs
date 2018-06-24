@@ -20,6 +20,26 @@ use request::Request;
 use response::Response;
 use status::StatusCode;
 
+lazy_static! {
+    static ref BAD_REQUEST_RESPONSE: Response<BytesMut> = Response::builder()
+        .status_code(StatusCode::BadRequest)
+        .build(BytesMut::new())
+        .expect("bad request response should not be invalid");
+
+    static ref NOT_ENOUGH_BANDWIDTH_RESPONSE: Response<BytesMut> = Response::builder()
+        .status_code(StatusCode::NotEnoughBandwidth)
+        .build(BytesMut::new())
+        .expect("not enough bandwidth response should not be invalid");
+
+    // TODO: As per specification, the "response SHOULD contain a message body describing why
+    // that version is not supported and what other protocols are supported by that agent".
+
+    static ref VERSION_NOT_SUPPORTED_RESPONSE: Response<BytesMut> = Response::builder()
+        .status_code(StatusCode::RTSPVersionNotSupported)
+        .build(BytesMut::new())
+        .expect("RTSP version not supported response should not be invalid");
+}
+
 pub struct Receiver {
     forwarding_receiver: Option<ForwardingReceiver>,
     inner: Option<ReceiverInner>,
@@ -185,10 +205,12 @@ impl ReceiverInner {
     ) {
         match error {
             RequestReceiverError::BadRequest => {
-                ReceiverInner::send_bad_request_response(sender_handle);
+                let message = Message::Response(BAD_REQUEST_RESPONSE.clone());
+                ReceiverInner::send_message(message, sender_handle);
             }
             RequestReceiverError::NotEnoughBandwidth => {
-                ReceiverInner::send_not_enough_bandwidth_response(sender_handle);
+                let message = Message::Response(NOT_ENOUGH_BANDWIDTH_RESPONSE.clone());
+                ReceiverInner::send_message(message, sender_handle);
             }
         }
     }
@@ -202,10 +224,12 @@ impl ReceiverInner {
                 | ProtocolError::DecodeError(DecodeError::InvalidResponse(
                     IrrecoverableInvalidResponse::UnsupportedVersion,
                 )) => {
-                    ReceiverInner::send_version_not_supported_response(sender_handle);
+                    let message = Message::Response(VERSION_NOT_SUPPORTED_RESPONSE.clone());
+                    ReceiverInner::send_message(message, sender_handle);
                 }
                 ProtocolError::DecodeError(_) => {
-                    ReceiverInner::send_bad_request_response(sender_handle);
+                    let message = Message::Response(BAD_REQUEST_RESPONSE.clone());
+                    ReceiverInner::send_message(message, sender_handle);
                 }
                 _ => {}
             }
@@ -228,37 +252,10 @@ impl ReceiverInner {
         }
     }
 
-    fn send_bad_request_response(sender_handle: &mut SenderHandle) {
-        let response = Response::builder()
-            .status_code(StatusCode::BadRequest)
-            .build(BytesMut::new())
-            .expect("bad request response should not be invalid");
-        ReceiverInner::send_message(Message::Response(response), sender_handle);
-    }
-
     fn send_message(message: Message, sender_handle: &mut SenderHandle) {
         sender_handle
             .try_send_message(message)
             .expect("message sending receive should not have been dropped");
-    }
-
-    fn send_not_enough_bandwidth_response(sender_handle: &mut SenderHandle) {
-        let response = Response::builder()
-            .status_code(StatusCode::NotEnoughBandwidth)
-            .build(BytesMut::new())
-            .expect("not enough bandwidth response should not be invalid");
-        ReceiverInner::send_message(Message::Response(response), sender_handle);
-    }
-
-    fn send_version_not_supported_response(sender_handle: &mut SenderHandle) {
-        // TODO: As per specification, the "response SHOULD contain a message body describing why
-        // that version is not supported and what other protocols are supported by that agent".
-
-        let response = Response::builder()
-            .status_code(StatusCode::RTSPVersionNotSupported)
-            .build(BytesMut::new())
-            .expect("RTSP version not supported response should not be invalid");
-        ReceiverInner::send_message(Message::Response(response), sender_handle);
     }
 
     fn handle_codec_event(&mut self, event: CodecEvent) {
