@@ -13,6 +13,7 @@ extern crate fnv;
 extern crate futures;
 #[macro_use]
 extern crate lazy_static;
+extern crate rand;
 extern crate regex;
 #[cfg(test)]
 extern crate tokio;
