@@ -126,6 +126,7 @@ impl TypedHeader for Session {
     /// # #![feature(try_from)]
     /// #
     /// use std::convert::TryFrom;
+    /// use std::time::Duration;
     ///
     /// use rtsp::*;
     /// use rtsp::header::types::Session;
@@ -194,6 +195,7 @@ impl TypedHeader for Session {
     /// # #![feature(try_from)]
     /// #
     /// use std::convert::TryFrom;
+    /// use std::time::Duration;
     ///
     /// use rtsp::*;
     /// use rtsp::header::types::Session;
