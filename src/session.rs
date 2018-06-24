@@ -1,11 +1,12 @@
 use ascii::{AsciiChar, AsciiString};
-use chrono::{offset, DateTime, Duration, Utc};
+use chrono::{offset, DateTime, Utc};
 use rand::{thread_rng, Rng};
 use std::convert::TryFrom;
 use std::error::Error;
+use std::time::Duration;
 use std::{fmt, str};
 
-pub const DEFAULT_SESSION_TIMEOUT: u64 = 60;
+pub const DEFAULT_SESSION_TIMEOUT: Duration = Duration::from_secs(60);
 pub const MAX_SESSION_TIMEOUT: u64 = 9_999_999_999_999_999_999;
 pub const SESSION_ID_ALPHABET: [u8; 67] = [
     b'$', b'-', b'_', b'.', b'+', b'0', b'1', b'2', b'3', b'4', b'5', b'6', b'7', b'8', b'9', b'a',
@@ -208,64 +209,22 @@ impl Error for InvalidSessionID {
 }
 
 pub trait Session {
+    fn expire_time(&self) -> DateTime<Utc>;
+
     fn id(&self) -> &SessionID;
-    fn timeout(&self) -> DateTime<Utc>;
-    fn touch(&mut self);
-}
 
-pub struct DefaultSession {
-    id: SessionID,
-    timeout: DateTime<Utc>,
-}
-
-impl DefaultSession {
-    pub fn new<T>(id: T) -> Result<Self, InvalidSessionID>
-    where
-        SessionID: TryFrom<T, Error = InvalidSessionID>,
-    {
-        let timeout = offset::Utc::now()
-            .checked_add_signed(Duration::seconds(DEFAULT_SESSION_TIMEOUT as i64))
-            .unwrap();
-
-        DefaultSession::with_timeout(id, timeout)
+    fn is_expired(&self) -> bool {
+        offset::Utc::now() > self.expire_time()
     }
 
-    pub fn with_timeout<T>(id: T, timeout: DateTime<Utc>) -> Result<Self, InvalidSessionID>
-    where
-        SessionID: TryFrom<T, Error = InvalidSessionID>,
-    {
-        Ok(DefaultSession {
-            id: SessionID::try_from(id)?,
-            timeout: timeout,
-        })
-    }
-}
+    fn set_expire_time(&mut self, expire_time: DateTime<Utc>);
 
-impl Session for DefaultSession {
-    fn id(&self) -> &SessionID {
-        &self.id
-    }
+    fn set_timeout(&mut self, timeout: Duration) -> Result<(), ()>;
 
-    fn timeout(&self) -> DateTime<Utc> {
-        self.timeout
-    }
-
-    fn touch(&mut self) {
-        self.timeout = offset::Utc::now();
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub struct ExpiredSession;
-
-impl fmt::Display for ExpiredSession {
-    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str(self.description())
-    }
-}
-
-impl Error for ExpiredSession {
-    fn description(&self) -> &str {
-        "expired RTSP session"
+    fn timeout(&self) -> Option<Duration> {
+        self.expire_time()
+            .signed_duration_since(offset::Utc::now())
+            .to_std()
+            .ok()
     }
 }
