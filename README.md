@@ -12,4 +12,4 @@ with minimal processing, see [examples/server.rs](https://github.com/sgodwincs/r
 I am currently considering an interface for a higher-level server abstraction that easily allows defining
 media sources.
 
-A client example will be added shortly.
+There is also an example of a client ([examples/client.rs](https://github.com/sgodwincs/rtsp-rs/blob/master/examples/client.rs)). 
