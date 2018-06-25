@@ -26,7 +26,7 @@ impl SessionID {
         let mut rng = thread_rng();
         let mut session_id = AsciiString::with_capacity(SESSION_ID_GENERATED_LENGTH);
 
-        for _ in 0..=SESSION_ID_GENERATED_LENGTH {
+        for _ in 0..SESSION_ID_GENERATED_LENGTH {
             let c = *rng
                 .choose(&SESSION_ID_ALPHABET)
                 .expect("`SESSION_ID_ALPHABET` should not be empty");
