@@ -1,14 +1,8 @@
 use chrono::{DateTime, Datelike, FixedOffset, TimeZone, Utc, Weekday};
-use itertools::Itertools;
-use std::collections::HashSet;
-use std::convert::TryFrom;
-use std::iter::FromIterator;
 use std::ops::{Deref, DerefMut};
 use std::str::Chars;
 
 use header::{HeaderName, HeaderValue, InvalidTypedHeader, TypedHeader};
-use method::Method;
-use syntax::trim_whitespace;
 
 /// The `"Date"` typed header as described by
 /// [RFC7826](https://tools.ietf.org/html/rfc7826#section-18.21).
