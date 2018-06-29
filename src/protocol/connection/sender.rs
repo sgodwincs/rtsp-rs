@@ -1,6 +1,8 @@
 use futures::sync::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
 use futures::{Async, AsyncSink, Poll, Sink, Stream};
 
+use header::types::Date;
+use header::{HeaderName, TypedHeader};
 use protocol::{Message, ProtocolError};
 
 pub struct Sender {
@@ -41,7 +43,22 @@ impl Sender {
                     .poll()
                     .expect("unbounded receiver `rx_outgoing_message` should not error")
                 {
-                    Async::Ready(Some(message)) => {
+                    Async::Ready(Some(mut message)) => {
+                        let date = Date::new()
+                            .to_header_raw()
+                            .into_iter()
+                            .nth(0)
+                            .expect("`Date` header should always have one header");
+
+                        match message {
+                            Message::Request(ref mut request) => {
+                                request.headers_mut().insert(HeaderName::Date, date);
+                            }
+                            Message::Response(ref mut response) => {
+                                response.headers_mut().insert(HeaderName::Date, date);
+                            }
+                        }
+
                         if let Async::NotReady = self.try_send_message(message)? {
                             self.rx_outgoing_message = Some(rx_outgoing_message);
                             return Ok(Async::NotReady);
