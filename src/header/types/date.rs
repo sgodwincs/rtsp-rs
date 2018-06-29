@@ -288,10 +288,7 @@ fn parse_date_time(value: &str) -> Result<DateTime<Utc>, InvalidTypedHeader> {
         (None, value)
     };
 
-    println!("after weekday: {:?} {}", weekday, value);
-
     let (day, month, year, value) = parse_date(value)?;
-    println!("after time: {} {} {} {}", day, month, year, value);
     let (_, value) = parse_comment_and_folding_whitespace(value, false)?;
     let (hour, minute, second, offset, value) = parse_time(value)?;
     parse_comment_and_folding_whitespace(value, true)?;
