@@ -4,25 +4,12 @@ use std::ops::{Deref, DerefMut};
 use header::common::parse_date_time;
 use header::{HeaderName, HeaderValue, InvalidTypedHeader, TypedHeader};
 
-/// The `"Date"` typed header as described by
+/// The `"Expires"` typed header as described by
 /// [RFC7826](https://tools.ietf.org/html/rfc7826#section-18.21).
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Date(pub DateTime<Utc>);
+pub struct Expires(pub DateTime<Utc>);
 
-impl Date {
-    /// Constructs a new header set to the current date.
-    pub fn new() -> Self {
-        Date::default()
-    }
-}
-
-impl Default for Date {
-    fn default() -> Self {
-        Date(Utc::now())
-    }
-}
-
-impl Deref for Date {
+impl Deref for Expires {
     type Target = DateTime<Utc>;
 
     fn deref(&self) -> &DateTime<Utc> {
@@ -30,19 +17,19 @@ impl Deref for Date {
     }
 }
 
-impl DerefMut for Date {
+impl DerefMut for Expires {
     fn deref_mut(&mut self) -> &mut DateTime<Utc> {
         &mut self.0
     }
 }
 
-impl TypedHeader for Date {
+impl TypedHeader for Expires {
     /// Returns the statically assigned `HeaderName` for this header.
     fn header_name() -> &'static HeaderName {
-        &HeaderName::Date
+        &HeaderName::Expires
     }
 
-    /// Converts the [`Date`] type to raw header values.
+    /// Converts the [`Expires`] type to raw header values.
     ///
     /// # Examples
     ///
@@ -56,9 +43,9 @@ impl TypedHeader for Date {
     /// use std::convert::TryFrom;
     ///
     /// use rtsp::*;
-    /// use rtsp::header::types::Date;
+    /// use rtsp::header::types::Expires;
     ///
-    /// let typed_header = Date(Utc.ymd(2014, 7, 10).and_hms(9, 10, 11));
+    /// let typed_header = Expires(Utc.ymd(2014, 7, 10).and_hms(9, 10, 11));
     /// let raw_header = vec![
     ///     HeaderValue::try_from("Thu, 10 Jul 2014 09:10:11 +0000").unwrap()
     /// ];
@@ -75,13 +62,13 @@ impl TypedHeader for Date {
         vec![unsafe { HeaderValue::from_str_unchecked(value) }]
     }
 
-    /// Converts the raw header values to the [`Date`] header type. Based on the syntax
+    /// Converts the raw header values to the [`Expires`] header type. Based on the syntax
     /// provided by [RFC7826](https://tools.ietf.org/html/rfc7826#section-20) and
     /// [RFC5322](https://tools.ietf.org/html/rfc5322#section-3.3), this header has the following
     /// syntax.
     ///
     /// ```text
-    /// Date = "Date" HCOLON RTSP-date
+    /// Expires = "Expires" HCOLON RTSP-date
     /// RTSP-date = date-time ;
     /// CR = %x0D ; carriage return
     /// CRLF = CR LF ; Internet standard newline
@@ -164,14 +151,14 @@ impl TypedHeader for Date {
     /// use std::convert::TryFrom;
     ///
     /// use rtsp::*;
-    /// use rtsp::header::types::Date;
+    /// use rtsp::header::types::Expires;
     ///
-    /// let typed_header = Date(Utc.ymd(2014, 7, 10).and_hms(9, 10, 11));
+    /// let typed_header = Expires(Utc.ymd(2014, 7, 10).and_hms(9, 10, 11));
     /// let raw_header = vec![
     ///     HeaderValue::try_from("Thu, 10 Jul 2014 09:10:11 +0000").unwrap()
     /// ];
     ///
-    /// assert!(Date::try_from_header_raw(&raw_header).unwrap() == typed_header);
+    /// assert!(Expires::try_from_header_raw(&raw_header).unwrap() == typed_header);
     /// ```
     fn try_from_header_raw(header: &[HeaderValue]) -> Result<Self, InvalidTypedHeader> {
         if header.len() == 0 {
@@ -180,7 +167,7 @@ impl TypedHeader for Date {
             Err(InvalidTypedHeader)
         } else {
             let date_time = parse_date_time(header[0].as_str()).map_err(|_| InvalidTypedHeader)?;
-            Ok(Date(date_time))
+            Ok(Expires(date_time))
         }
     }
 }

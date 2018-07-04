@@ -66,6 +66,7 @@ mod name;
 mod typed_map;
 mod value;
 
+pub mod common;
 pub mod types;
 
 pub use self::map::{
