@@ -8,7 +8,7 @@ extern crate tokio_timer;
 use bytes::BytesMut;
 use futures::{future, lazy, Future};
 use rtsp::protocol::{Connection, ConnectionHandle, OperationError, ShutdownType};
-use rtsp::{HeaderMap, HeaderName, Method, Request, RequestURIField, Response, Service};
+use rtsp::{HeaderMap, HeaderName, Method, Request, Response, Service};
 use std::io::{self, Read, Write};
 use std::net::TcpListener;
 use std::time::{Duration, Instant};
@@ -138,7 +138,7 @@ fn test_connection_shutdown_connection_dropped_with_pending_requests() {
 
                 let request = Request::builder()
                     .method(Method::Options)
-                    .uri(RequestURIField::Any)
+                    .uri("*")
                     .build("")
                     .unwrap();
 
@@ -216,7 +216,7 @@ fn test_connection_shutdown_immediate_with_pending_requests() {
 
                 let request = Request::builder()
                     .method(Method::Options)
-                    .uri(RequestURIField::Any)
+                    .uri("*")
                     .build("")
                     .unwrap();
                 let mut handle_clone = handle.clone();
@@ -327,7 +327,7 @@ fn test_connection_shutdown_graceful_with_pending_requests() {
 
                 let request = Request::builder()
                     .method(Method::Options)
-                    .uri(RequestURIField::Any)
+                    .uri("*")
                     .build("")
                     .unwrap();
                 let mut handle_clone = handle.clone();
@@ -391,7 +391,7 @@ fn test_connection_shutdown_graceful_with_pending_requests_and_timeout() {
 
                 let request = Request::builder()
                     .method(Method::Options)
-                    .uri(RequestURIField::Any)
+                    .uri("*")
                     .build("")
                     .unwrap();
                 let mut handle_clone = handle.clone();
