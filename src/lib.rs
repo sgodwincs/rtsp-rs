@@ -21,7 +21,7 @@ extern crate tokio_executor;
 extern crate tokio_io;
 extern crate tokio_tcp;
 extern crate tokio_timer;
-extern crate url;
+extern crate uriparse;
 
 mod syntax;
 
@@ -48,5 +48,5 @@ pub use response::Response;
 pub use server::Server;
 pub use session::SessionID;
 pub use status::{StatusCode, StatusCodeClass};
-pub use uri::{RequestURI, RequestURIField};
+pub use uri::RequestURI;
 pub use version::Version;
