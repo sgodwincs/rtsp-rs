@@ -13,9 +13,9 @@ where
 {
     buffer.extend(request.method().as_str().as_bytes());
     buffer.extend(b" ");
-    buffer.extend(request.uri().as_str().as_bytes());
+    buffer.extend(request.uri().to_string().as_bytes());
     buffer.extend(b" ");
-    buffer.extend(request.version().as_str().as_bytes());
+    buffer.extend(request.version().as_bytes());
     buffer.extend(b"\r\n");
 
     let body_size = request.body().as_ref().len();
@@ -48,7 +48,7 @@ pub fn encode_response<B>(response: &Response<B>, buffer: &mut BytesMut)
 where
     B: AsRef<[u8]>,
 {
-    buffer.extend(response.version().as_str().as_bytes());
+    buffer.extend(response.version().as_bytes());
     buffer.extend(b" ");
     buffer.extend(response.status_code().to_string().as_bytes());
     buffer.extend(b" ");

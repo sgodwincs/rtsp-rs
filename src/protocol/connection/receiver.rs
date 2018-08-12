@@ -255,7 +255,7 @@ impl ReceiverInner {
     fn send_message(message: Message, sender_handle: &mut SenderHandle) {
         sender_handle
             .try_send_message(message)
-            .expect("message sending receive should not have been dropped");
+            .expect("message sending receiver should not have been dropped");
     }
 
     fn handle_codec_event(&mut self, event: CodecEvent) {
@@ -420,15 +420,14 @@ impl RequestReceiver {
                 if *(cseq - incoming_sequence_number)
                     > forwarding_receiver.request_buffer_size() as u32
                 {
-                    return Err(RequestReceiverError::NotEnoughBandwidth);
+                    Err(RequestReceiverError::NotEnoughBandwidth)
                 } else {
                     forwarding_receiver.buffer_request(cseq, request);
+                    Ok(())
                 }
             }
-            Err(_) => return Err(RequestReceiverError::BadRequest),
+            Err(_) => Err(RequestReceiverError::BadRequest),
         }
-
-        Ok(())
     }
 }
 

@@ -1,3 +1,12 @@
+pub mod decoder;
+pub mod encoder;
+
+pub use self::decoder::{
+    InvalidRequest, InvalidResponse, ParseResult, ParseState, RequestDecoder, RequestParseResult,
+    ResponseDecoder, ResponseParseResult,
+};
+pub use self::encoder::{encode_request, encode_response};
+
 use bytes::BytesMut;
 use futures::sync::mpsc::UnboundedSender;
 use std::convert::TryFrom;
@@ -6,10 +15,6 @@ use std::sync::Arc;
 use std::{fmt, io};
 use tokio_io::codec::{Decoder, Encoder};
 
-use protocol::{
-    encode_request, encode_response, InvalidRequest, InvalidResponse, ParseResult, ParseState,
-    RequestDecoder, ResponseDecoder,
-};
 use request::Request;
 use response::Response;
 

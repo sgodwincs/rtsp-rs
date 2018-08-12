@@ -1,14 +1,13 @@
 pub mod codec;
 pub mod connection;
-pub mod decoder;
-pub mod encoder;
 pub mod service;
 
 pub use self::codec::{
-    Codec, CodecEvent, DecodeError, InvalidMessage, IrrecoverableInvalidRequest,
-    IrrecoverableInvalidResponse, Message, MessageResult, OperationError, ProtocolError,
-    RecoverableInvalidRequest, RecoverableInvalidResponse, RequestResult, RequestTimeoutType,
-    ResponseResult,
+    encode_request, encode_response, Codec, CodecEvent, DecodeError, InvalidMessage,
+    InvalidRequest, InvalidResponse, IrrecoverableInvalidRequest, IrrecoverableInvalidResponse,
+    Message, MessageResult, OperationError, ParseResult, ParseState, ProtocolError,
+    RecoverableInvalidRequest, RecoverableInvalidResponse, RequestDecoder, RequestParseResult,
+    RequestResult, RequestTimeoutType, ResponseDecoder, ResponseParseResult, ResponseResult,
 };
 pub use self::connection::{
     Config, ConfigBuilder, ConfigBuilderError, Connection, ConnectionHandle, RequestOptions,
@@ -17,9 +16,4 @@ pub use self::connection::{
     DEFAULT_REQUEST_BUFFER_SIZE, DEFAULT_REQUEST_MAX_TIMEOUT_DURATION,
     DEFAULT_REQUEST_TIMEOUT_DURATION,
 };
-pub use self::decoder::{
-    InvalidRequest, InvalidResponse, ParseResult, ParseState, RequestDecoder, RequestParseResult,
-    ResponseDecoder, ResponseParseResult,
-};
-pub use self::encoder::{encode_request, encode_response};
 pub use self::service::{EmptyService, Service};
