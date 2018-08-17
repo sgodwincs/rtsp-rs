@@ -20,7 +20,7 @@
 
 use std::convert::TryFrom;
 use std::error::Error;
-use std::fmt::{self, Display, Formatter};
+use std::fmt::{self, Debug, Display, Formatter};
 
 /// Represents a version of the RTSP spec.
 #[derive(Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -111,7 +111,7 @@ impl AsRef<str> for Version {
     }
 }
 
-impl fmt::Debug for Version {
+impl Debug for Version {
     fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
         formatter.write_str(self.as_str())
     }
