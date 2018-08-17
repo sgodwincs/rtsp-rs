@@ -11,7 +11,7 @@ use std::mem::replace;
 
 use header::{HeaderMap, HeaderName, HeaderValue, TypedHeader, TypedHeaderMap};
 use method::Method;
-use uri::RequestURIField;
+use uri::RequestURI;
 use version::Version;
 
 /// Represents an RTSP request.
@@ -46,7 +46,7 @@ where
     /// RTSP also supports specifying just `*` for the URI in the request line indicating that the
     /// request does not apply to a particular resource but to the server or proxy itself. This is
     /// only allowed when the request method does not necessarily apply to a resource.
-    uri: RequestURIField,
+    uri: RequestURI,
 
     /// The protocol version that is being used.
     version: Version,
@@ -67,7 +67,7 @@ impl Request<()> {
     /// `"DESCRIBE"` and the request URI field set to `uri`.
     pub fn describe<T>(uri: T) -> Builder
     where
-        RequestURIField: TryFrom<T>,
+        RequestURI: TryFrom<T>,
     {
         let mut b = Builder::new();
         b.method(Method::Describe).uri(uri);
@@ -78,7 +78,7 @@ impl Request<()> {
     /// `"GET_PARAMETER"` and the request URI field set to `uri`.
     pub fn get_parameter<T>(uri: T) -> Builder
     where
-        RequestURIField: TryFrom<T>,
+        RequestURI: TryFrom<T>,
     {
         let mut b = Builder::new();
         b.method(Method::GetParameter).uri(uri);
@@ -89,7 +89,7 @@ impl Request<()> {
     /// and the request URI field set to `uri`.
     pub fn options<T>(uri: T) -> Builder
     where
-        RequestURIField: TryFrom<T>,
+        RequestURI: TryFrom<T>,
     {
         let mut b = Builder::new();
         b.method(Method::Options).uri(uri);
@@ -100,7 +100,7 @@ impl Request<()> {
     /// and the request URI set to `uri`.
     pub fn pause<T>(uri: T) -> Builder
     where
-        RequestURIField: TryFrom<T>,
+        RequestURI: TryFrom<T>,
     {
         let mut b = Builder::new();
         b.method(Method::Pause).uri(uri);
@@ -111,7 +111,7 @@ impl Request<()> {
     /// and the request URI set to `uri`.
     pub fn play<T>(uri: T) -> Builder
     where
-        RequestURIField: TryFrom<T>,
+        RequestURI: TryFrom<T>,
     {
         let mut b = Builder::new();
         b.method(Method::Play).uri(uri);
@@ -122,7 +122,7 @@ impl Request<()> {
     /// `"PLAY_NOTIFY"` and the request URI set to `uri`.
     pub fn play_notify<T>(uri: T) -> Builder
     where
-        RequestURIField: TryFrom<T>,
+        RequestURI: TryFrom<T>,
     {
         let mut b = Builder::new();
         b.method(Method::PlayNotify).uri(uri);
@@ -133,7 +133,7 @@ impl Request<()> {
     /// `"REDIRECT"` and the request URI set to `uri`.
     pub fn redirect<T>(uri: T) -> Builder
     where
-        RequestURIField: TryFrom<T>,
+        RequestURI: TryFrom<T>,
     {
         let mut b = Builder::new();
         b.method(Method::Redirect).uri(uri);
@@ -144,7 +144,7 @@ impl Request<()> {
     /// `"SET_PARAMETER"` and the request URI set to `uri`.
     pub fn set_parameter<T>(uri: T) -> Builder
     where
-        RequestURIField: TryFrom<T>,
+        RequestURI: TryFrom<T>,
     {
         let mut b = Builder::new();
         b.method(Method::SetParameter).uri(uri);
@@ -155,7 +155,7 @@ impl Request<()> {
     /// and the request URI set to `uri`.
     pub fn setup<T>(uri: T) -> Builder
     where
-        RequestURIField: TryFrom<T>,
+        RequestURI: TryFrom<T>,
     {
         let mut b = Builder::new();
         b.method(Method::Setup).uri(uri);
@@ -166,7 +166,7 @@ impl Request<()> {
     /// `"TEARDOWN"` and the request URI set to `uri`.
     pub fn teardown<T>(uri: T) -> Builder
     where
-        RequestURIField: TryFrom<T>,
+        RequestURI: TryFrom<T>,
     {
         let mut b = Builder::new();
         b.method(Method::Teardown).uri(uri);
@@ -224,12 +224,12 @@ where
     }
 
     /// Returns an immutable reference to the request URI.
-    pub fn uri(&self) -> &RequestURIField {
+    pub fn uri(&self) -> &RequestURI {
         &self.uri
     }
 
     /// Returns a mutable reference to the request URI.
-    pub fn uri_mut(&mut self) -> &mut RequestURIField {
+    pub fn uri_mut(&mut self) -> &mut RequestURI {
         &mut self.uri
     }
 
@@ -314,7 +314,7 @@ where
     /// RTSP also supports specifying just `*` for the URI in the request line indicating that the
     /// request does not apply to a particular resource but to the server or proxy itself. This is
     /// only allowed when the request method does not necessarily apply to a resource.
-    pub(crate) uri: Option<RequestURIField>,
+    pub(crate) uri: Option<RequestURI>,
 
     /// The protocol version that is being used.
     pub(crate) version: Version,
@@ -420,9 +420,9 @@ where
     /// ```
     pub fn uri<T>(&mut self, uri: T) -> &mut Self
     where
-        RequestURIField: TryFrom<T>,
+        RequestURI: TryFrom<T>,
     {
-        match RequestURIField::try_from(uri) {
+        match RequestURI::try_from(uri) {
             Ok(uri) => self.uri = Some(uri),
             Err(_) => self.error = Some(BuilderError::InvalidRequestURI),
         }
