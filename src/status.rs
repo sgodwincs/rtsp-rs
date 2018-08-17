@@ -1,9 +1,8 @@
 //! RTSP Status Code
 //!
-//! This module contains RTSP-status code related structs and errors. The main type in this module
-//! is `StatusCode` which is not intended to be used through this module but rather the
-//! `rtsp::StatusCode` enum type. Each variant on the `StatusCode` type represents either a specific
-//! standardized status code or a custom status code.
+//! This module contains RTSP-status code related structs and errors. Each variant on the
+//! [`StatusCode`] type represents either a specific standardized status code or a custom status
+//! code.
 //!
 //! # Example
 //!
@@ -23,7 +22,7 @@
 use std::cmp::Ordering;
 use std::convert::TryFrom;
 use std::error::Error;
-use std::fmt;
+use std::fmt::{self, Debug, Display, Formatter};
 
 use reason::ReasonPhrase;
 
@@ -34,7 +33,8 @@ macro_rules! status_codes {
             ($code:expr, $variant:ident, $phrase:expr);
         )+
     ) => {
-        /// An RTSP status code (as defined in RFC 7826).
+        /// An RTSP status code (as defined in
+        /// [[RFC7826, Section 17]](https://tools.ietf.org/html/rfc7826#section-17)).
         ///
         /// Although the status code is represented as a `u16`, only values between [100, 599]
         /// should be used since only these are defined as valid status codes with a status class by
@@ -69,7 +69,7 @@ macro_rules! status_codes {
         }
 
         impl StatusCode {
-            /// Get the standardised "reason-phrase" for this status code.
+            /// Get the standardised reason phrase for this status code.
             ///
             /// This is mostly here for servers writing responses but could potentially have an
             /// application at other times.
@@ -88,7 +88,7 @@ macro_rules! status_codes {
                 use self::StatusCode::*;
 
                 // Unsafe Justification
-                // 
+                //
                 // Since the phrases used here are defined at compile time, we can be sure that they
                 // are all valid reason phrases. Perhaps this use of unsafe can eventually be
                 // replaced using a constant function constructor.
@@ -101,13 +101,14 @@ macro_rules! status_codes {
                 }
             }
 
-            /// Constructs a new `StatusCode` from a given `u16`. It is assumed that the `u16` is
-            /// in the allowed range.
+            /// Constructs a new [`StatusCode`] from a given `u16`.
+            ///
+            /// If the status code is not in the range [100, 599], an error will be returned.
             fn from_u16(status_code: u16) -> Result<Self, InvalidStatusCode> {
                 use self::StatusCode::*;
 
                 if status_code < 100 || status_code >= 600 {
-                    return Err(InvalidStatusCode);
+                    return Err(InvalidStatusCode::OutOfRange);
                 }
 
                 Ok(match status_code {
@@ -131,6 +132,8 @@ macro_rules! status_codes {
                 }
             }
         }
+
+
 
         #[test]
         fn test_status_code_canonical_reason() {
@@ -179,7 +182,7 @@ impl StatusCode {
         }
     }
 
-    /// Returns whether the status code is of the client error class (between [400, 499]).
+    /// Returns whether or not the status code is of the client error class (between [400, 499]).
     ///
     /// # Examples
     ///
@@ -193,7 +196,7 @@ impl StatusCode {
         self.class() == StatusCodeClass::ClientError
     }
 
-    /// Returns whether the status code is of the informational class (between [100, 199]).
+    /// Returns whether or not the status code is of the informational class (between [100, 199]).
     ///
     /// # Examples
     ///
@@ -207,7 +210,7 @@ impl StatusCode {
         self.class() == StatusCodeClass::Informational
     }
 
-    /// Returns whether the status code is of the redirection class (between [300, 399]).
+    /// Returns whether or not the status code is of the redirection class (between [300, 399]).
     ///
     /// # Examples
     ///
@@ -221,7 +224,7 @@ impl StatusCode {
         self.class() == StatusCodeClass::Redirection
     }
 
-    /// Returns whether the status code is of the server error class (between [100, 199]).
+    /// Returns whether or not the status code is of the server error class (between [100, 199]).
     ///
     /// # Examples
     ///
@@ -235,7 +238,7 @@ impl StatusCode {
         self.class() == StatusCodeClass::ServerError
     }
 
-    /// Returns whether the status code is of the success class (between [200, 299]).
+    /// Returns whether or not the status code is of the success class (between [200, 299]).
     ///
     /// # Examples
     ///
@@ -250,9 +253,9 @@ impl StatusCode {
     }
 }
 
-impl fmt::Debug for StatusCode {
-    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        write!(formatter, "{}", u16::from(*self))
+impl Debug for StatusCode {
+    fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
+        Debug::fmt(&u16::from(*self), formatter)
     }
 }
 
@@ -262,9 +265,9 @@ impl Default for StatusCode {
     }
 }
 
-impl fmt::Display for StatusCode {
-    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        write!(formatter, "{}", u16::from(*self))
+impl Display for StatusCode {
+    fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
+        Display::fmt(&u16::from(*self), formatter)
     }
 }
 
@@ -292,44 +295,12 @@ impl PartialOrd for StatusCode {
     }
 }
 
-/// Provides a fallible conversion from a byte slice to a `StatusCode`. Note that you cannot do the
-/// following:
-///
-/// ```compile_fail
-/// let ok = StatusCode::try_from(b"200").unwrap();
-/// ```
-///
-/// This is because `b"200"` is of type `&[u8; 3]` and so it must be converted to `&[u8]` in order
-/// to perform the conversion. Another `TryFrom` implementation from `&[u8, N: usize]` will be
-/// provided once constant generics land on nightly.
 impl<'a> TryFrom<&'a [u8]> for StatusCode {
     type Error = InvalidStatusCode;
 
-    /// Converts a `&[u8]` to a status code.
-    ///
-    /// # Errors
-    ///
-    /// An error will be returned if the byte slice is not of length 3, or the parsed `u16` is less
-    /// than 100 or greater than 599.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # #![feature(try_from)]
-    /// #
-    /// use std::convert::TryFrom;
-    ///
-    /// use rtsp::StatusCode;
-    ///
-    /// let ok = StatusCode::try_from(&b"200"[..]).unwrap();
-    /// assert_eq!(ok, StatusCode::OK);
-    ///
-    /// let error = StatusCode::try_from(&b"099"[..]);
-    /// assert!(error.is_err());
-    /// ```
     fn try_from(value: &'a [u8]) -> Result<Self, Self::Error> {
         if value.len() != 3 {
-            return Err(InvalidStatusCode);
+            return Err(InvalidStatusCode::Invalid);
         }
 
         let a = u16::from(value[0].wrapping_sub(b'0'));
@@ -344,58 +315,95 @@ impl<'a> TryFrom<&'a [u8]> for StatusCode {
 impl<'a> TryFrom<&'a str> for StatusCode {
     type Error = InvalidStatusCode;
 
-    /// Converts a `&str` to a status code.
-    ///
-    /// # Errors
-    ///
-    /// An error will be returned if the string as a byte slice is not of length 3, or the parsed
-    /// `u16` is less than 100 or greater than 599.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # #![feature(try_from)]
-    /// #
-    /// use std::convert::TryFrom;
-    ///
-    /// use rtsp::StatusCode;
-    ///
-    /// let ok = StatusCode::try_from("200").unwrap();
-    /// assert_eq!(ok, StatusCode::OK);
-    ///
-    /// let error = StatusCode::try_from("099");
-    /// assert!(error.is_err());
-    /// ```
     fn try_from(value: &'a str) -> Result<Self, Self::Error> {
         StatusCode::try_from(value.as_bytes())
+    }
+}
+
+impl TryFrom<i8> for StatusCode {
+    type Error = InvalidStatusCode;
+
+    fn try_from(value: i8) -> Result<Self, Self::Error> {
+        let value = u16::try_from(value).map_err(|_| InvalidStatusCode::OutOfRange)?;
+        StatusCode::from_u16(value)
+    }
+}
+
+impl TryFrom<u8> for StatusCode {
+    type Error = InvalidStatusCode;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        StatusCode::from_u16(value as u16)
+    }
+}
+
+impl TryFrom<i16> for StatusCode {
+    type Error = InvalidStatusCode;
+
+    fn try_from(value: i16) -> Result<Self, Self::Error> {
+        let value = u16::try_from(value).map_err(|_| InvalidStatusCode::OutOfRange)?;
+        StatusCode::from_u16(value)
     }
 }
 
 impl TryFrom<u16> for StatusCode {
     type Error = InvalidStatusCode;
 
-    /// Converts a u16 to a status code.
-    ///
-    /// # Errors
-    ///
-    /// An error will be returned if the given `u16` is less than 100 or greater than 599.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # #![feature(try_from)]
-    /// #
-    /// use std::convert::TryFrom;
-    ///
-    /// use rtsp::StatusCode;
-    ///
-    /// let ok = StatusCode::try_from(200).unwrap();
-    /// assert_eq!(ok, StatusCode::OK);
-    ///
-    /// let error = StatusCode::try_from(99);
-    /// assert!(error.is_err());
-    /// ```
     fn try_from(value: u16) -> Result<Self, Self::Error> {
+        StatusCode::from_u16(value)
+    }
+}
+
+impl TryFrom<i32> for StatusCode {
+    type Error = InvalidStatusCode;
+
+    fn try_from(value: i32) -> Result<Self, Self::Error> {
+        let value = u16::try_from(value).map_err(|_| InvalidStatusCode::OutOfRange)?;
+        StatusCode::from_u16(value)
+    }
+}
+
+impl TryFrom<u32> for StatusCode {
+    type Error = InvalidStatusCode;
+
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
+        let value = u16::try_from(value).map_err(|_| InvalidStatusCode::OutOfRange)?;
+        StatusCode::from_u16(value)
+    }
+}
+
+impl TryFrom<i64> for StatusCode {
+    type Error = InvalidStatusCode;
+
+    fn try_from(value: i64) -> Result<Self, Self::Error> {
+        let value = u16::try_from(value).map_err(|_| InvalidStatusCode::OutOfRange)?;
+        StatusCode::from_u16(value as u16)
+    }
+}
+
+impl TryFrom<u64> for StatusCode {
+    type Error = InvalidStatusCode;
+
+    fn try_from(value: u64) -> Result<Self, Self::Error> {
+        let value = u16::try_from(value).map_err(|_| InvalidStatusCode::OutOfRange)?;
+        StatusCode::from_u16(value)
+    }
+}
+
+impl TryFrom<i128> for StatusCode {
+    type Error = InvalidStatusCode;
+
+    fn try_from(value: i128) -> Result<Self, Self::Error> {
+        let value = u16::try_from(value).map_err(|_| InvalidStatusCode::OutOfRange)?;
+        StatusCode::from_u16(value as u16)
+    }
+}
+
+impl TryFrom<u128> for StatusCode {
+    type Error = InvalidStatusCode;
+
+    fn try_from(value: u128) -> Result<Self, Self::Error> {
+        let value = u16::try_from(value).map_err(|_| InvalidStatusCode::OutOfRange)?;
         StatusCode::from_u16(value)
     }
 }
@@ -432,7 +440,15 @@ pub enum StatusCodeClass {
 
 /// A generic error indicating that the status code was invalid.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub struct InvalidStatusCode;
+pub enum InvalidStatusCode {
+    /// This error indicates that when converting to a [`StatusCode`] from a byte string, that the
+    /// byte string was not of the form `"***"` where each `'*'` is a digit.
+    Invalid,
+
+    /// This error indicates that when converting to a [`StatusCode`] from an unsigned integer, the
+    /// value was out of range (i.e. outside of the range [100, 599]).
+    OutOfRange,
+}
 
 impl fmt::Display for InvalidStatusCode {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
@@ -442,7 +458,12 @@ impl fmt::Display for InvalidStatusCode {
 
 impl Error for InvalidStatusCode {
     fn description(&self) -> &str {
-        "invalid RTSP status code"
+        use self::InvalidStatusCode::*;
+
+        match self {
+            Invalid => "invalid RTSP status code",
+            OutOfRange => "out of range RTSP status code",
+        }
     }
 }
 
@@ -463,9 +484,12 @@ status_codes! {
     /// [[RFC7826, Section 17.3.3](https://tools.ietf.org/html/rfc7826#section-17.3.3)]
     (302, Found, "Found");
 
-    /// 303 See Other
-    /// [[RFC7826, Section 17.3.4](https://tools.ietf.org/html/rfc7826#section-17.3.4)]
-    (303, SeeOther, "See Other");
+    // As stated in the RFC: "This status code MUST NOT be used in RTSP 2.0. However, it was allowed
+    // in RTSP 1.0".
+
+    // /// 303 See Other
+    // /// [[RFC7826, Section 17.3.4](https://tools.ietf.org/html/rfc7826#section-17.3.4)]
+    // (303, SeeOther, "See Other");
 
     /// 304 Not Modified
     /// [[RFC7826, Section 17.3.5](https://tools.ietf.org/html/rfc7826#section-17.3.5)]
