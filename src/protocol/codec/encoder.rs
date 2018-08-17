@@ -11,7 +11,7 @@ pub fn encode_request<B>(request: &Request<B>, buffer: &mut BytesMut)
 where
     B: AsRef<[u8]>,
 {
-    buffer.extend::<&[u8]>(request.method().as_ref());
+    buffer.extend(request.method().as_str().as_bytes());
     buffer.extend(b" ");
     buffer.extend(request.uri().to_string().as_bytes());
     buffer.extend(b" ");
