@@ -171,6 +171,12 @@ impl Method {
     }
 }
 
+impl AsRef<[u8]> for Method {
+    fn as_ref(&self) -> &[u8] {
+        self.as_str().as_bytes()
+    }
+}
+
 impl AsRef<str> for Method {
     fn as_ref(&self) -> &str {
         self.as_str()
