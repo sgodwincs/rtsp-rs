@@ -1,7 +1,6 @@
 //! Version
 //!
-//! This module contains a definition of the [`Version`] type. The `Version` type is intended to be
-//! accessed through the root of the crate ([`Version`]) rather than this module.
+//! This module contains a definition of the [`Version`] type.
 //!
 //! The [`Version`] enum type contains variants that represent the various versions of the the RTSP
 //! protocol. Note that although RTSP 1.0 and RTSP 2.0 are listed here, RTSP 2.0 obseletes RTSP 1.0
