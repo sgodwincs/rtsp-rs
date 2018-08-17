@@ -16,13 +16,12 @@
 //! let rtsp20 = Version::RTSP20;
 //!
 //! assert!(rtsp10 != rtsp20);
-//! assert_eq!(rtsp20.to_string(), "RTSP/2.0")
+//! assert_eq!(rtsp20.as_str(), "RTSP/2.0")
 //! ```
-//!
 
 use std::convert::TryFrom;
 use std::error::Error;
-use std::fmt;
+use std::fmt::{self, Display, Formatter};
 
 /// Represents a version of the RTSP spec.
 #[derive(Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -101,8 +100,20 @@ impl Version {
     }
 }
 
+impl AsRef<[u8]> for Version {
+    fn as_ref(&self) -> &[u8] {
+        self.as_str().as_bytes()
+    }
+}
+
+impl AsRef<str> for Version {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
 impl fmt::Debug for Version {
-    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
         formatter.write_str(self.as_str())
     }
 }
@@ -113,51 +124,21 @@ impl Default for Version {
     }
 }
 
-impl fmt::Display for Version {
-    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+impl Display for Version {
+    fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
         formatter.write_str(self.as_str())
     }
 }
 
-/// Provides a fallible conversion from a byte slice to a [`Version`].
-///
-/// Note that you cannot do the following:
-///
-/// ```compile_fail
-/// let play = Version::try_from(b"RTSP/2.0").unwrap();
-/// ```
-///
-/// This is because `b"RTSP/2.0"` is of type `&[u8; 8]` and so it must be converted to `&[u8]` in
-/// order to perform the conversion. Another `TryFrom` implementation from `&[u8, N: usize]` will be
-/// provided once constant generics land on nightly.
+impl<'query> From<Version> for String {
+    fn from(value: Version) -> Self {
+        value.to_string()
+    }
+}
+
 impl<'a> TryFrom<&'a [u8]> for Version {
     type Error = InvalidVersion;
 
-    /// Converts a `&[u8]` to an RTSP version. The conversion is case insensitive.
-    ///
-    /// # Return Value
-    ///
-    /// An error will be returned if the version is not of the form `b"RTSP/*.*"` where the `*` are
-    /// 1 digit numbers.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # #![feature(try_from)]
-    /// #
-    /// use std::convert::TryFrom;
-    ///
-    /// use rtsp::Version;
-    ///
-    /// let rtsp10 = Version::try_from(&b"RTSP/1.0"[..]).unwrap();
-    /// assert_eq!(rtsp10, Version::RTSP10);
-    ///
-    /// let rtsp20 = Version::try_from(&b"RTSP/2.0"[..]).unwrap();
-    /// assert_eq!(rtsp20, Version::RTSP20);
-    ///
-    /// let error = Version::try_from(&b"RTSP/3.0"[..]);
-    /// assert!(error.is_err());
-    /// ```
     fn try_from(value: &'a [u8]) -> Result<Self, Self::Error> {
         use self::Version::*;
 
@@ -183,31 +164,6 @@ impl<'a> TryFrom<&'a [u8]> for Version {
 impl<'a> TryFrom<&'a str> for Version {
     type Error = InvalidVersion;
 
-    /// Converts a `&str` to an RTSP version. The conversion is case insensitive.
-    ///
-    /// # Return Value
-    ///
-    /// An error will be returned if the version is not of the form `"RTSP/*.*"` where the `*` are 1
-    /// digit numbers.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # #![feature(try_from)]
-    /// #
-    /// use std::convert::TryFrom;
-    ///
-    /// use rtsp::Version;
-    ///
-    /// let rtsp10 = Version::try_from(&b"RTSP/1.0"[..]).unwrap();
-    /// assert_eq!(rtsp10, Version::RTSP10);
-    ///
-    /// let rtsp20 = Version::try_from(&b"RTSP/2.0"[..]).unwrap();
-    /// assert_eq!(rtsp20, Version::RTSP20);
-    ///
-    /// let error = Version::try_from(&b"RTSP/3.0"[..]);
-    /// assert!(error.is_err());
-    /// ```
     fn try_from(value: &'a str) -> Result<Self, Self::Error> {
         Version::try_from(value.as_bytes())
     }
@@ -216,11 +172,11 @@ impl<'a> TryFrom<&'a str> for Version {
 /// A possible error value when converting to a [`Version`] from a `&[u8]` or `&str`.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum InvalidVersion {
-    /// This error indicates that the version was not of the form `RTSP/*.*` where * are 1 digit
-    /// numbers.
+    /// This error indicates that the version was not of the form `"RTSP/*.*"` where `'*'` are 1
+    /// digit numbers.
     Invalid,
 
-    /// This error indicates that the version was of the correct form but the version is not
+    /// This error indicates that the version was of the correct form, but the version is not
     /// recognized.
     Unknown,
 }
