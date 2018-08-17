@@ -24,7 +24,7 @@ impl RequestURI {
             "*",
             None::<Query>,
             None::<Fragment>,
-        );
+        ).unwrap();
 
         RequestURI {
             scheme: None,
@@ -90,15 +90,19 @@ impl RequestURI {
         self.uri_reference.host()
     }
 
-    pub fn into_builder(self) -> RequestURIBuilder<'static> {
+    pub fn into_builder(self) -> Option<RequestURIBuilder<'static>> {
+        if self.is_asterisk() {
+            return None;
+        }
+
         let (scheme, authority, path, query) = self.into_parts();
         let mut builder = RequestURIBuilder::new();
         builder
-            .scheme(scheme)
-            .authority(authority)
+            .scheme(scheme.unwrap())
+            .authority(authority.unwrap())
             .path(path)
             .query(query);
-        builder
+        Some(builder)
     }
 
     pub fn into_parts(
