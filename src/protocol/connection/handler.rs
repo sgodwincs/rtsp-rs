@@ -7,7 +7,7 @@ use tokio_timer::Delay;
 
 use super::SenderHandle;
 use header::types::CSeq;
-use header::{HeaderMap, HeaderName, TypedHeader};
+use header::{HeaderName, RawHeaderMap, TypedHeader};
 use protocol::{Message, Service};
 use request::Request;
 use response::Response;
@@ -31,7 +31,7 @@ impl<S> RequestHandler<S>
 where
     S: Service<Request = Request<BytesMut>>,
     S::Future: Send + 'static,
-    S::Response: Into<Response<BytesMut, HeaderMap>>,
+    S::Response: Into<Response<BytesMut, RawHeaderMap>>,
 {
     pub(crate) fn new(
         service: S,
@@ -143,7 +143,7 @@ impl<S> Future for RequestHandler<S>
 where
     S: Service<Request = Request<BytesMut>>,
     S::Future: Send + 'static,
-    S::Response: Into<Response<BytesMut, HeaderMap>>,
+    S::Response: Into<Response<BytesMut, RawHeaderMap>>,
 {
     type Item = ();
     type Error = ();

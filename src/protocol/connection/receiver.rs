@@ -407,8 +407,7 @@ impl RequestReceiver {
     ) -> Result<(), RequestReceiverError> {
         let header_values = request
             .headers()
-            .get_all(HeaderName::CSeq)
-            .iter()
+            .get_all(&HeaderName::CSeq)
             .cloned()
             .collect::<Vec<HeaderValue>>();
 
@@ -540,8 +539,7 @@ impl ResponseReceiver {
 
         let header_values = response
             .headers()
-            .get_all(HeaderName::CSeq)
-            .iter()
+            .get_all(&HeaderName::CSeq)
             .cloned()
             .collect::<Vec<HeaderValue>>();
         let cseq = CSeq::try_from_header_raw(&header_values);

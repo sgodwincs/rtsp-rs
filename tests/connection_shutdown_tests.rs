@@ -8,7 +8,7 @@ extern crate tokio_timer;
 use bytes::BytesMut;
 use futures::{future, lazy, Future};
 use rtsp::protocol::{Connection, ConnectionHandle, OperationError, ShutdownType};
-use rtsp::{HeaderMap, HeaderName, Method, Request, Response, Service};
+use rtsp::{HeaderName, Method, RawHeaderMap, Request, Response, Service};
 use std::io::{self, Read, Write};
 use std::net::TcpListener;
 use std::time::{Duration, Instant};
@@ -28,7 +28,7 @@ impl Service for DummyService {
         let response = Response::builder()
             .header(
                 HeaderName::CSeq,
-                request.headers().get(HeaderName::CSeq).unwrap().clone(),
+                request.headers().get(&HeaderName::CSeq).unwrap().clone(),
             )
             .build("".into())
             .unwrap();
@@ -45,7 +45,7 @@ where
     ServerHandler: FnOnce(TcpListener) -> () + Send + 'static,
     RequestService: Service<Request = Request<BytesMut>> + Send + 'static,
     RequestService::Future: Send + 'static,
-    RequestService::Response: Into<Response<BytesMut, HeaderMap>>,
+    RequestService::Response: Into<Response<BytesMut, RawHeaderMap>>,
 {
     let server = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = server.local_addr().unwrap();
@@ -87,7 +87,8 @@ fn test_connection_shutdown_connection_dropped_with_no_pending_requests() {
                     socket.read_to_end(&mut buffer).unwrap();
                 },
                 service,
-            ).and_then(|mut handle| {
+            )
+            .and_then(|mut handle| {
                 // Wait for shutdown event.
 
                 handle.take_shutdown().unwrap().map_err(|_| ())
@@ -129,7 +130,8 @@ fn test_connection_shutdown_connection_dropped_with_pending_requests() {
                     socket.read_to_end(&mut buffer).unwrap();
                 },
                 service,
-            ).and_then(|mut handle| {
+            )
+            .and_then(|mut handle| {
                 // Prepare shutdown future for waiting for the shutdown event.
 
                 let shutdown = handle.take_shutdown().unwrap().map_err(|_| ());
@@ -170,7 +172,8 @@ fn test_connection_shutdown_immediate_with_no_pending_requests() {
                     socket.read_to_end(&mut buffer).unwrap();
                 },
                 service,
-            ).and_then(|mut handle| {
+            )
+            .and_then(|mut handle| {
                 handle.shutdown(ShutdownType::Immediate);
 
                 // Wait for shutdown event.
@@ -206,7 +209,8 @@ fn test_connection_shutdown_immediate_with_pending_requests() {
                     socket.read_to_end(&mut buffer).unwrap();
                 },
                 service,
-            ).and_then(|mut handle| {
+            )
+            .and_then(|mut handle| {
                 // Prepare shutdown future for waiting for the shutdown event.
 
                 let shutdown = handle.take_shutdown().unwrap().map_err(|_| ());
@@ -269,7 +273,8 @@ fn test_connection_shutdown_graceful_with_no_pending_requests() {
                     socket.read_to_end(&mut buffer).unwrap();
                 },
                 service,
-            ).and_then(|mut handle| {
+            )
+            .and_then(|mut handle| {
                 handle.shutdown(ShutdownType::Graceful(Duration::from_millis(5)));
 
                 // Wait for shutdown event.
@@ -317,7 +322,8 @@ fn test_connection_shutdown_graceful_with_pending_requests() {
                     socket.read_to_end(&mut buffer).unwrap();
                 },
                 service,
-            ).and_then(|mut handle| {
+            )
+            .and_then(|mut handle| {
                 // Prepare shutdown future for waiting for the shutdown event.
 
                 let shutdown = handle.take_shutdown().unwrap().map_err(|_| ());
@@ -381,7 +387,8 @@ fn test_connection_shutdown_graceful_with_pending_requests_and_timeout() {
                     socket.read_to_end(&mut buffer).unwrap();
                 },
                 service,
-            ).and_then(|mut handle| {
+            )
+            .and_then(|mut handle| {
                 // Prepare shutdown future for waiting for the shutdown event.
 
                 let shutdown = handle.take_shutdown().unwrap().map_err(|_| ());

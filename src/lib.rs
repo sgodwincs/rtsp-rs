@@ -7,12 +7,10 @@ extern crate bytes;
 extern crate chrono;
 extern crate itertools;
 #[macro_use]
-extern crate delegate;
-extern crate fnv;
-#[macro_use]
 extern crate futures;
 #[macro_use]
 extern crate lazy_static;
+extern crate ordered_multimap;
 extern crate rand;
 extern crate regex;
 #[cfg(test)]
@@ -39,7 +37,7 @@ pub mod uri;
 pub mod version;
 
 pub use client::Client;
-pub use header::{HeaderMap, HeaderName, HeaderValue, TypedHeader, TypedHeaderMap};
+pub use header::{HeaderName, HeaderValue, RawHeaderMap, TypedHeader, TypedHeaderMap};
 pub use method::Method;
 pub use protocol::Service;
 pub use reason::ReasonPhrase;

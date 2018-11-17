@@ -67,12 +67,13 @@
 //! ```
 
 use bytes::BytesMut;
+use ordered_multimap::list_ordered_multimap::Entry;
 use std::convert::TryFrom;
 use std::mem::replace;
 use std::{error, fmt};
 
 use header::types::ContentLength;
-use header::{Entry, HeaderName, HeaderValue, TypedHeader};
+use header::{HeaderName, HeaderValue, TypedHeader};
 use request::{Builder as RequestBuilder, BuilderError as RequestBuilderError, Request};
 use response::{Builder as ResponseBuilder, BuilderError as ResponseBuilderError, Response};
 
@@ -539,11 +540,7 @@ impl RequestDecoder {
             Incomplete => Incomplete,
             Complete(None) => {
                 self.state = ParseState::Body;
-                let entry = self
-                    .builder
-                    .headers
-                    .entry(HeaderName::ContentLength)
-                    .expect("`ContentLength` should be a valid `HeaderName`");
+                let entry = self.builder.headers.entry(HeaderName::ContentLength);
 
                 match get_content_length(entry) {
                     Ok(content_length) => self.content_length = content_length,
@@ -970,11 +967,7 @@ impl ResponseDecoder {
             Incomplete => Incomplete,
             Complete(None) => {
                 self.state = ParseState::Body;
-                let entry = self
-                    .builder
-                    .headers
-                    .entry(HeaderName::ContentLength)
-                    .expect("`ContentLength` should be a valid `HeaderName`");
+                let entry = self.builder.headers.entry(HeaderName::ContentLength);
 
                 match get_content_length(entry) {
                     Ok(content_length) => self.content_length = content_length,
@@ -1196,18 +1189,22 @@ fn get_line<'a>(buffer: &mut &'a [u8]) -> Option<(&'a [u8], usize)> {
     }
 }
 
-/// Given the `Entry` for the `Content-Length` header (assuming use of `HeaderMap`), this function
-/// attempts to parse the given header and return the content length, defaulting to 0 if the header
-/// does not exist.
-fn get_content_length(header_entry: Entry<HeaderValue>) -> Result<ContentLength, ()> {
+/// Given the `Entry` for the `Content-Length` header (assuming use of `RawHeaderMap`), this
+/// function attempts to parse the given header and return the content length, defaulting to 0 if
+/// the header does not exist.
+fn get_content_length(header_entry: Entry<HeaderName, HeaderValue>) -> Result<ContentLength, ()> {
+    use ordered_multimap::list_ordered_multimap::Entry::*;
+
     match header_entry {
-        Entry::Occupied(entry) => if entry.iter().count() > 1 {
-            Err(())
-        } else {
-            let header_values = &entry.iter().cloned().collect::<Vec<HeaderValue>>();
-            ContentLength::try_from_header_raw(header_values).map_err(|_| ())
-        },
-        Entry::Vacant(_) => Ok(ContentLength::default()),
+        Occupied(entry) => {
+            if entry.iter().count() > 1 {
+                Err(())
+            } else {
+                let header_values = &entry.iter().cloned().collect::<Vec<HeaderValue>>();
+                ContentLength::try_from_header_raw(header_values).map_err(|_| ())
+            }
+        }
+        Vacant(_) => Ok(ContentLength::default()),
     }
 }
 
@@ -1227,20 +1224,22 @@ fn parse_header_multiline(buffer: &[u8]) -> ParseResult<Option<(usize, usize)>, 
 
     match iter.next() {
         Some(0) => Complete(None),
-        Some(mut i) => if let Some(j) = buffer.iter().take(i).position(|&b| b == b':') {
-            loop {
-                match buffer.get(i + 2) {
-                    Some(&b) if b == b' ' || b == b'\t' => match iter.next() {
-                        Some(k) => i = k,
+        Some(mut i) => {
+            if let Some(j) = buffer.iter().take(i).position(|&b| b == b':') {
+                loop {
+                    match buffer.get(i + 2) {
+                        Some(&b) if b == b' ' || b == b'\t' => match iter.next() {
+                            Some(k) => i = k,
+                            None => break Incomplete,
+                        },
+                        Some(_) => break Complete(Some((i, j))),
                         None => break Incomplete,
-                    },
-                    Some(_) => break Complete(Some((i, j))),
-                    None => break Incomplete,
+                    }
                 }
+            } else {
+                Error(())
             }
-        } else {
-            Error(())
-        },
+        }
         None => Incomplete,
     }
 }

@@ -21,7 +21,7 @@ use futures::sync::mpsc::{channel, unbounded, UnboundedSender};
 use futures::sync::oneshot;
 use futures::{future, Async, Future, Poll, Stream};
 use header::types::CSeq;
-use header::{HeaderMap, HeaderName, TypedHeader};
+use header::{HeaderName, RawHeaderMap, TypedHeader};
 use protocol::{Codec, Message, OperationError, Service};
 use request::Request;
 use response::Response;
@@ -58,7 +58,7 @@ impl Connection {
         Transport: AsyncRead + AsyncWrite + Send + 'static,
         S: Service<Request = Request<BytesMut>> + Send + 'static,
         S::Future: Send + 'static,
-        S::Response: Into<Response<BytesMut, HeaderMap>>,
+        S::Response: Into<Response<BytesMut, RawHeaderMap>>,
     {
         Connection::with_config(transport, service, Config::default())
     }
@@ -72,7 +72,7 @@ impl Connection {
         Transport: AsyncRead + AsyncWrite + Send + 'static,
         S: Service<Request = Request<BytesMut>> + Send + 'static,
         S::Future: Send + 'static,
-        S::Response: Into<Response<BytesMut, HeaderMap>>,
+        S::Response: Into<Response<BytesMut, RawHeaderMap>>,
     {
         let (tx_codec_event, rx_codec_event) = unbounded();
         let (tx_incoming_request, rx_incoming_request) = channel(config.request_buffer_size());

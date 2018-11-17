@@ -61,19 +61,15 @@
 //! [`HashMap`]: #
 //! [Robin Hood hashing]: https://en.wikipedia.org/wiki/Hash_table#Robin_Hood_hashing
 
-mod map;
-mod name;
-mod typed_map;
-mod value;
-
 pub mod common;
+pub mod name;
+pub mod raw_map;
+pub mod typed_map;
 pub mod types;
+pub mod value;
 
-pub use self::map::{
-    AsHeaderName, Drain, Entry, GetAll, HeaderMap, IntoHeaderName, IntoIter, Iter, Keys,
-    OccupiedEntry, VacantEntry, ValueDrain, ValueIter, ValueIterMut, Values,
-};
 pub use self::name::{HeaderName, InvalidHeaderName};
+pub use self::raw_map::RawHeaderMap;
 pub use self::typed_map::{InvalidTypedHeader, TypedHeader, TypedHeaderMap};
 pub use self::value::{HeaderValue, InvalidHeaderValue};
 

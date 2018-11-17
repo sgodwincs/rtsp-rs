@@ -1,15 +1,14 @@
 //! RTSP Request Types
 //!
-//! This module contains structs related to RTSP requests, notably the `Request` type itself as well
-//! as a builder to create requests. Typically, you will import the `rtsp::Request` type rather than
-//! reaching into this module itself.
+//! This module contains structs related to RTSP requests, notably the [`Request`] type itself as
+//! well as a builder to create requests.
 
 use std::convert::TryFrom;
 use std::error::Error;
 use std::fmt;
 use std::mem::replace;
 
-use header::{HeaderMap, HeaderName, HeaderValue, TypedHeader, TypedHeaderMap};
+use header::{HeaderName, HeaderValue, RawHeaderMap, TypedHeader, TypedHeaderMap};
 use method::Method;
 use uri::RequestURI;
 use version::Version;
@@ -26,14 +25,14 @@ use version::Version;
 /// Note that it is not necessary to ever set the `Content-Length` header as it will be forcibly
 /// set during encoding even if it is already present.
 #[derive(Clone, Eq, PartialEq)]
-pub struct Request<B, H = HeaderMap>
+pub struct Request<B, H = RawHeaderMap>
 where
     H: Default,
 {
     /// The body component of the request. This is generic to support arbitrary content types.
     body: B,
 
-    /// A header map that will either be `HeaderMap` or `TypedHeaderMap`.
+    /// A header map that will either be `RawHeaderMap` or `TypedHeaderMap`.
     headers: H,
 
     /// The RTSP method to be applied to the resource. This can be any standardized RTSP method or
@@ -294,14 +293,14 @@ pub type TypedRequest<B> = Request<B, TypedHeaderMap>;
 ///
 /// This type can be used to construct a `Request` through a builder-like pattern.
 #[derive(Clone, Debug)]
-pub struct Builder<H = HeaderMap>
+pub struct Builder<H = RawHeaderMap>
 where
     H: Default,
 {
     /// A stored error used when making a `Request`.
     pub(crate) error: Option<BuilderError>,
 
-    /// A header map that will either be `HeaderMap` or `TypedHeaderMap`.
+    /// A header map that will either be `RawHeaderMap` or `TypedHeaderMap`.
     pub(crate) headers: H,
 
     /// The RTSP method to be applied to the resource. This can be any standardized RTSP method or
@@ -465,12 +464,12 @@ where
     }
 }
 
-impl Builder<HeaderMap> {
+impl Builder<RawHeaderMap> {
     /// Appends a header to this request.
     ///
-    /// This function will append the provided key/value as a header to the internal `HeaderMap`
-    /// being constructed. Essentially, this is equivalent to calling `HeaderMap::append`. Because
-    /// of this, you are able to add a given header multiple times.
+    /// This function will append the provided key/value as a header to the internal `RawHeaderMap`
+    /// being constructed. Essentially, this is equivalent to calling `RawHeaderMap::append`.
+    /// Because of this, you are able to add a given header multiple times.
     ///
     /// By default, the request contains no headers.
     ///
@@ -586,7 +585,7 @@ impl Builder<TypedHeaderMap> {
     }
 
     /// Converts this builder into a builder that contains untyped headers.
-    pub fn into_untyped(self) -> Builder<HeaderMap> {
+    pub fn into_untyped(self) -> Builder<RawHeaderMap> {
         Builder {
             error: self.error,
             headers: self.headers.into(),

@@ -11,7 +11,7 @@ use std::error::Error;
 use std::iter::FromIterator;
 use std::{fmt, mem};
 
-use header::{HeaderMap, HeaderName, HeaderValue};
+use header::{HeaderName, HeaderValue, RawHeaderMap};
 
 use self::sealed::TypedHeaderClone;
 
@@ -489,22 +489,21 @@ impl Default for TypedHeaderMap {
     }
 }
 
-impl From<HeaderMap<HeaderValue>> for TypedHeaderMap {
-    fn from(mut value: HeaderMap<HeaderValue>) -> Self {
-        let mut map = TypedHeaderMap::with_capacity(value.len());
+impl From<RawHeaderMap> for TypedHeaderMap {
+    fn from(mut value: RawHeaderMap) -> Self {
+        let mut map = TypedHeaderMap::with_capacity(value.keys_len());
 
-        for (key, values) in value.drain() {
-            let values = values.collect::<Vec<HeaderValue>>();
-            map.set_raw(key, values);
+        for (key, values) in value.drain_pairs() {
+            map.set_raw(key, values.collect::<Vec<_>>());
         }
 
         map
     }
 }
 
-impl From<TypedHeaderMap> for HeaderMap<HeaderValue> {
+impl From<TypedHeaderMap> for RawHeaderMap {
     fn from(value: TypedHeaderMap) -> Self {
-        let mut map = HeaderMap::with_capacity(value.len());
+        let mut map = RawHeaderMap::with_capacity(value.len(), value.len());
 
         for view in value.iter() {
             let key = view.name();
@@ -537,7 +536,7 @@ pub struct TypedHeaderView<'a>(&'a HeaderName, &'a TypedHeaderItem);
 
 impl<'a> TypedHeaderView<'a> {
     pub fn is<H: TypedHeader>(&self) -> bool {
-        H::header_name() == *self.0
+        *H::header_name() == *self.0
     }
 
     pub fn name(&self) -> &HeaderName {
@@ -645,7 +644,8 @@ impl TypedHeaderItem {
                 H::try_from_header_raw(&raw_value)
                     .map(|value| -> Box<TypedHeader + Send + Sync> { Box::new(value) })
             }
-        }.map(|typed| unsafe { typed.downcast_unchecked() })
+        }
+        .map(|typed| unsafe { typed.downcast_unchecked() })
     }
 
     pub fn raw(&self) -> &Vec<HeaderValue> {
@@ -709,7 +709,8 @@ impl TypedHeaderItem {
                     }
                 }
             }
-        }.map(|typed| unsafe { typed.downcast_ref_unchecked() })
+        }
+        .map(|typed| unsafe { typed.downcast_ref_unchecked() })
     }
 
     pub fn typed_mut<H: Any + TypedHeader>(&mut self) -> Result<&mut H, InvalidTypedHeader> {
@@ -742,7 +743,8 @@ impl TypedHeaderItem {
                     }
                 }
             }
-        }.map(|typed| unsafe { typed.downcast_mut_unchecked() })
+        }
+        .map(|typed| unsafe { typed.downcast_mut_unchecked() })
     }
 }
 
