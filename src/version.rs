@@ -135,10 +135,10 @@ impl<'query> From<Version> for String {
     }
 }
 
-impl<'a> TryFrom<&'a [u8]> for Version {
+impl<'version> TryFrom<&'version [u8]> for Version {
     type Error = InvalidVersion;
 
-    fn try_from(value: &'a [u8]) -> Result<Self, Self::Error> {
+    fn try_from(value: &'version [u8]) -> Result<Self, Self::Error> {
         use self::Version::*;
 
         let value = value.to_ascii_uppercase();
@@ -160,10 +160,10 @@ impl<'a> TryFrom<&'a [u8]> for Version {
     }
 }
 
-impl<'a> TryFrom<&'a str> for Version {
+impl<'version> TryFrom<&'version str> for Version {
     type Error = InvalidVersion;
 
-    fn try_from(value: &'a str) -> Result<Self, Self::Error> {
+    fn try_from(value: &'version str) -> Result<Self, Self::Error> {
         Version::try_from(value.as_bytes())
     }
 }
@@ -180,8 +180,8 @@ pub enum InvalidVersion {
     Unknown,
 }
 
-impl fmt::Display for InvalidVersion {
-    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+impl Display for InvalidVersion {
+    fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
         formatter.write_str(self.description())
     }
 }
