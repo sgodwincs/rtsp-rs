@@ -66,7 +66,7 @@ pub fn extract_quoted_string(string: &str) -> Option<&str> {
 }
 
 /// A helper function used to trim whitespace as it is used in
-/// [[RFC7826](https://tools.ietf.org/html/rfc782)]. Specifically, whitespace includes `' '`,
+/// [[RFC7826](https://tools.ietf.org/html/rfc7826)]. Specifically, whitespace includes `' '`,
 /// `'\t'`, and `"\r\n"`. The trim functions defined on the `str` slice do not seem to be enough to
 /// trim the whitespace in a one liner, so this function is used.
 pub fn trim_whitespace(string: &str) -> &str {
