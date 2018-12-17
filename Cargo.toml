@@ -25,7 +25,7 @@ tokio-executor = "0.1.1"
 tokio-io = "0.1.6"
 tokio-tcp = "0.1.0"
 tokio-timer = "0.2.3"
-uriparse = "0.3.0"
+uriparse = "0.4.0"
 
 [dev-dependencies]
 tokio = "0.1.6"

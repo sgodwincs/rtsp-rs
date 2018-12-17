@@ -3,11 +3,10 @@ use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use uriparse::{
     Fragment, InvalidAuthority, InvalidFragment, InvalidPath, InvalidQuery, InvalidScheme,
-    InvalidURIReference, Scheme as GenericScheme, URIReference, URIReferenceBuilder, URI,
+    InvalidURIReference, Scheme as URIScheme, URIReference, URIReferenceBuilder, URI,
 };
 
-// TODO(https://github.com/rust-lang/rust/issues/52118) Set lifetimes on these types to `'static`
-// for convenience and export.
+// TODO(https://github.com/rust-lang/rust/issues/49683): Need to wait for type alias enums.
 pub use uriparse::{Authority, Host, Password, Path, Query, Username};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -57,7 +56,7 @@ impl RequestURI {
         query: Option<QueryType>,
     ) -> Result<RequestURI, InvalidRequestURI>
     where
-        GenericScheme<'new_uri>: TryFrom<SchemeType, Error = SchemeError>,
+        URIScheme<'new_uri>: TryFrom<SchemeType, Error = SchemeError>,
         Authority<'new_uri>: TryFrom<AuthorityType, Error = AuthorityError>,
         Path<'new_uri>: TryFrom<PathType, Error = PathError>,
         Query<'new_uri>: TryFrom<QueryType, Error = QueryError>,
@@ -76,6 +75,10 @@ impl RequestURI {
 
     pub fn has_password(&self) -> bool {
         self.uri_reference.has_password()
+    }
+
+    pub fn has_port(&self) -> bool {
+        self.uri_reference.has_port()
     }
 
     pub fn has_query(&self) -> bool {
@@ -122,6 +125,10 @@ impl RequestURI {
         self.uri_reference.is_relative_reference()
     }
 
+    pub fn is_normalized(&self) -> bool {
+        self.uri_reference.is_normalized()
+    }
+
     pub fn map_authority<Mapper>(&mut self, mapper: Mapper) -> Option<&Authority<'static>>
     where
         Mapper: FnOnce(Authority<'static>) -> Authority<'static>,
@@ -166,6 +173,10 @@ impl RequestURI {
         }
 
         self.scheme()
+    }
+
+    pub fn normalize(&mut self) {
+        self.uri_reference.normalize();
     }
 
     pub fn path(&self) -> &Path<'static> {
@@ -396,7 +407,7 @@ impl<'uri> RequestURIBuilder<'uri> {
 
     pub fn scheme<SchemeType, SchemeError>(&mut self, scheme: SchemeType) -> &mut Self
     where
-        GenericScheme<'uri>: TryFrom<SchemeType, Error = SchemeError>,
+        URIScheme<'uri>: TryFrom<SchemeType, Error = SchemeError>,
         InvalidScheme: From<SchemeError>,
     {
         self.uri_reference_builder.scheme(Some(scheme));
@@ -411,31 +422,31 @@ pub enum Scheme {
     RTSPU,
 }
 
-impl From<Scheme> for GenericScheme<'static> {
+impl From<Scheme> for URIScheme<'static> {
     fn from(value: Scheme) -> Self {
         use self::Scheme::*;
 
         match value {
-            RTSP => GenericScheme::RTSP,
-            RTSPS => GenericScheme::RTSPS,
-            RTSPU => GenericScheme::RTSPU,
+            RTSP => URIScheme::RTSP,
+            RTSPS => URIScheme::RTSPS,
+            RTSPU => URIScheme::RTSPU,
         }
     }
 }
 
-impl<'scheme> TryFrom<GenericScheme<'scheme>> for Scheme {
+impl<'scheme> TryFrom<URIScheme<'scheme>> for Scheme {
     type Error = ();
 
-    fn try_from(value: GenericScheme<'scheme>) -> Result<Self, Self::Error> {
+    fn try_from(value: URIScheme<'scheme>) -> Result<Self, Self::Error> {
         Scheme::try_from(&value)
     }
 }
 
-impl<'a, 'scheme> TryFrom<&'a GenericScheme<'scheme>> for Scheme {
+impl<'a, 'scheme> TryFrom<&'a URIScheme<'scheme>> for Scheme {
     type Error = ();
 
-    fn try_from(value: &'a GenericScheme<'scheme>) -> Result<Self, Self::Error> {
-        use self::GenericScheme::*;
+    fn try_from(value: &'a URIScheme<'scheme>) -> Result<Self, Self::Error> {
+        use self::URIScheme::*;
 
         match value {
             RTSP => Ok(Scheme::RTSP),
@@ -516,6 +527,7 @@ impl TryFrom<InvalidURIReference> for InvalidRequestURI {
             InvalidURIReference::SchemelessPathCannotStartWithColonSegment => {
                 Ok(SchemelessPathCannotStartWithColonSegment)
             }
+            _ => panic!("unhandled URI reference error")
         }
     }
 }
