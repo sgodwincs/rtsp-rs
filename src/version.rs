@@ -141,9 +141,14 @@ impl<'version> TryFrom<&'version [u8]> for Version {
     fn try_from(value: &'version [u8]) -> Result<Self, Self::Error> {
         use self::Version::*;
 
-        let value = value.to_ascii_uppercase();
-
-        if value.len() != 8 || !value.starts_with(b"RTSP/") || value[6] != b'.' {
+        if value.len() != 8
+            || value
+                .iter()
+                .take(5)
+                .map(|byte| byte.to_ascii_uppercase())
+                .ne(b"RTSP/".iter().cloned())
+            || value[6] != b'.'
+        {
             return Err(InvalidVersion::Invalid);
         }
 
@@ -154,6 +159,8 @@ impl<'version> TryFrom<&'version [u8]> for Version {
             Ok(RTSP10)
         } else if major == 2 && minor == 0 {
             Ok(RTSP20)
+        } else if major > 9 || minor > 9 {
+            Err(InvalidVersion::Invalid)
         } else {
             Err(InvalidVersion::Unknown)
         }
@@ -194,5 +201,24 @@ impl Error for InvalidVersion {
             Invalid => "invalid RTSP version",
             Unknown => "unknown RTSP version",
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_parse() {
+        assert_eq!(Version::try_from("rtsp/1.0"), Ok(Version::RTSP10));
+        assert_eq!(Version::try_from("RTSP/1.0"), Ok(Version::RTSP10));
+        assert_eq!(Version::try_from("rtsp/2.0"), Ok(Version::RTSP20));
+        assert_eq!(Version::try_from("RTSP/2.0"), Ok(Version::RTSP20));
+
+        assert_eq!(Version::try_from(""), Err(InvalidVersion::Invalid));
+        assert_eq!(Version::try_from("rtsp/"), Err(InvalidVersion::Invalid));
+        assert_eq!(Version::try_from("rtsp/0.0"), Err(InvalidVersion::Unknown));
+        assert_eq!(Version::try_from("rtsp/9.9"), Err(InvalidVersion::Unknown));
+        assert_eq!(Version::try_from("rtsp/A.A"), Err(InvalidVersion::Invalid));
     }
 }
