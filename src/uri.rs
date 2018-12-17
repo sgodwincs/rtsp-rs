@@ -50,8 +50,8 @@ impl RequestURI {
         PathError,
         QueryError,
     >(
-        scheme: Option<SchemeType>,
-        authority: Option<AuthorityType>,
+        scheme: SchemeType,
+        authority: AuthorityType,
         path: PathType,
         query: Option<QueryType>,
     ) -> Result<RequestURI, InvalidRequestURI>
@@ -64,7 +64,7 @@ impl RequestURI {
             From<SchemeError> + From<AuthorityError> + From<PathError> + From<QueryError>,
     {
         let uri_reference =
-            URIReference::from_parts(scheme, authority, path, query, None::<Fragment>)
+            URIReference::from_parts(Some(scheme), Some(authority), path, query, None::<Fragment>)
                 .map_err(|error| InvalidRequestURI::try_from(error).unwrap())?;
         RequestURI::try_from(uri_reference)
     }
@@ -98,11 +98,11 @@ impl RequestURI {
             return None;
         }
 
-        let (scheme, authority, path, query) = self.into_parts();
+        let (scheme, authority, path, query) = self.into_parts().unwrap();
         let mut builder = RequestURIBuilder::new();
         builder
-            .scheme(scheme.unwrap())
-            .authority(authority.unwrap())
+            .scheme(scheme)
+            .authority(authority)
             .path(path)
             .query(query);
         Some(builder)
@@ -110,15 +110,19 @@ impl RequestURI {
 
     pub fn into_parts(
         self,
-    ) -> (
-        Option<Scheme>,
-        Option<Authority<'static>>,
+    ) -> Option<(
+        Scheme,
+        Authority<'static>,
         Path<'static>,
         Option<Query<'static>>,
-    ) {
+    )> {
+        if self.is_asterisk() {
+            return None;
+        }
+
         let (scheme, authority, path, query, _) = self.uri_reference.into_parts();
-        let scheme = scheme.map(|scheme| Scheme::try_from(scheme).unwrap());
-        (scheme, authority, path, query)
+        let scheme = Scheme::try_from(scheme.unwrap()).unwrap();
+        Some((scheme, authority.unwrap(), path, query))
     }
 
     pub fn is_asterisk(&self) -> bool {
