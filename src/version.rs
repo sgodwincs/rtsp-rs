@@ -73,7 +73,7 @@ impl Version {
     pub fn is_rtsp10(self) -> bool {
         use self::Version::*;
 
-        match *self {
+        match self {
             RTSP10 => true,
             _ => false,
         }
@@ -92,7 +92,7 @@ impl Version {
     pub fn is_rtsp20(self) -> bool {
         use self::Version::*;
 
-        match *self {
+        match self {
             RTSP20 => true,
             _ => false,
         }
