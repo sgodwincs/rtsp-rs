@@ -135,6 +135,54 @@ impl<'query> From<Version> for String {
     }
 }
 
+impl PartialEq<[u8]> for Version {
+    fn eq(&self, other: &[u8]) -> bool {
+        self.as_str().as_bytes().eq_ignore_ascii_case(other)
+    }
+}
+
+impl<'query> PartialEq<Version> for [u8] {
+    fn eq(&self, other: &Version) -> bool {
+        self.eq_ignore_ascii_case(other.as_str().as_bytes())
+    }
+}
+
+impl<'a> PartialEq<&'a [u8]> for Version {
+    fn eq(&self, other: &&'a [u8]) -> bool {
+        self.as_str().as_bytes().eq_ignore_ascii_case(other)
+    }
+}
+
+impl<'a, 'query> PartialEq<Version> for &'a [u8] {
+    fn eq(&self, other: &Version) -> bool {
+        self.eq_ignore_ascii_case(other.as_str().as_bytes())
+    }
+}
+
+impl PartialEq<str> for Version {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str().eq_ignore_ascii_case(other)
+    }
+}
+
+impl<'query> PartialEq<Version> for str {
+    fn eq(&self, other: &Version) -> bool {
+        self.eq_ignore_ascii_case(other.as_str())
+    }
+}
+
+impl<'a> PartialEq<&'a str> for Version {
+    fn eq(&self, other: &&'a str) -> bool {
+        self.as_str().eq_ignore_ascii_case(other)
+    }
+}
+
+impl<'a, 'query> PartialEq<Version> for &'a str {
+    fn eq(&self, other: &Version) -> bool {
+        self.eq_ignore_ascii_case(other.as_str())
+    }
+}
+
 impl<'version> TryFrom<&'version [u8]> for Version {
     type Error = InvalidVersion;
 
