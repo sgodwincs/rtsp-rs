@@ -1,3 +1,4 @@
+#![feature(never_type)]
 #![feature(non_exhaustive)]
 #![feature(try_from)]
 #![recursion_limit = "256"]

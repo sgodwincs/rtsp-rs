@@ -11,7 +11,6 @@ pub use uriparse::{Authority, Host, Password, Path, Query, Username};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct RequestURI {
-    scheme: Option<Scheme>,
     uri_reference: URIReference<'static>,
 }
 
@@ -23,12 +22,10 @@ impl RequestURI {
             "*",
             None::<Query>,
             None::<Fragment>,
-        ).unwrap();
+        )
+        .unwrap();
 
-        RequestURI {
-            scheme: None,
-            uri_reference,
-        }
+        RequestURI { uri_reference }
     }
 
     pub fn authority(&self) -> Option<&Authority<'static>> {
@@ -172,8 +169,9 @@ impl RequestURI {
         Mapper: FnOnce(Scheme) -> Scheme,
     {
         if !self.is_asterisk() {
-            let scheme = mapper(self.scheme.unwrap());
-            self.set_scheme(scheme).unwrap();
+            self.uri_reference.map_scheme(|scheme| {
+                Some(mapper(Scheme::try_from(scheme.unwrap()).unwrap()).into())
+            });
         }
 
         self.scheme()
@@ -200,7 +198,9 @@ impl RequestURI {
     }
 
     pub fn scheme(&self) -> Option<Scheme> {
-        self.scheme
+        self.uri_reference
+            .scheme()
+            .map(|scheme| Scheme::try_from(scheme).unwrap())
     }
 
     pub fn set_authority<AuthorityType, AuthorityError>(
@@ -263,8 +263,10 @@ impl RequestURI {
         InvalidURIReference: From<SchemeError>,
     {
         if !self.is_asterisk() {
-            self.scheme =
-                Some(Scheme::try_from(scheme).map_err(|_| InvalidRequestURI::NonRTSPScheme)?);
+            let scheme: Scheme = Scheme::try_from(scheme).map_err(|error| {
+                InvalidRequestURI::try_from(InvalidURIReference::from(error)).unwrap()
+            })?;
+            self.uri_reference.set_scheme::<_, !>(Some(scheme)).unwrap();
         }
 
         Ok(self.scheme())
@@ -325,7 +327,7 @@ impl<'uri> TryFrom<URIReference<'uri>> for RequestURI {
             return Err(InvalidRequestURI::MissingScheme);
         }
 
-        let scheme = if value.is_relative_reference() {
+        if value.is_relative_reference() {
             let segments = value.path().segments();
 
             if segments.len() != 1
@@ -335,27 +337,22 @@ impl<'uri> TryFrom<URIReference<'uri>> for RequestURI {
             {
                 return Err(InvalidRequestURI::InvalidRelativeReference);
             }
-
-            None
         } else {
-            let scheme = match Scheme::try_from(value.scheme().unwrap()) {
-                Ok(scheme) => scheme,
-                Err(_) => return Err(InvalidRequestURI::NonRTSPScheme),
-            };
+            if let Err(_) = Scheme::try_from(value.scheme().unwrap()) {
+                return Err(InvalidRequestURI::NonRTSPScheme);
+            }
 
             match value.host().unwrap() {
                 Host::RegisteredName(ref name) if name.as_str().is_empty() => {
-                    return Err(InvalidRequestURI::EmptyHost)
+                    return Err(InvalidRequestURI::EmptyHost);
                 }
                 _ => (),
             }
 
             value.set_fragment(None::<Fragment>).unwrap();
-            Some(scheme)
-        };
+        }
 
         Ok(RequestURI {
-            scheme,
             uri_reference: value.into_owned(),
         })
     }
@@ -531,7 +528,7 @@ impl TryFrom<InvalidURIReference> for InvalidRequestURI {
             InvalidURIReference::SchemelessPathCannotStartWithColonSegment => {
                 Ok(SchemelessPathCannotStartWithColonSegment)
             }
-            _ => panic!("unhandled URI reference error")
+            _ => Err(()),
         }
     }
 }
