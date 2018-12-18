@@ -70,7 +70,7 @@ impl Version {
     /// assert!(Version::RTSP10.is_rtsp10());
     /// assert!(!Version::RTSP20.is_rtsp10());
     /// ```
-    pub fn is_rtsp10(&self) -> bool {
+    pub fn is_rtsp10(self) -> bool {
         use self::Version::*;
 
         match *self {
@@ -89,7 +89,7 @@ impl Version {
     /// assert!(!Version::RTSP10.is_rtsp20());
     /// assert!(Version::RTSP20.is_rtsp20());
     /// ```
-    pub fn is_rtsp20(&self) -> bool {
+    pub fn is_rtsp20(self) -> bool {
         use self::Version::*;
 
         match *self {
