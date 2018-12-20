@@ -1,6 +1,6 @@
-//! RTSP Status Code
+//! Status Code
 //!
-//! This module contains RTSP-status code related structs and errors. Each variant on the
+//! This module contains RTSP status code related structs and errors. Each variant on the
 //! [`StatusCode`] type represents either a specific standardized status code or a custom status
 //! code.
 //!
@@ -92,7 +92,6 @@ macro_rules! status_codes {
                 // Since the phrases used here are defined at compile time, we can be sure that they
                 // are all valid reason phrases. Perhaps this use of unsafe can eventually be
                 // replaced using a constant function constructor.
-
                 match *self {
                 $(
                     $variant => Some(unsafe { ReasonPhrase::from_str_unchecked($phrase) }),
@@ -109,6 +108,12 @@ macro_rules! status_codes {
 
                 if status_code < 100 || status_code >= 600 {
                     return Err(InvalidStatusCode::OutOfRange);
+                }
+
+                // These status codes are not allowed in RTSP 2.0 and cannot be reused by
+                // extensions.
+                if status_code == 303 || status_code == 352 {
+                    return Err(InvalidStatusCode::Removed);
                 }
 
                 Ok(match status_code {
@@ -132,8 +137,6 @@ macro_rules! status_codes {
                 }
             }
         }
-
-
 
         #[test]
         fn test_status_code_canonical_reason() {
@@ -271,9 +274,63 @@ impl Display for StatusCode {
     }
 }
 
+impl From<StatusCode> for i16 {
+    fn from(value: StatusCode) -> i16 {
+        u16::from(value) as i16
+    }
+}
+
+impl From<StatusCode> for i32 {
+    fn from(value: StatusCode) -> i32 {
+        i32::from(u16::from(value))
+    }
+}
+
+impl From<StatusCode> for u32 {
+    fn from(value: StatusCode) -> u32 {
+        u32::from(u16::from(value))
+    }
+}
+
+impl From<StatusCode> for i64 {
+    fn from(value: StatusCode) -> i64 {
+        i64::from(u16::from(value))
+    }
+}
+
+impl From<StatusCode> for u64 {
+    fn from(value: StatusCode) -> u64 {
+        u64::from(u16::from(value))
+    }
+}
+
+impl From<StatusCode> for i128 {
+    fn from(value: StatusCode) -> i128 {
+        i128::from(u16::from(value))
+    }
+}
+
+impl From<StatusCode> for u128 {
+    fn from(value: StatusCode) -> u128 {
+        u128::from(u16::from(value))
+    }
+}
+
 impl Ord for StatusCode {
     fn cmp(&self, other: &StatusCode) -> Ordering {
         u16::from(*self).cmp(&u16::from(*other))
+    }
+}
+
+impl PartialEq<i16> for StatusCode {
+    fn eq(&self, other: &i16) -> bool {
+        i16::from(*self) == *other
+    }
+}
+
+impl PartialEq<StatusCode> for i16 {
+    fn eq(&self, other: &StatusCode) -> bool {
+        *self == i16::from(*other)
     }
 }
 
@@ -286,6 +343,78 @@ impl PartialEq<u16> for StatusCode {
 impl PartialEq<StatusCode> for u16 {
     fn eq(&self, other: &StatusCode) -> bool {
         *self == u16::from(*other)
+    }
+}
+
+impl PartialEq<i32> for StatusCode {
+    fn eq(&self, other: &i32) -> bool {
+        i32::from(*self) == *other
+    }
+}
+
+impl PartialEq<StatusCode> for i32 {
+    fn eq(&self, other: &StatusCode) -> bool {
+        *self == i32::from(*other)
+    }
+}
+
+impl PartialEq<u32> for StatusCode {
+    fn eq(&self, other: &u32) -> bool {
+        u32::from(*self) == *other
+    }
+}
+
+impl PartialEq<StatusCode> for u32 {
+    fn eq(&self, other: &StatusCode) -> bool {
+        *self == u32::from(*other)
+    }
+}
+
+impl PartialEq<i64> for StatusCode {
+    fn eq(&self, other: &i64) -> bool {
+        i64::from(*self) == *other
+    }
+}
+
+impl PartialEq<StatusCode> for i64 {
+    fn eq(&self, other: &StatusCode) -> bool {
+        *self == i64::from(*other)
+    }
+}
+
+impl PartialEq<u64> for StatusCode {
+    fn eq(&self, other: &u64) -> bool {
+        u64::from(*self) == *other
+    }
+}
+
+impl PartialEq<StatusCode> for u64 {
+    fn eq(&self, other: &StatusCode) -> bool {
+        *self == u64::from(*other)
+    }
+}
+
+impl PartialEq<i128> for StatusCode {
+    fn eq(&self, other: &i128) -> bool {
+        i128::from(*self) == *other
+    }
+}
+
+impl PartialEq<StatusCode> for i128 {
+    fn eq(&self, other: &StatusCode) -> bool {
+        *self == i128::from(*other)
+    }
+}
+
+impl PartialEq<u128> for StatusCode {
+    fn eq(&self, other: &u128) -> bool {
+        u128::from(*self) == *other
+    }
+}
+
+impl PartialEq<StatusCode> for u128 {
+    fn eq(&self, other: &StatusCode) -> bool {
+        *self == u128::from(*other)
     }
 }
 
@@ -317,23 +446,6 @@ impl<'a> TryFrom<&'a str> for StatusCode {
 
     fn try_from(value: &'a str) -> Result<Self, Self::Error> {
         StatusCode::try_from(value.as_bytes())
-    }
-}
-
-impl TryFrom<i8> for StatusCode {
-    type Error = InvalidStatusCode;
-
-    fn try_from(value: i8) -> Result<Self, Self::Error> {
-        let value = u16::try_from(value).map_err(|_| InvalidStatusCode::OutOfRange)?;
-        StatusCode::from_u16(value)
-    }
-}
-
-impl TryFrom<u8> for StatusCode {
-    type Error = InvalidStatusCode;
-
-    fn try_from(value: u8) -> Result<Self, Self::Error> {
-        StatusCode::from_u16(u16::from(value))
     }
 }
 
@@ -445,9 +557,15 @@ pub enum InvalidStatusCode {
     /// byte string was not of the form `"***"` where each `'*'` is a digit.
     Invalid,
 
-    /// This error indicates that when converting to a [`StatusCode`] from an unsigned integer, the
-    /// value was out of range (i.e. outside of the range [100, 599]).
+    /// This error indicates that when converting to a [`StatusCode`] from an integer, the value was
+    /// out of range (i.e. outside of the range [100, 599]).
     OutOfRange,
+
+    /// This error indicates that the status code was valid and referred to an existing status code,
+    /// but the status code is not allowed to be used in RTSP 2.0. Currently, this only applies to
+    /// status codes 303 (See Other) and 452 (Illegal Conference Identifier). Due to their reserved
+    /// nature, extensions are also not allowed to use these status codes.
+    Removed,
 }
 
 impl fmt::Display for InvalidStatusCode {
@@ -463,6 +581,7 @@ impl Error for InvalidStatusCode {
         match self {
             Invalid => "invalid RTSP status code",
             OutOfRange => "out of range RTSP status code",
+            Removed => "removed status codes cannot be used",
         }
     }
 }
@@ -484,12 +603,10 @@ status_codes! {
     /// [[RFC7826, Section 17.3.3](https://tools.ietf.org/html/rfc7826#section-17.3.3)]
     (302, Found, "Found");
 
-    // As stated in the RFC: "This status code MUST NOT be used in RTSP 2.0. However, it was allowed
-    // in RTSP 1.0".
-
-    // /// 303 See Other
-    // /// [[RFC7826, Section 17.3.4](https://tools.ietf.org/html/rfc7826#section-17.3.4)]
-    // (303, SeeOther, "See Other");
+    /// 303 See Other
+    /// [[RFC7826, Section 17.3.4](https://tools.ietf.org/html/rfc7826#section-17.3.4)]
+    ///
+    /// This status code is not allowed in RTSP 2.0, but its position is reserved.
 
     /// 304 Not Modified
     /// [[RFC7826, Section 17.3.5](https://tools.ietf.org/html/rfc7826#section-17.3.5)]
@@ -559,13 +676,10 @@ status_codes! {
     /// [[RFC7826, Section 17.4.15](https://tools.ietf.org/html/rfc7826#section-17.4.15)]
     (451, ParameterNotUnderstood, "Parameter Not Understood");
 
-    // RFC 7826 mentions status code "452 Illegal Conference Identifier" which was only allowed in
-    // RTSP 1.0. Should it be added here just for completeness? Though, it is listed as "reserved"
-    // in the status code list.
-
-    // /// 452 Illegal Conference Identifier
-    // (452, IllegalConferenceIdentifier, "Illegal Conference Identifier");
-    // /// [[RFC7826, Section 17.4.16](https://tools.ietf.org/html/rfc7826#section-17.4.16)]
+    /// 452 Illegal Conference Identifier
+    /// [[RFC7826, Section 17.4.16](https://tools.ietf.org/html/rfc7826#section-17.4.16)]
+    ///
+    /// This status code is not allowed in RTSP 2.0, but its position is reserved.
 
     /// 453 Not Enough Bandwidth
     /// [[RFC7826, Section 17.4.17](https://tools.ietf.org/html/rfc7826#section-17.4.17)]
