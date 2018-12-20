@@ -37,16 +37,16 @@ use std::convert::TryFrom;
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use uriparse::{
-    Fragment, InvalidAuthority as InvalidURIAuthority, InvalidHost as InvalidURIHost, InvalidPath,
-    InvalidQuery, InvalidScheme as InvalidURIScheme, InvalidURIReference, Scheme as URIScheme,
-    URIReference, URI,
+    Fragment, InvalidAuthority as InvalidURIAuthority, InvalidHost as InvalidURIHost, InvalidQuery,
+    InvalidScheme as InvalidURIScheme, InvalidURIReference, Scheme as URIScheme, URIReference, URI,
 };
 
 // TODO(https://github.com/rust-lang/rust/issues/49683): Need to wait for type alias enums before we
 // export all `uriparse` types with `'static` lifetimes. If we do it now, the user will no longer be
 // able to use variants of enum types (e.g. `Host<'static>::RegisteredName` is an error currently).
 pub use uriparse::{
-    Authority, Host, InvalidPort, InvalidUserInfo, Password, Path, Query, Username,
+    Authority, Host, InvalidPath, InvalidPort, InvalidUserInfo, Password, Path, Query,
+    RegisteredName, Segment, Username,
 };
 
 lazy_static! {
