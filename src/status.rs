@@ -169,10 +169,10 @@ impl StatusCode {
     ///
     /// assert_eq!(StatusCode::BadRequest.class(), StatusCodeClass::ClientError);
     /// ```
-    pub fn class(&self) -> StatusCodeClass {
+    pub fn class(self) -> StatusCodeClass {
         use self::StatusCodeClass::*;
 
-        match u16::from(*self) {
+        match u16::from(self) {
             100...199 => Informational,
             200...299 => Success,
             300...399 => Redirection,
@@ -192,7 +192,7 @@ impl StatusCode {
     /// assert!(StatusCode::NotFound.is_client_error());
     /// assert!(!StatusCode::InternalServerError.is_client_error());
     /// ```
-    pub fn is_client_error(&self) -> bool {
+    pub fn is_client_error(self) -> bool {
         self.class() == StatusCodeClass::ClientError
     }
 
@@ -206,7 +206,7 @@ impl StatusCode {
     /// assert!(StatusCode::Continue.is_informational());
     /// assert!(!StatusCode::OK.is_informational());
     /// ```
-    pub fn is_informational(&self) -> bool {
+    pub fn is_informational(self) -> bool {
         self.class() == StatusCodeClass::Informational
     }
 
@@ -220,7 +220,7 @@ impl StatusCode {
     /// assert!(StatusCode::Found.is_redirection());
     /// assert!(!StatusCode::BadRequest.is_redirection());
     /// ```
-    pub fn is_redirection(&self) -> bool {
+    pub fn is_redirection(self) -> bool {
         self.class() == StatusCodeClass::Redirection
     }
 
@@ -234,7 +234,7 @@ impl StatusCode {
     /// assert!(StatusCode::InternalServerError.is_server_error());
     /// assert!(!StatusCode::OK.is_server_error());
     /// ```
-    pub fn is_server_error(&self) -> bool {
+    pub fn is_server_error(self) -> bool {
         self.class() == StatusCodeClass::ServerError
     }
 
@@ -248,7 +248,7 @@ impl StatusCode {
     /// assert!(StatusCode::OK.is_success());
     /// assert!(!StatusCode::NotFound.is_success());
     /// ```
-    pub fn is_success(&self) -> bool {
+    pub fn is_success(self) -> bool {
         self.class() == StatusCodeClass::Success
     }
 }
@@ -333,7 +333,7 @@ impl TryFrom<u8> for StatusCode {
     type Error = InvalidStatusCode;
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
-        StatusCode::from_u16(value as u16)
+        StatusCode::from_u16(u16::from(value))
     }
 }
 
