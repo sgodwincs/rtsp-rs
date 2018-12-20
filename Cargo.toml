@@ -11,6 +11,10 @@ name = "decode"
 harness = false
 name = "encode"
 
+[[bench]]
+harness = false
+name = "uri"
+
 [dependencies]
 ascii = "0.8.6"
 bytes = "0.4.5"
