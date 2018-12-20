@@ -12,7 +12,7 @@ lazy_static! {
         Regex::new(r#""((?:[ !#-\[\]-~]|[^[:ascii:]]|\\"|\\)*)""#).unwrap();
 }
 
-#[cfg_attr(rustfmt, rustfmt_skip)]
+#[rustfmt::skip]
 const TOKEN_CHAR_MAP: [bool; 256] = byte_map![
  // 0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 0
@@ -77,8 +77,8 @@ pub fn trim_whitespace_left(mut string: &str) -> &str {
     let mut old = 0;
 
     while string.len() != old {
-        string = string.trim_left_matches("\r\n");
-        string = string.trim_left_matches(|c| c == ' ' || c == '\t');
+        string = string.trim_start_matches("\r\n");
+        string = string.trim_start_matches(|c| c == ' ' || c == '\t');
         old = string.len();
     }
 
@@ -89,8 +89,8 @@ pub fn trim_whitespace_right(mut string: &str) -> &str {
     let mut old = 0;
 
     while string.len() != old {
-        string = string.trim_right_matches("\r\n");
-        string = string.trim_right_matches(|c| c == ' ' || c == '\t');
+        string = string.trim_end_matches("\r\n");
+        string = string.trim_end_matches(|c| c == ' ' || c == '\t');
         old = string.len();
     }
 
