@@ -552,6 +552,7 @@ pub enum StatusCodeClass {
 
 /// A generic error indicating that the status code was invalid.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub enum InvalidStatusCode {
     /// This error indicates that when converting to a [`StatusCode`] from a byte string, that the
     /// byte string was not of the form `"***"` where each `'*'` is a digit.
@@ -583,6 +584,12 @@ impl Error for InvalidStatusCode {
             OutOfRange => "out of range RTSP status code",
             Removed => "removed status codes cannot be used",
         }
+    }
+}
+
+impl From<!> for InvalidStatusCode {
+    fn from(value: !) -> Self {
+        value
     }
 }
 

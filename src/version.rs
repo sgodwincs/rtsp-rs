@@ -252,6 +252,12 @@ impl Error for InvalidVersion {
     }
 }
 
+impl From<!> for InvalidVersion {
+    fn from(value: !) -> Self {
+        value
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
