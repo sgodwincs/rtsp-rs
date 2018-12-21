@@ -11,6 +11,7 @@ use ordered_multimap::ListOrderedMultimap;
 use header::{HeaderName, HeaderValue};
 
 pub type Entry<'map> = MultimapEntry<'map, HeaderName, HeaderValue>;
+pub type EntryValues<'map> = MultimapEntryValues<'map, HeaderName, HeaderValue>;
 pub type EntryValuesDrain<'map> = MultimapEntryValuesDrain<'map, HeaderName, HeaderValue>;
 pub type EntryValuesMut<'map> = MultimapEntryValuesMut<'map, HeaderName, HeaderValue>;
 pub type Iter<'map> = MultimapIter<'map, HeaderName, HeaderValue>;
