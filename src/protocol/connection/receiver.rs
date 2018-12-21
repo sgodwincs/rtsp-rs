@@ -17,15 +17,10 @@ use protocol::{
     IrrecoverableInvalidResponse, Message, MessageResult, ProtocolError,
 };
 use request::Request;
-use response::Response;
+use response::{Response, BAD_REQUEST_RESPONSE};
 use status::StatusCode;
 
 lazy_static! {
-    static ref BAD_REQUEST_RESPONSE: Response<BytesMut> = Response::builder()
-        .status_code(StatusCode::BadRequest)
-        .build(BytesMut::new())
-        .expect("bad request response should not be invalid");
-
     static ref NOT_ENOUGH_BANDWIDTH_RESPONSE: Response<BytesMut> = Response::builder()
         .status_code(StatusCode::NotEnoughBandwidth)
         .build(BytesMut::new())

@@ -16,6 +16,10 @@ use status::StatusCode;
 use version::Version;
 
 lazy_static! {
+    pub(crate) static ref BAD_REQUEST_RESPONSE: Response<BytesMut> = Response::builder()
+        .status_code(StatusCode::BadRequest)
+        .build(BytesMut::new())
+        .expect("bad request response should not be invalid");
     pub(crate) static ref NOT_IMPLEMENTED_RESPONSE: Response<BytesMut> = Response::builder()
         .status_code(StatusCode::NotImplemented)
         .build(BytesMut::new())

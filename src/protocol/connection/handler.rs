@@ -6,11 +6,11 @@ use std::time::{Duration, Instant};
 use tokio_timer::Delay;
 
 use super::SenderHandle;
-use header::types::CSeq;
-use header::{HeaderName, RawHeaderMap, TypedHeader};
+use header::types::{CSeq, ContentLength};
+use header::{HeaderName, HeaderValue, RawHeaderMap, TypedHeader};
 use protocol::{Message, Service};
 use request::Request;
-use response::{Response, NOT_IMPLEMENTED_RESPONSE};
+use response::{Response, BAD_REQUEST_RESPONSE, NOT_IMPLEMENTED_RESPONSE};
 use status::StatusCode;
 use uri::Scheme;
 
@@ -105,6 +105,19 @@ where
     fn process_request(&mut self, cseq: CSeq, request: Request<BytesMut>) {
         if request.uri().scheme() == Some(Scheme::RTSPU) {
             self.send_response(cseq, NOT_IMPLEMENTED_RESPONSE.clone());
+            return;
+        }
+
+        let header_values = &request
+            .headers()
+            .get_all(&HeaderName::ContentLength)
+            .cloned()
+            .collect::<Vec<HeaderValue>>();
+        let content_length = ContentLength::try_from_header_raw(header_values).unwrap();
+
+        if *content_length > 0 && !request.headers().contains_key(&HeaderName::ContentType) {
+            self.send_response(cseq, BAD_REQUEST_RESPONSE.clone());
+            return;
         }
 
         self.reset_continue_timer();
