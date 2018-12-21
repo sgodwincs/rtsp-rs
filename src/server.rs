@@ -56,11 +56,13 @@ impl Service for ClientHandler {
     type Future = Box<Future<Item = Self::Response, Error = Self::Error> + Send + 'static>;
 
     fn call(&mut self, request: Self::Request) -> Self::Future {
-        let request: Request<_, TypedHeaderMap> = request.into();
+        let mut request: Request<_, TypedHeaderMap> = request.into();
 
         if request.uri().scheme() == Some(Scheme::RTSPU) {
             return Box::new(future::ok(NOT_IMPLEMENTED_RESPONSE.clone()));
         }
+
+        request.uri_mut().normalize();
 
         match request.method() {
             Method::Options => Box::new(self.handle_method_options(request)),
