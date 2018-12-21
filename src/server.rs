@@ -15,6 +15,7 @@ use request::{Request, TypedRequest};
 use response::{Response, TypedResponse};
 use session::{InvalidSessionID, Session, SessionID, DEFAULT_SESSION_TIMEOUT};
 use status::StatusCode;
+use uri::Scheme;
 
 pub const SUPPORTED_METHODS: [Method; 1] = [Method::Options];
 
@@ -56,6 +57,10 @@ impl Service for ClientHandler {
 
     fn call(&mut self, request: Self::Request) -> Self::Future {
         let request: Request<_, TypedHeaderMap> = request.into();
+
+        if request.uri().scheme() == Some(Scheme::RTSPU) {
+            return Box::new(future::ok(NOT_IMPLEMENTED_RESPONSE.clone()));
+        }
 
         match request.method() {
             Method::Options => Box::new(self.handle_method_options(request)),
