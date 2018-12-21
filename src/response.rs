@@ -4,6 +4,7 @@
 //! well as a builder to create responses. Typically, you will import the `rtsp::Response` type
 //! rather than reaching into this module itself.
 
+use bytes::BytesMut;
 use std::convert::TryFrom;
 use std::error::Error;
 use std::fmt;
@@ -13,6 +14,13 @@ use header::{HeaderName, HeaderValue, RawHeaderMap, TypedHeader, TypedHeaderMap}
 use reason::ReasonPhrase;
 use status::StatusCode;
 use version::Version;
+
+lazy_static! {
+    pub(crate) static ref NOT_IMPLEMENTED_RESPONSE: Response<BytesMut> = Response::builder()
+        .status_code(StatusCode::NotImplemented)
+        .build(BytesMut::new())
+        .expect("not implemented response should not be invalid");
+}
 
 /// Represents an RTSP response.
 ///

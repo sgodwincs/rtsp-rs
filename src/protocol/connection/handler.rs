@@ -10,8 +10,9 @@ use header::types::CSeq;
 use header::{HeaderName, RawHeaderMap, TypedHeader};
 use protocol::{Message, Service};
 use request::Request;
-use response::Response;
+use response::{Response, NOT_IMPLEMENTED_RESPONSE};
 use status::StatusCode;
+use uri::Scheme;
 
 #[must_use = "futures do nothing unless polled"]
 pub struct RequestHandler<S>
@@ -102,6 +103,10 @@ where
     }
 
     fn process_request(&mut self, cseq: CSeq, request: Request<BytesMut>) {
+        if request.uri().scheme() == Some(Scheme::RTSPU) {
+            self.send_response(cseq, NOT_IMPLEMENTED_RESPONSE.clone());
+        }
+
         self.reset_continue_timer();
         self.serviced_request = Some((cseq, self.service.call(request)))
     }

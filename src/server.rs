@@ -12,19 +12,10 @@ use header::TypedHeaderMap;
 use method::Method;
 use protocol::{ConnectionHandle, Service};
 use request::{Request, TypedRequest};
-use response::{Response, TypedResponse};
+use response::{Response, NOT_IMPLEMENTED_RESPONSE};
 use session::{InvalidSessionID, Session, SessionID, DEFAULT_SESSION_TIMEOUT};
-use status::StatusCode;
-use uri::Scheme;
 
 pub const SUPPORTED_METHODS: [Method; 1] = [Method::Options];
-
-lazy_static! {
-    static ref NOT_IMPLEMENTED_RESPONSE: Response<BytesMut> = Response::builder()
-        .status_code(StatusCode::NotImplemented)
-        .build(BytesMut::new())
-        .expect("not implemented response should not be invalid");
-}
 
 pub struct Server {
     // connections:
@@ -57,11 +48,6 @@ impl Service for ClientHandler {
 
     fn call(&mut self, request: Self::Request) -> Self::Future {
         let mut request: Request<_, TypedHeaderMap> = request.into();
-
-        if request.uri().scheme() == Some(Scheme::RTSPU) {
-            return Box::new(future::ok(NOT_IMPLEMENTED_RESPONSE.clone()));
-        }
-
         request.uri_mut().normalize();
 
         match request.method() {
