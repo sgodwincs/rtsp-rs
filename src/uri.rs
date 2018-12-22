@@ -1283,6 +1283,7 @@ pub enum Scheme {
 }
 
 impl Scheme {
+    /// Returns the scheme in its string representation.
     pub fn as_str(&self) -> &str {
         use self::Scheme::*;
 
@@ -1293,6 +1294,7 @@ impl Scheme {
         }
     }
 
+    /// Returns the default port that will be used for the scheme is not specified.
     pub fn default_port(&self) -> u16 {
         use self::Scheme::*;
 
