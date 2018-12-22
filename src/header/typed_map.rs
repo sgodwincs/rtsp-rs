@@ -774,8 +774,8 @@ mod test {
 
     use super::*;
 
-    use header::types::ContentLength;
-    use header::{HeaderName, HeaderValue};
+    use crate::header::types::ContentLength;
+    use crate::header::{HeaderName, HeaderValue};
 
     #[test]
     fn test_typed_map_get_mut() {
