@@ -26,7 +26,6 @@ mod syntax;
 
 pub mod client;
 pub mod header;
-pub mod media;
 pub mod method;
 pub mod protocol;
 pub mod reason;
