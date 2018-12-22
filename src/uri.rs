@@ -46,7 +46,7 @@ use uriparse::{
 // able to use variants of enum types (e.g. `Host<'static>::RegisteredName` is an error currently).
 pub use uriparse::{
     Authority, Host, InvalidPath, InvalidPort, InvalidUserInfo, Password, Path, Query,
-    RegisteredName, Segment, Username,
+    RegisteredName, SchemeStatus, Segment, UnregisteredScheme, Username,
 };
 
 lazy_static! {
