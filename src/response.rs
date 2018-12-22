@@ -10,10 +10,10 @@ use std::error::Error;
 use std::fmt;
 use std::mem::replace;
 
-use header::{HeaderName, HeaderValue, RawHeaderMap, TypedHeader, TypedHeaderMap};
-use reason::ReasonPhrase;
-use status::StatusCode;
-use version::Version;
+use crate::header::{HeaderName, HeaderValue, RawHeaderMap, TypedHeader, TypedHeaderMap};
+use crate::reason::ReasonPhrase;
+use crate::status::StatusCode;
+use crate::version::Version;
 
 lazy_static! {
     pub(crate) static ref BAD_REQUEST_RESPONSE: Response<BytesMut> = Response::builder()

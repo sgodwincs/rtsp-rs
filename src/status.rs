@@ -24,7 +24,7 @@ use std::convert::TryFrom;
 use std::error::Error;
 use std::fmt::{self, Debug, Display, Formatter};
 
-use reason::ReasonPhrase;
+use crate::reason::ReasonPhrase;
 
 macro_rules! status_codes {
     (

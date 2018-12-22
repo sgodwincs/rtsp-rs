@@ -8,7 +8,7 @@ use ordered_multimap::list_ordered_multimap::{
 };
 use ordered_multimap::ListOrderedMultimap;
 
-use header::{HeaderName, HeaderValue};
+use crate::header::{HeaderName, HeaderValue};
 
 pub type Entry<'map> = MultimapEntry<'map, HeaderName, HeaderValue>;
 pub type EntryValues<'map> = MultimapEntryValues<'map, HeaderName, HeaderValue>;

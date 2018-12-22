@@ -1,8 +1,8 @@
 use std::convert::TryFrom;
 use std::ops::Deref;
 
-use header::{HeaderName, HeaderValue, InvalidTypedHeader, TypedHeader};
-use syntax::trim_whitespace_left;
+use crate::header::{HeaderName, HeaderValue, InvalidTypedHeader, TypedHeader};
+use crate::syntax::trim_whitespace_left;
 
 pub const MAX_CONTENT_LENGTH: u64 = 9_999_999_999_999_999_999;
 

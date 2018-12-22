@@ -6,13 +6,13 @@ use std::time::{Duration, Instant};
 use tokio_timer::Delay;
 
 use super::SenderHandle;
-use header::types::{CSeq, ContentLength};
-use header::{HeaderName, HeaderValue, RawHeaderMap, TypedHeader};
-use protocol::{Message, Service};
-use request::Request;
-use response::{Response, BAD_REQUEST_RESPONSE, NOT_IMPLEMENTED_RESPONSE};
-use status::StatusCode;
-use uri::Scheme;
+use crate::header::types::{CSeq, ContentLength};
+use crate::header::{HeaderName, HeaderValue, RawHeaderMap, TypedHeader};
+use crate::protocol::{Message, Service};
+use crate::request::Request;
+use crate::response::{Response, BAD_REQUEST_RESPONSE, NOT_IMPLEMENTED_RESPONSE};
+use crate::status::StatusCode;
+use crate::uri::Scheme;
 
 #[must_use = "futures do nothing unless polled"]
 pub struct RequestHandler<S>

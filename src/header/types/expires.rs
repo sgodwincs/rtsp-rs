@@ -1,8 +1,8 @@
 use chrono::{DateTime, Utc};
 use std::ops::{Deref, DerefMut};
 
-use header::common::parse_date_time;
-use header::{HeaderName, HeaderValue, InvalidTypedHeader, TypedHeader};
+use crate::header::common::parse_date_time;
+use crate::header::{HeaderName, HeaderValue, InvalidTypedHeader, TypedHeader};
 
 /// The `"Expires"` typed header as described by
 /// [RFC7826](https://tools.ietf.org/html/rfc7826#section-18.21).

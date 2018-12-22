@@ -7,13 +7,13 @@ use std::io;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use header::types::Public;
-use header::TypedHeaderMap;
-use method::Method;
-use protocol::{ConnectionHandle, Service};
-use request::{Request, TypedRequest};
-use response::{Response, NOT_IMPLEMENTED_RESPONSE};
-use session::{InvalidSessionID, Session, SessionID, DEFAULT_SESSION_TIMEOUT};
+use crate::header::types::Public;
+use crate::header::TypedHeaderMap;
+use crate::method::Method;
+use crate::protocol::{ConnectionHandle, Service};
+use crate::request::{Request, TypedRequest};
+use crate::response::{Response, NOT_IMPLEMENTED_RESPONSE};
+use crate::session::{InvalidSessionID, Session, SessionID, DEFAULT_SESSION_TIMEOUT};
 
 pub const SUPPORTED_METHODS: [Method; 1] = [Method::Options];
 

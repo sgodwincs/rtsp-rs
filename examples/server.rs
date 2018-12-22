@@ -17,6 +17,7 @@ fn main() {
 
     let server = listener.incoming().for_each(move |socket| {
         let (connection, handler, mut handle) = Connection::new(socket, Some(Application));
+        println!("Received connection");
 
         // This will handle all reading and writing for the connection.
 

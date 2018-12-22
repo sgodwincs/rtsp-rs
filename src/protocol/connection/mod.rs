@@ -20,11 +20,6 @@ use futures::future::Either;
 use futures::sync::mpsc::{channel, unbounded, UnboundedSender};
 use futures::sync::oneshot;
 use futures::{future, Async, Future, Poll, Stream};
-use header::types::CSeq;
-use header::{HeaderName, RawHeaderMap, TypedHeader};
-use protocol::{Codec, Message, OperationError, Service};
-use request::Request;
-use response::Response;
 use std::convert::TryFrom;
 use std::error::Error;
 use std::fmt;
@@ -32,6 +27,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio_io::{AsyncRead, AsyncWrite};
+
+use crate::header::types::CSeq;
+use crate::header::{HeaderName, RawHeaderMap, TypedHeader};
+use crate::protocol::{Codec, Message, OperationError, Service};
+use crate::request::Request;
+use crate::response::Response;
 
 pub const DEFAULT_CONTINUE_WAIT_DURATION: Duration = Duration::from_secs(5);
 pub const DEFAULT_DECODE_TIMEOUT_DURATION: Duration = Duration::from_secs(10);

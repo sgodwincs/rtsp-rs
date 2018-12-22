@@ -1,8 +1,8 @@
 use bytes::BytesMut;
 
-use header::HeaderName;
-use request::Request;
-use response::Response;
+use crate::header::HeaderName;
+use crate::request::Request;
+use crate::response::Response;
 
 /// Encodes `request` into `buffer`. This will set the `Content-Length` header to the size of the
 /// body but will not modify the original request. Even if a content length header was already set,

@@ -4,9 +4,9 @@ use std::convert::TryFrom;
 use std::iter::FromIterator;
 use std::ops::{Deref, DerefMut};
 
-use header::{HeaderName, HeaderValue, InvalidTypedHeader, TypedHeader};
-use method::Method;
-use syntax::trim_whitespace;
+use crate::header::{HeaderName, HeaderValue, InvalidTypedHeader, TypedHeader};
+use crate::method::Method;
+use crate::syntax::trim_whitespace;
 
 /// The `"Public"` typed header as described by
 /// [RFC7826](https://tools.ietf.org/html/rfc7826#section-18.39).

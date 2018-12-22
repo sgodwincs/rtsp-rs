@@ -1,9 +1,9 @@
 use futures::sync::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
 use futures::{Async, AsyncSink, Poll, Sink, Stream};
 
-use header::types::Date;
-use header::{HeaderName, TypedHeader};
-use protocol::{Message, ProtocolError};
+use crate::header::types::Date;
+use crate::header::{HeaderName, TypedHeader};
+use crate::protocol::{Message, ProtocolError};
 
 pub struct Sender {
     buffered_message: Option<Message>,

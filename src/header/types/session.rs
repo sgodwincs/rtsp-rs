@@ -1,10 +1,10 @@
 use std::convert::TryFrom;
 use std::time::Duration;
 
-use header::{HeaderName, HeaderValue, InvalidTypedHeader, TypedHeader};
-use session::Session as SessionData;
-use session::{InvalidSessionID, SessionID, DEFAULT_SESSION_TIMEOUT, MAX_SESSION_TIMEOUT};
-use syntax::trim_whitespace;
+use crate::header::{HeaderName, HeaderValue, InvalidTypedHeader, TypedHeader};
+use crate::session::Session as SessionData;
+use crate::session::{InvalidSessionID, SessionID, DEFAULT_SESSION_TIMEOUT, MAX_SESSION_TIMEOUT};
+use crate::syntax::trim_whitespace;
 
 /// The `Session` typed header as described by
 /// [RFC7826](https://tools.ietf.org/html/rfc7826#section-18.49).

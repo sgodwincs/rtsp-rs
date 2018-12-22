@@ -3,8 +3,8 @@ use futures::{future, Future};
 use std::error::Error;
 use std::io;
 
-use request::Request;
-use response::Response;
+use crate::request::Request;
+use crate::response::Response;
 
 pub trait Service {
     type Request;

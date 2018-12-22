@@ -6,7 +6,7 @@ use std::error::Error;
 use std::fmt;
 use std::hash::{Hash, Hasher};
 
-use syntax::is_token;
+use crate::syntax::is_token;
 
 macro_rules! standard_headers {
     (

@@ -8,10 +8,10 @@ use std::error::Error;
 use std::fmt;
 use std::mem::replace;
 
-use header::{HeaderName, HeaderValue, RawHeaderMap, TypedHeader, TypedHeaderMap};
-use method::Method;
-use uri::RequestURI;
-use version::Version;
+use crate::header::{HeaderName, HeaderValue, RawHeaderMap, TypedHeader, TypedHeaderMap};
+use crate::method::Method;
+use crate::uri::RequestURI;
+use crate::version::Version;
 
 /// Represents an RTSP request.
 ///

@@ -5,9 +5,9 @@ use std::net::SocketAddr;
 use tokio_executor::{DefaultExecutor, Executor, SpawnError};
 use tokio_tcp::TcpStream;
 
-use protocol::{Connection, ConnectionHandle, EmptyService, OperationError};
-use request::Request;
-use response::Response;
+use crate::protocol::{Connection, ConnectionHandle, EmptyService, OperationError};
+use crate::request::Request;
+use crate::response::Response;
 
 pub struct Client {
     handle: ConnectionHandle,

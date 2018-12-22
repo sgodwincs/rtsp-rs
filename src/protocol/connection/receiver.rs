@@ -10,15 +10,15 @@ use std::time::{Duration, Instant};
 use tokio_timer::{Delay, Error as TimerError};
 
 use super::{PendingRequestResponse, PendingRequestUpdate, SenderHandle};
-use header::types::CSeq;
-use header::{HeaderName, HeaderValue, TypedHeader};
-use protocol::{
+use crate::header::types::CSeq;
+use crate::header::{HeaderName, HeaderValue, TypedHeader};
+use crate::protocol::{
     CodecEvent, DecodeError, InvalidMessage, IrrecoverableInvalidRequest,
     IrrecoverableInvalidResponse, Message, MessageResult, ProtocolError,
 };
-use request::Request;
-use response::{Response, BAD_REQUEST_RESPONSE};
-use status::StatusCode;
+use crate::request::Request;
+use crate::response::{Response, BAD_REQUEST_RESPONSE};
+use crate::status::StatusCode;
 
 lazy_static! {
     static ref NOT_ENOUGH_BANDWIDTH_RESPONSE: Response<BytesMut> = Response::builder()

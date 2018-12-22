@@ -7,9 +7,9 @@ use std::fmt;
 use std::time::{Duration, Instant};
 use tokio_timer::Delay;
 
-use header::types::CSeq;
-use protocol::{OperationError, RequestTimeoutType};
-use response::Response;
+use crate::header::types::CSeq;
+use crate::protocol::{OperationError, RequestTimeoutType};
+use crate::response::Response;
 
 #[must_use = "futures do nothing unless polled"]
 pub struct SendRequestFuture {

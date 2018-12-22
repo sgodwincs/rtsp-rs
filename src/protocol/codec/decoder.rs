@@ -72,10 +72,10 @@ use std::convert::TryFrom;
 use std::mem::replace;
 use std::{error, fmt};
 
-use header::types::ContentLength;
-use header::{HeaderName, HeaderValue, TypedHeader};
-use request::{Builder as RequestBuilder, BuilderError as RequestBuilderError, Request};
-use response::{Builder as ResponseBuilder, BuilderError as ResponseBuilderError, Response};
+use crate::header::types::ContentLength;
+use crate::header::{HeaderName, HeaderValue, TypedHeader};
+use crate::request::{Builder as RequestBuilder, BuilderError as RequestBuilderError, Request};
+use crate::response::{Builder as ResponseBuilder, BuilderError as ResponseBuilderError, Response};
 
 /// The current state of the request/response parsing.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]

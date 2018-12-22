@@ -15,8 +15,8 @@ use std::sync::Arc;
 use std::{fmt, io};
 use tokio_io::codec::{Decoder, Encoder};
 
-use request::Request;
-use response::Response;
+use crate::request::Request;
+use crate::response::Response;
 
 /// The minimum amount of bytes needed in the information line in order to differentiate between
 /// responses and requests.
@@ -684,7 +684,7 @@ mod test {
     use tokio::runtime::current_thread::Runtime;
 
     use super::*;
-    use header::HeaderName;
+    use crate::header::HeaderName;
 
     #[test]
     fn test_codec_decoding() {

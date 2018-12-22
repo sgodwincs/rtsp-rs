@@ -11,7 +11,7 @@ use std::error::Error;
 use std::iter::FromIterator;
 use std::{fmt, mem};
 
-use header::{HeaderName, HeaderValue, RawHeaderMap};
+use crate::header::{HeaderName, HeaderValue, RawHeaderMap};
 
 use self::sealed::TypedHeaderClone;
 

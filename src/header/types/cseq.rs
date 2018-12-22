@@ -1,8 +1,8 @@
 use std::convert::TryFrom;
 use std::ops::{Add, Deref, Sub};
 
-use header::{HeaderName, HeaderValue, InvalidTypedHeader, TypedHeader};
-use syntax::trim_whitespace_left;
+use crate::header::{HeaderName, HeaderValue, InvalidTypedHeader, TypedHeader};
+use crate::syntax::trim_whitespace_left;
 
 pub const MAX_CSEQ: u32 = 999_999_999;
 
