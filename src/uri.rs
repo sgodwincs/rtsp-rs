@@ -35,7 +35,8 @@
 
 use std::convert::TryFrom;
 use std::error::Error;
-use std::fmt::{self, Display, Formatter};
+use std::fmt::{self, Display, Formatter, Write};
+use std::mem;
 use uriparse::{
     Fragment, InvalidAuthority as InvalidURIAuthority, InvalidHost as InvalidURIHost, InvalidQuery,
     InvalidScheme as InvalidURIScheme, InvalidURIReference, Scheme as URIScheme, URIReference, URI,
@@ -50,17 +51,9 @@ pub use uriparse::{
 };
 
 lazy_static! {
-    static ref REQUEST_URI_ASTERISK: RequestURI = {
-        let uri_reference = URIReference::from_parts(
-            None::<Scheme>,
-            None::<Authority>,
-            "*",
-            None::<Query>,
-            None::<Fragment>,
-        )
-        .unwrap();
-        RequestURI { uri_reference }
-    };
+    static ref ASTERISK_PATH: Path<'static> = Path::try_from("*").unwrap();
+    static ref SENTINEL_AUTHORITY: Authority<'static> = Authority::try_from("").unwrap();
+    static ref SENTINEL_PATH: Path<'static> = Path::try_from("").unwrap();
 }
 
 /// The URI used in the RTSP request line.
@@ -69,10 +62,8 @@ lazy_static! {
 /// of how RTSP handles URIs (and request URIs) in general.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct RequestURI {
-    /// All URIs are also URI references, so we just maintain a [`URIReference`] underneath. There's
-    /// also the possibility that a request URI can be `"*"` which is not a URI but is a URI
-    /// reference.
-    uri_reference: URIReference<'static>,
+    /// A wrapper around the URI components. This will be `None` if the request URI is an asterisk.
+    components: Option<RequestURIComponents>,
 }
 
 impl RequestURI {
@@ -85,10 +76,7 @@ impl RequestURI {
     /// An asterisk request URI is essentially immutable, all functions on this type that would
     /// mutate request URIs are no-ops (e.g. [`RequestURI::set_scheme`]).
     pub fn asterisk() -> RequestURI {
-        // Unfortunately this isn't a free clone. There won't be any string allocations, but there
-        // will be an allocation for the segment vector. Closing
-        // https://github.com/sgodwincs/uriparse-rs/issues/3 will make this pretty much free.
-        REQUEST_URI_ASTERISK.clone()
+        RequestURI { components: None }
     }
 
     /// Returns the authority of the request URI.
@@ -108,7 +96,9 @@ impl RequestURI {
     /// assert_eq!(uri.authority().unwrap().to_string(), "example.com");
     /// ```
     pub fn authority(&self) -> Option<&Authority<'static>> {
-        self.uri_reference.authority()
+        self.components
+            .as_ref()
+            .map(|components| &components.authority)
     }
 
     /// Constructs a default builder for a request URI.
@@ -212,7 +202,30 @@ impl RequestURI {
     /// assert!(!uri.has_authority());
     /// ```
     pub fn has_authority(&self) -> bool {
-        self.uri_reference.has_authority()
+        self.components.is_some()
+    }
+
+    /// Returns whether the request URI has a host component.
+    ///
+    /// This will be false only for asterisk request URIs.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #![feature(try_from)]
+    /// #
+    /// use std::convert::TryFrom;
+    ///
+    /// use rtsp::RequestURI;
+    ///
+    /// let uri = RequestURI::try_from("rtsp://example.com").unwrap();
+    /// assert!(uri.has_host());
+    ///
+    /// let uri = RequestURI::try_from("*").unwrap();
+    /// assert!(!uri.has_host());
+    /// ```
+    pub fn has_host(&self) -> bool {
+        self.components.is_some()
     }
 
     /// Returns whether the request URI has a password component.
@@ -233,7 +246,10 @@ impl RequestURI {
     /// assert!(!uri.has_password());
     /// ```
     pub fn has_password(&self) -> bool {
-        self.uri_reference.has_password()
+        self.components
+            .as_ref()
+            .map(|components| components.authority.has_password())
+            .unwrap_or(false)
     }
 
     /// Returns whether the URI has a port.
@@ -254,7 +270,10 @@ impl RequestURI {
     /// assert!(!uri.has_port());
     /// ```
     pub fn has_port(&self) -> bool {
-        self.uri_reference.has_port()
+        self.components
+            .as_ref()
+            .map(|components| components.authority.has_port())
+            .unwrap_or(false)
     }
 
     /// Returns whether the request URI has a query component.
@@ -275,7 +294,10 @@ impl RequestURI {
     /// assert!(!uri.has_query());
     /// ```
     pub fn has_query(&self) -> bool {
-        self.uri_reference.has_query()
+        self.components
+            .as_ref()
+            .map(|components| components.query.is_some())
+            .unwrap_or(false)
     }
 
     /// Returns whether the request URI has a username component.
@@ -296,7 +318,10 @@ impl RequestURI {
     /// assert!(!uri.has_username());
     /// ```
     pub fn has_username(&self) -> bool {
-        self.uri_reference.has_username()
+        self.components
+            .as_ref()
+            .map(|components| components.authority.has_username())
+            .unwrap_or(false)
     }
 
     /// Returns the host of the URI.
@@ -316,7 +341,9 @@ impl RequestURI {
     /// assert_eq!(uri.host().unwrap().to_string(), "example.com");
     /// ```
     pub fn host(&self) -> Option<&Host> {
-        self.uri_reference.host()
+        self.components
+            .as_ref()
+            .map(|components| components.authority.host())
     }
 
     /// Consumes the request URI and converts it into a builder with the same values.
@@ -385,13 +412,14 @@ impl RequestURI {
         Path<'static>,
         Option<Query<'static>>,
     )> {
-        if self.is_asterisk() {
-            return None;
-        }
-
-        let (scheme, authority, path, query, _) = self.uri_reference.into_parts();
-        let scheme = Scheme::try_from(scheme.unwrap()).unwrap();
-        Some((scheme, authority.unwrap(), path, query))
+        self.components.map(|components| {
+            (
+                components.scheme,
+                components.authority,
+                components.path,
+                components.query,
+            )
+        })
     }
 
     /// Returns whether the request URI is an asterisk URI (i.e. its string representation is
@@ -413,7 +441,7 @@ impl RequestURI {
     /// assert!(!uri.is_asterisk());
     /// ```
     pub fn is_asterisk(&self) -> bool {
-        self.uri_reference.is_relative_reference()
+        self.components.is_none()
     }
 
     /// Returns whether the URI is normalized.
@@ -438,7 +466,24 @@ impl RequestURI {
     /// assert!(uri.is_normalized());
     /// ```
     pub fn is_normalized(&self) -> bool {
-        self.uri_reference.is_normalized()
+        self.components
+            .as_ref()
+            .map(|components| {
+                if let Some(port) = components.authority.port() {
+                    if port == components.scheme.default_port() {
+                        return false;
+                    }
+                }
+
+                if let Some(query) = components.query.as_ref() {
+                    if !query.is_normalized() {
+                        return false;
+                    }
+                }
+
+                components.authority.is_normalized() && components.path.is_normalized(false)
+            })
+            .unwrap_or(true)
     }
 
     /// Maps the authority using the given map function.
@@ -463,12 +508,17 @@ impl RequestURI {
     where
         Mapper: FnOnce(Authority<'static>) -> Authority<'static>,
     {
-        if !self.is_asterisk() {
-            self.uri_reference
-                .map_authority(|authority| Some(mapper(authority.unwrap())));
+        match self.components.as_mut() {
+            Some(components) => {
+                let authority = mapper(mem::replace(
+                    &mut components.authority,
+                    SENTINEL_AUTHORITY.clone(),
+                ));
+                self.set_authority(authority)
+                    .expect("mapped authority resulted in invalid state")
+            }
+            None => self.authority(),
         }
-
-        self.authority()
     }
 
     /// Maps the path using the given map function.
@@ -496,11 +546,14 @@ impl RequestURI {
     where
         Mapper: FnOnce(Path<'static>) -> Path<'static>,
     {
-        if !self.is_asterisk() {
-            self.uri_reference.map_path(mapper);
+        match self.components.as_mut() {
+            Some(components) => {
+                let path = mapper(mem::replace(&mut components.path, SENTINEL_PATH.clone()));
+                self.set_path(path)
+                    .expect("mapped path resulted in invalid state")
+            }
+            None => self.path(),
         }
-
-        self.path()
     }
 
     /// Maps the query using the given map function.
@@ -525,11 +578,14 @@ impl RequestURI {
     where
         Mapper: FnOnce(Option<Query<'static>>) -> Option<Query<'static>>,
     {
-        if !self.is_asterisk() {
-            self.uri_reference.map_query(mapper);
+        match self.components.as_mut() {
+            Some(components) => {
+                let query = mapper(components.query.take());
+                self.set_query(query)
+                    .expect("mapped query resulted in invalid state")
+            }
+            None => self.query(),
         }
-
-        self.query()
     }
 
     /// Maps the scheme using the given map function.
@@ -554,13 +610,14 @@ impl RequestURI {
     where
         Mapper: FnOnce(Scheme) -> Scheme,
     {
-        if !self.is_asterisk() {
-            self.uri_reference.map_scheme(|scheme| {
-                Some(mapper(Scheme::try_from(scheme.unwrap()).unwrap()).into())
-            });
+        match self.components.as_ref() {
+            Some(components) => {
+                let scheme = mapper(components.scheme);
+                self.set_scheme(scheme)
+                    .expect("mapped scheme resulted in invalid state")
+            }
+            None => self.scheme(),
         }
-
-        self.scheme()
     }
 
     /// Normalizes the request URI.
@@ -586,7 +643,20 @@ impl RequestURI {
     /// assert_eq!(uri.to_string(), "rtsp://example.com/?a=b");
     /// ```
     pub fn normalize(&mut self) {
-        self.uri_reference.normalize();
+        if let Some(components) = self.components.as_mut() {
+            components.authority.normalize();
+            components.path.normalize(false);
+
+            if let Some(query) = components.query.as_mut() {
+                query.normalize();
+            }
+
+            if let Some(port) = components.authority.port() {
+                if port == components.scheme.default_port() {
+                    components.authority.set_port(None);
+                }
+            }
+        }
     }
 
     /// Returns the path of the request URI.
@@ -606,7 +676,10 @@ impl RequestURI {
     /// assert_eq!(uri.path(), "/my/path");
     /// ```
     pub fn path(&self) -> &Path<'static> {
-        self.uri_reference.path()
+        match self.components.as_ref() {
+            Some(components) => &components.path,
+            None => &ASTERISK_PATH,
+        }
     }
 
     /// Returns the password of the request URI.
@@ -628,7 +701,9 @@ impl RequestURI {
     /// assert_eq!(uri.password().unwrap(), "pass");
     /// ```
     pub fn password(&self) -> Option<&Password<'static>> {
-        self.uri_reference.password()
+        self.components
+            .as_ref()
+            .and_then(|components| components.authority.password())
     }
 
     /// Returns the port of the request URI.
@@ -648,7 +723,9 @@ impl RequestURI {
     /// assert_eq!(uri.port().unwrap(), 8080);
     /// ```
     pub fn port(&self) -> Option<u16> {
-        self.uri_reference.port()
+        self.components
+            .as_ref()
+            .and_then(|components| components.authority.port())
     }
 
     /// Returns the query of the request URI.
@@ -668,7 +745,9 @@ impl RequestURI {
     /// assert_eq!(uri.query().unwrap(), "my=query");
     /// ```
     pub fn query(&self) -> Option<&Query<'static>> {
-        self.uri_reference.query()
+        self.components
+            .as_ref()
+            .and_then(|components| components.query.as_ref())
     }
 
     /// Returns the scheme of the request URI.
@@ -688,9 +767,7 @@ impl RequestURI {
     /// assert_eq!(uri.scheme().unwrap(), "rtsp");
     /// ```
     pub fn scheme(&self) -> Option<Scheme> {
-        self.uri_reference
-            .scheme()
-            .map(|scheme| Scheme::try_from(scheme).unwrap())
+        self.components.as_ref().map(|components| components.scheme)
     }
 
     /// Sets the authority of the request URI.
@@ -720,9 +797,8 @@ impl RequestURI {
         Authority<'static>: TryFrom<AuthorityType, Error = AuthorityError>,
         InvalidRequestURI: From<AuthorityError>,
     {
-        if !self.is_asterisk() {
-            let authority = Authority::try_from(authority)?;
-            self.map_authority(|_| authority);
+        if let Some(components) = self.components.as_mut() {
+            components.authority = Authority::try_from(authority)?;
         }
 
         Ok(self.authority())
@@ -755,9 +831,10 @@ impl RequestURI {
         Path<'static>: TryFrom<PathType, Error = PathError>,
         InvalidRequestURI: From<PathError>,
     {
-        if !self.is_asterisk() {
-            let path = Path::try_from(path)?;
-            self.map_path(|_| path);
+        if let Some(components) = self.components.as_mut() {
+            let mut path = Path::try_from(path)?;
+            path.set_absolute(true);
+            components.path = path;
         }
 
         Ok(self.path())
@@ -790,12 +867,11 @@ impl RequestURI {
         Query<'static>: TryFrom<QueryType, Error = QueryError>,
         InvalidRequestURI: From<QueryError>,
     {
-        if !self.is_asterisk() {
-            let query = match query {
+        if let Some(components) = self.components.as_mut() {
+            components.query = match query {
                 Some(query) => Some(Query::try_from(query)?),
                 None => None,
             };
-            self.map_query(|_| query);
         }
 
         Ok(self.query())
@@ -828,9 +904,8 @@ impl RequestURI {
         Scheme: TryFrom<SchemeType, Error = SchemeError>,
         InvalidRequestURI: From<SchemeError>,
     {
-        if !self.is_asterisk() {
-            let scheme = Scheme::try_from(scheme)?;
-            self.map_scheme(|_| scheme);
+        if let Some(components) = self.components.as_mut() {
+            components.scheme = Scheme::try_from(scheme)?;
         }
 
         Ok(self.scheme())
@@ -853,13 +928,30 @@ impl RequestURI {
     /// assert_eq!(uri.username().unwrap(), "username");
     /// ```
     pub fn username(&self) -> Option<&Username<'static>> {
-        self.uri_reference.username()
+        self.components
+            .as_ref()
+            .and_then(|components| components.authority.username())
     }
 }
 
 impl Display for RequestURI {
     fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
-        self.uri_reference.fmt(formatter)
+        match self.components.as_ref() {
+            Some(components) => {
+                formatter.write_str(components.scheme.as_str())?;
+                formatter.write_str("://")?;
+                formatter.write_str(&components.authority.to_string())?;
+                formatter.write_str(&components.path.to_string())?;
+
+                if let Some(ref query) = components.query {
+                    formatter.write_char('?')?;
+                    formatter.write_str(query.as_str())?;
+                }
+
+                Ok(())
+            }
+            None => formatter.write_char('*'),
+        }
     }
 }
 
@@ -871,7 +963,23 @@ impl From<RequestURI> for String {
 
 impl<'uri> From<RequestURI> for URIReference<'uri> {
     fn from(value: RequestURI) -> Self {
-        value.uri_reference
+        match value.components {
+            Some(components) => URIReference::from_parts(
+                Some(components.scheme),
+                Some(components.authority),
+                components.path,
+                components.query,
+                None::<Fragment>,
+            ),
+            None => URIReference::from_parts(
+                None::<URIScheme>,
+                None::<Authority>,
+                ASTERISK_PATH.clone(),
+                None::<Query>,
+                None::<Fragment>,
+            ),
+        }
+        .unwrap()
     }
 }
 
@@ -904,7 +1012,7 @@ impl<'uri> TryFrom<URI<'uri>> for RequestURI {
 impl<'uri> TryFrom<URIReference<'uri>> for RequestURI {
     type Error = InvalidRequestURI;
 
-    fn try_from(mut value: URIReference<'uri>) -> Result<Self, Self::Error> {
+    fn try_from(value: URIReference<'uri>) -> Result<Self, Self::Error> {
         if value.has_scheme() && !value.has_authority() {
             return Err(InvalidRequestURI::MissingAuthority);
         }
@@ -922,6 +1030,8 @@ impl<'uri> TryFrom<URIReference<'uri>> for RequestURI {
                 || value.has_fragment()
             {
                 return Err(InvalidRequestURI::InvalidRelativeReference);
+            } else {
+                return Ok(RequestURI { components: None });
             }
         } else {
             if Scheme::try_from(value.scheme().unwrap()).is_err() {
@@ -938,14 +1048,40 @@ impl<'uri> TryFrom<URIReference<'uri>> for RequestURI {
                 }
                 _ => (),
             }
-
-            value.set_fragment(None::<Fragment>).unwrap();
         }
 
+        let (scheme, authority, path, query, _) = value.into_owned().into_parts();
+        let scheme = Scheme::try_from(scheme.unwrap())?;
+
         Ok(RequestURI {
-            uri_reference: value.into_owned(),
+            components: Some(RequestURIComponents {
+                scheme,
+                authority: authority.unwrap(),
+                path,
+                query,
+            }),
         })
     }
+}
+
+/// An internal wrapper around all request URI components. This is done so that the entire thing can
+/// be wrapped in an `Option` to avoid having to either use an enum as an interface or having all
+/// components as `Options`s.
+///
+/// Request URIs cannot have fragments, so it is not included here.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct RequestURIComponents {
+    /// The scheme of the request URI.
+    scheme: Scheme,
+
+    /// The authority of the request URI.
+    authority: Authority<'static>,
+
+    /// The path of the request URI.
+    path: Path<'static>,
+
+    /// The query of the request URI.
+    query: Option<Query<'static>>,
 }
 
 /// A builder type for [`RequestURI]`.
@@ -1154,6 +1290,15 @@ impl Scheme {
             RTSP => "rtsp",
             RTSPS => "rtsps",
             RTSPU => "rtspu",
+        }
+    }
+
+    pub fn default_port(&self) -> u16 {
+        use self::Scheme::*;
+
+        match *self {
+            RTSP | RTSPU => 554,
+            RTSPS => 332,
         }
     }
 }
