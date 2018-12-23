@@ -123,11 +123,6 @@ impl<B> Response<B> {
     pub fn version(&self) -> Version {
         self.version
     }
-
-    /// Returns a mutable reference to the response version.
-    pub fn version_mut(&mut self) -> &mut Version {
-        &mut self.version
-    }
 }
 
 impl<B> fmt::Debug for Response<B>

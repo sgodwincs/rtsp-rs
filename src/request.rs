@@ -225,11 +225,6 @@ impl<B> Request<B> {
     pub fn version(&self) -> Version {
         self.version
     }
-
-    /// Returns a mutable reference to the request version.
-    pub fn version_mut(&mut self) -> &mut Version {
-        &mut self.version
-    }
 }
 
 impl<B> fmt::Debug for Request<B>
