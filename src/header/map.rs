@@ -21,7 +21,8 @@ pub type KeyValuesDrain<'map> = MultimapKeyValuesDrain<'map, HeaderName, HeaderV
 pub type KeyValuesEntryDrain<'map> = MultimapKeyValuesEntryDrain<'map, HeaderName, HeaderValue>;
 pub type KeyValuesMut<'map> = MultimapKeyValuesMut<'map, HeaderName, HeaderValue>;
 pub type OccupiedEntry<'map> = MultimapOccupiedEntry<'map, HeaderName, HeaderValue>;
-pub type RawHeaderMap = ListOrderedMultimap<HeaderName, HeaderValue>;
 pub type VacantEntry<'map> = MultimapVacantEntry<'map, HeaderName, HeaderValue>;
 pub type Values<'map> = MultimapValues<'map, HeaderName, HeaderValue>;
 pub type ValuesMut<'map> = MultimapValuesMut<'map, HeaderName, HeaderValue>;
+
+pub type HeaderMap = ListOrderedMultimap<HeaderName, HeaderValue>;

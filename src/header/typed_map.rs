@@ -11,7 +11,7 @@ use std::error::Error;
 use std::iter::FromIterator;
 use std::{fmt, mem};
 
-use crate::header::{HeaderName, HeaderValue, RawHeaderMap};
+use crate::header::{HeaderName, HeaderValue, HeaderMap};
 
 use self::sealed::TypedHeaderClone;
 
@@ -489,8 +489,8 @@ impl Default for TypedHeaderMap {
     }
 }
 
-impl From<RawHeaderMap> for TypedHeaderMap {
-    fn from(mut value: RawHeaderMap) -> Self {
+impl From<HeaderMap> for TypedHeaderMap {
+    fn from(mut value: HeaderMap) -> Self {
         let mut map = TypedHeaderMap::with_capacity(value.keys_len());
 
         for (key, values) in value.drain_pairs() {
@@ -501,9 +501,9 @@ impl From<RawHeaderMap> for TypedHeaderMap {
     }
 }
 
-impl From<TypedHeaderMap> for RawHeaderMap {
+impl From<TypedHeaderMap> for HeaderMap {
     fn from(value: TypedHeaderMap) -> Self {
-        let mut map = RawHeaderMap::with_capacity(value.len(), value.len());
+        let mut map = HeaderMap::with_capacity(value.len(), value.len());
 
         for view in value.iter() {
             let key = view.name();

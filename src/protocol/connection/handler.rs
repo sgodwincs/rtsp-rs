@@ -7,7 +7,7 @@ use tokio_timer::Delay;
 
 use super::SenderHandle;
 use crate::header::types::{CSeq, ContentLength};
-use crate::header::{HeaderName, HeaderValue, RawHeaderMap, TypedHeader};
+use crate::header::{HeaderName, HeaderValue, HeaderMap, TypedHeader};
 use crate::protocol::{Message, Service};
 use crate::request::Request;
 use crate::response::{Response, BAD_REQUEST_RESPONSE, NOT_IMPLEMENTED_RESPONSE};
@@ -32,7 +32,7 @@ impl<S> RequestHandler<S>
 where
     S: Service<Request = Request<BytesMut>>,
     S::Future: Send + 'static,
-    S::Response: Into<Response<BytesMut, RawHeaderMap>>,
+    S::Response: Into<Response<BytesMut, HeaderMap>>,
 {
     pub(crate) fn new(
         service: S,
@@ -161,7 +161,7 @@ impl<S> Future for RequestHandler<S>
 where
     S: Service<Request = Request<BytesMut>>,
     S::Future: Send + 'static,
-    S::Response: Into<Response<BytesMut, RawHeaderMap>>,
+    S::Response: Into<Response<BytesMut, HeaderMap>>,
 {
     type Item = ();
     type Error = ();

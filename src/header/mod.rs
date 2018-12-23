@@ -62,14 +62,14 @@
 //! [Robin Hood hashing]: https://en.wikipedia.org/wiki/Hash_table#Robin_Hood_hashing
 
 pub mod common;
+pub mod map;
 pub mod name;
-pub mod raw_map;
 pub mod typed_map;
 pub mod types;
 pub mod value;
 
 pub use self::name::{HeaderName, InvalidHeaderName};
-pub use self::raw_map::RawHeaderMap;
+pub use self::map::HeaderMap;
 pub use self::typed_map::{InvalidTypedHeader, TypedHeader, TypedHeaderMap};
 pub use self::value::{HeaderValue, InvalidHeaderValue};
 

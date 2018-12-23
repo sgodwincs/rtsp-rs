@@ -38,7 +38,7 @@ pub mod uri;
 pub mod version;
 
 pub use self::client::Client;
-pub use self::header::{HeaderName, HeaderValue, RawHeaderMap, TypedHeader, TypedHeaderMap};
+pub use self::header::{HeaderName, HeaderValue, HeaderMap, TypedHeader, TypedHeaderMap};
 pub use self::method::Method;
 pub use self::protocol::Service;
 pub use self::reason::ReasonPhrase;

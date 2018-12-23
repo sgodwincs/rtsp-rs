@@ -8,7 +8,7 @@ use std::error::Error;
 use std::fmt;
 use std::mem::replace;
 
-use crate::header::{HeaderName, HeaderValue, RawHeaderMap, TypedHeader, TypedHeaderMap};
+use crate::header::{HeaderName, HeaderValue, HeaderMap, TypedHeader, TypedHeaderMap};
 use crate::method::Method;
 use crate::uri::RequestURI;
 use crate::version::Version;
@@ -25,14 +25,14 @@ use crate::version::Version;
 /// Note that it is not necessary to ever set the `Content-Length` header as it will be forcibly
 /// set during encoding even if it is already present.
 #[derive(Clone, Eq, PartialEq)]
-pub struct Request<B, H = RawHeaderMap>
+pub struct Request<B, H = HeaderMap>
 where
     H: Default,
 {
     /// The body component of the request. This is generic to support arbitrary content types.
     body: B,
 
-    /// A header map that will either be `RawHeaderMap` or `TypedHeaderMap`.
+    /// A header map that will either be `HeaderMap` or `TypedHeaderMap`.
     headers: H,
 
     /// The RTSP method to be applied to the resource. This can be any standardized RTSP method or
@@ -293,14 +293,14 @@ pub type TypedRequest<B> = Request<B, TypedHeaderMap>;
 ///
 /// This type can be used to construct a `Request` through a builder-like pattern.
 #[derive(Clone, Debug)]
-pub struct Builder<H = RawHeaderMap>
+pub struct Builder<H = HeaderMap>
 where
     H: Default,
 {
     /// A stored error used when making a `Request`.
     pub(crate) error: Option<BuilderError>,
 
-    /// A header map that will either be `RawHeaderMap` or `TypedHeaderMap`.
+    /// A header map that will either be `HeaderMap` or `TypedHeaderMap`.
     pub(crate) headers: H,
 
     /// The RTSP method to be applied to the resource. This can be any standardized RTSP method or
@@ -464,11 +464,11 @@ where
     }
 }
 
-impl Builder<RawHeaderMap> {
+impl Builder<HeaderMap> {
     /// Appends a header to this request.
     ///
-    /// This function will append the provided key/value as a header to the internal `RawHeaderMap`
-    /// being constructed. Essentially, this is equivalent to calling `RawHeaderMap::append`.
+    /// This function will append the provided key/value as a header to the internal `HeaderMap`
+    /// being constructed. Essentially, this is equivalent to calling `HeaderMap::append`.
     /// Because of this, you are able to add a given header multiple times.
     ///
     /// By default, the request contains no headers.
@@ -585,7 +585,7 @@ impl Builder<TypedHeaderMap> {
     }
 
     /// Converts this builder into a builder that contains untyped headers.
-    pub fn into_untyped(self) -> Builder<RawHeaderMap> {
+    pub fn into_untyped(self) -> Builder<HeaderMap> {
         Builder {
             error: self.error,
             headers: self.headers.into(),

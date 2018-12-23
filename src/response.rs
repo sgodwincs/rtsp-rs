@@ -10,7 +10,7 @@ use std::error::Error;
 use std::fmt;
 use std::mem::replace;
 
-use crate::header::{HeaderName, HeaderValue, RawHeaderMap, TypedHeader, TypedHeaderMap};
+use crate::header::{HeaderName, HeaderValue, HeaderMap, TypedHeader, TypedHeaderMap};
 use crate::reason::ReasonPhrase;
 use crate::status::StatusCode;
 use crate::version::Version;
@@ -38,7 +38,7 @@ lazy_static! {
 /// Note that it is not necessary to ever set the `Content-Length` header as it will be forcibly
 /// set during encoding even if it is already present.
 #[derive(Clone, Eq, PartialEq)]
-pub struct Response<B, H = RawHeaderMap>
+pub struct Response<B, H = HeaderMap>
 where
     H: Default,
 {
@@ -49,7 +49,7 @@ where
     /// reason phrases and even recommends it in specific cases.
     reason_phrase: ReasonPhrase,
 
-    /// A header map that will either be `RawHeaderMap` or `TypedHeaderMap`.
+    /// A header map that will either be `HeaderMap` or `TypedHeaderMap`.
     headers: H,
 
     /// The status code of the response.
@@ -191,7 +191,7 @@ pub type TypedResponse<B> = Response<B, TypedHeaderMap>;
 ///
 /// This type can be used to construct a `Response` through a builder-like pattern.
 #[derive(Clone, Debug)]
-pub struct Builder<H = RawHeaderMap>
+pub struct Builder<H = HeaderMap>
 where
     H: Default,
 {
@@ -204,7 +204,7 @@ where
     /// A stored error used when making a `Response`.
     pub(crate) error: Option<BuilderError>,
 
-    /// A header map that will either be `RawHeaderMap` or `TypedHeaderMap`.
+    /// A header map that will either be `HeaderMap` or `TypedHeaderMap`.
     pub(crate) headers: H,
 
     /// The status code of the response.
@@ -366,11 +366,11 @@ where
     }
 }
 
-impl Builder<RawHeaderMap> {
+impl Builder<HeaderMap> {
     /// Appends a header to this response.
     ///
-    /// This function will append the provided key/value as a header to the internal `RawHeaderMap`
-    /// being constructed. Essentially, this is equivalent to calling `RawHeaderMap::append`.
+    /// This function will append the provided key/value as a header to the internal `HeaderMap`
+    /// being constructed. Essentially, this is equivalent to calling `HeaderMap::append`.
     /// Because of this, you are able to add a given header multiple times.
     ///
     /// By default, the response contains no headers.
@@ -503,7 +503,7 @@ impl Builder<TypedHeaderMap> {
     }
 
     /// Converts this builder into a builder that contains untyped headers.
-    pub fn into_untyped(self) -> Builder<RawHeaderMap> {
+    pub fn into_untyped(self) -> Builder<HeaderMap> {
         Builder {
             custom_reason_phrase: self.custom_reason_phrase,
             error: self.error,

@@ -1189,7 +1189,7 @@ fn get_line<'a>(buffer: &mut &'a [u8]) -> Option<(&'a [u8], usize)> {
     }
 }
 
-/// Given the `Entry` for the `Content-Length` header (assuming use of `RawHeaderMap`), this
+/// Given the `Entry` for the `Content-Length` header (assuming use of `HeaderMap`), this
 /// function attempts to parse the given header and return the content length, defaulting to 0 if
 /// the header does not exist.
 fn get_content_length(header_entry: Entry<HeaderName, HeaderValue>) -> Result<ContentLength, ()> {

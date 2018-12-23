@@ -29,7 +29,7 @@ use std::time::Duration;
 use tokio_io::{AsyncRead, AsyncWrite};
 
 use crate::header::types::CSeq;
-use crate::header::{HeaderName, RawHeaderMap, TypedHeader};
+use crate::header::{HeaderName, HeaderMap, TypedHeader};
 use crate::protocol::{Codec, Message, OperationError, Service};
 use crate::request::Request;
 use crate::response::Response;
@@ -59,7 +59,7 @@ impl Connection {
         Transport: AsyncRead + AsyncWrite + Send + 'static,
         S: Service<Request = Request<BytesMut>> + Send + 'static,
         S::Future: Send + 'static,
-        S::Response: Into<Response<BytesMut, RawHeaderMap>>,
+        S::Response: Into<Response<BytesMut, HeaderMap>>,
     {
         Connection::with_config(transport, service, Config::default())
     }
@@ -73,7 +73,7 @@ impl Connection {
         Transport: AsyncRead + AsyncWrite + Send + 'static,
         S: Service<Request = Request<BytesMut>> + Send + 'static,
         S::Future: Send + 'static,
-        S::Response: Into<Response<BytesMut, RawHeaderMap>>,
+        S::Response: Into<Response<BytesMut, HeaderMap>>,
     {
         let (tx_codec_event, rx_codec_event) = unbounded();
         let (tx_incoming_request, rx_incoming_request) = channel(config.request_buffer_size());
