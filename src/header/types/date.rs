@@ -1,4 +1,5 @@
 use chrono::{DateTime, Utc};
+use std::iter::once;
 use std::ops::{Deref, DerefMut};
 
 use crate::header::common::parse_date_time;
@@ -37,42 +38,11 @@ impl DerefMut for Date {
 }
 
 impl TypedHeader for Date {
+    type DecodeError = InvalidTypedHeader;
+
     /// Returns the statically assigned `HeaderName` for this header.
     fn header_name() -> &'static HeaderName {
         &HeaderName::Date
-    }
-
-    /// Converts the [`Date`] type to raw header values.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # #![feature(try_from)]
-    /// #
-    /// # extern crate chrono;
-    /// # extern crate rtsp;
-    /// #
-    /// use chrono::{TimeZone, Utc};
-    /// use std::convert::TryFrom;
-    ///
-    /// use rtsp::*;
-    /// use rtsp::header::types::Date;
-    ///
-    /// let typed_header = Date(Utc.ymd(2014, 7, 10).and_hms(9, 10, 11));
-    /// let raw_header = vec![
-    ///     HeaderValue::try_from("Thu, 10 Jul 2014 09:10:11 +0000").unwrap()
-    /// ];
-    ///
-    /// assert!(typed_header.to_header_raw() == raw_header);
-    /// ```
-    fn to_header_raw(&self) -> Vec<HeaderValue> {
-        // Unsafe Justification
-        //
-        // Header values must be valid UTF-8, and since we know that the [`Method`] type
-        // guarantees valid ASCII-US (with no newlines), it satisfies the constraints.
-
-        let value = self.format("%a, %e %b %Y %H:%M:%S %z").to_string();
-        vec![unsafe { HeaderValue::from_str_unchecked(value) }]
     }
 
     /// Converts the raw header values to the [`Date`] header type. Based on the syntax
@@ -165,22 +135,69 @@ impl TypedHeader for Date {
     ///
     /// use rtsp::*;
     /// use rtsp::header::types::Date;
+    /// use rtsp::header::TypedHeader;
+    ///
+    /// let raw_header: Vec<HeaderValue> = vec![];
+    /// assert_eq!(Date::decode(&mut raw_header.iter()).unwrap(), None);
     ///
     /// let typed_header = Date(Utc.ymd(2014, 7, 10).and_hms(9, 10, 11));
     /// let raw_header = vec![
     ///     HeaderValue::try_from("Thu, 10 Jul 2014 09:10:11 +0000").unwrap()
     /// ];
-    ///
-    /// assert!(Date::try_from_header_raw(&raw_header).unwrap() == typed_header);
+    /// assert_eq!(Date::decode(&mut raw_header.iter()).unwrap(), Some(typed_header));
     /// ```
-    fn try_from_header_raw(header: &[HeaderValue]) -> Result<Self, InvalidTypedHeader> {
-        if header.len() == 0 {
-            Err(InvalidTypedHeader)
-        } else if header.len() > 1 {
-            Err(InvalidTypedHeader)
-        } else {
-            let date_time = parse_date_time(header[0].as_str()).map_err(|_| InvalidTypedHeader)?;
-            Ok(Date(date_time))
+    fn decode<'header, Iter>(values: &mut Iter) -> Result<Option<Self>, Self::DecodeError>
+    where
+        Iter: Iterator<Item = &'header HeaderValue>,
+    {
+        let value = match values.next() {
+            Some(value) => value,
+            None => return Ok(None),
+        };
+
+        if values.next().is_some() {
+            return Err(InvalidTypedHeader);
         }
+
+        let date_time = parse_date_time(value.as_str()).map_err(|_| InvalidTypedHeader)?;
+        Ok(Some(Date(date_time)))
+    }
+
+    /// Converts the [`Date`] type to raw header values.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #![feature(try_from)]
+    /// #
+    /// # extern crate chrono;
+    /// # extern crate rtsp;
+    /// #
+    /// use chrono::{TimeZone, Utc};
+    /// use std::convert::TryFrom;
+    ///
+    /// use rtsp::*;
+    /// use rtsp::header::types::Date;
+    /// use rtsp::header::TypedHeader;
+    ///
+    /// let typed_header = Date(Utc.ymd(2014, 7, 10).and_hms(9, 10, 11));
+    /// let expected_raw_header = vec![
+    ///     HeaderValue::try_from("Thu, 10 Jul 2014 09:10:11 +0000").unwrap()
+    /// ];
+    /// let mut raw_header = vec![];
+    /// typed_header.encode(&mut raw_header);
+    /// assert_eq!(raw_header, expected_raw_header);
+    /// ```
+    fn encode<Target>(&self, values: &mut Target)
+    where
+        Target: Extend<HeaderValue>,
+    {
+        // Unsafe Justification
+        //
+        // Header values must be valid UTF-8, and since we know that the [`Method`] type
+        // guarantees valid ASCII-US (with no newlines), it satisfies the constraints.
+
+        let value = self.format("%a, %e %b %Y %H:%M:%S %z").to_string();
+        values.extend(once(unsafe { HeaderValue::from_str_unchecked(value) }));
     }
 }

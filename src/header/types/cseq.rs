@@ -1,4 +1,5 @@
 use std::convert::TryFrom;
+use std::iter::once;
 use std::ops::{Add, Deref, Sub};
 
 use crate::header::{HeaderName, HeaderValue, InvalidTypedHeader, TypedHeader};
@@ -106,35 +107,11 @@ impl TryFrom<u32> for CSeq {
 }
 
 impl TypedHeader for CSeq {
+    type DecodeError = InvalidTypedHeader;
+
     /// Returns the statically assigned `HeaderName` for this header.
     fn header_name() -> &'static HeaderName {
         &HeaderName::CSeq
-    }
-
-    /// Converts the `CSeq` type to raw header values.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # #![feature(try_from)]
-    /// #
-    /// use std::convert::TryFrom;
-    ///
-    /// use rtsp::*;
-    /// use rtsp::header::types::CSeq;
-    ///
-    /// let typed_header = CSeq::try_from(0).unwrap();
-    /// let raw_header = vec![HeaderValue::try_from("0").unwrap()];
-    /// assert_eq!(typed_header.to_header_raw(), raw_header);
-    /// ```
-    fn to_header_raw(&self) -> Vec<HeaderValue> {
-        // Unsafe Justification
-        //
-        // In order for this to be safe, we must ensure that `value` contains no unprintable
-        // ASCII-US characters and that all linebreaks of the form `"\r\n"` are followed by a space
-        // or tab. Since [`CSeq`] serializes into a number, it satisfies the constraints.
-
-        vec![unsafe { HeaderValue::from_str_unchecked(self.0.to_string().as_str()) }]
     }
 
     /// Converts the raw header values to the `CSeq` header type. Based on the syntax provided by
@@ -156,28 +133,69 @@ impl TypedHeader for CSeq {
     ///
     /// use rtsp::*;
     /// use rtsp::header::types::CSeq;
+    /// use rtsp::header::TypedHeader;
+    ///
+    /// let raw_header: Vec<HeaderValue> = vec![];
+    /// assert_eq!(CSeq::decode(&mut raw_header.iter()).unwrap(), None);
     ///
     /// let typed_header = CSeq::try_from(10).unwrap();
     /// let raw_header = vec![HeaderValue::try_from("10").unwrap()];
-    ///
-    /// assert_eq!(
-    ///     CSeq::try_from_header_raw(&raw_header).unwrap(),
-    ///     typed_header
-    /// );
+    /// assert_eq!(CSeq::decode(&mut raw_header.iter()).unwrap(), Some(typed_header));
     ///
     /// let raw_header = vec![HeaderValue::try_from("invalid cseq").unwrap()];
-    ///
-    /// assert!(CSeq::try_from_header_raw(&raw_header).is_err());
+    /// assert!(CSeq::decode(&mut raw_header.iter()).is_err());
     /// ```
-    fn try_from_header_raw(header: &[HeaderValue]) -> Result<Self, InvalidTypedHeader> {
-        if header.len() == 0 || header.len() > 1 {
-            Err(InvalidTypedHeader)
-        } else {
-            trim_whitespace_left(header[0].as_str())
-                .parse::<u32>()
-                .map_err(|_| InvalidTypedHeader)
-                .and_then(|cseq| CSeq::try_from(cseq))
+    fn decode<'header, Iter>(values: &mut Iter) -> Result<Option<Self>, Self::DecodeError>
+    where
+        Iter: Iterator<Item = &'header HeaderValue>,
+    {
+        let value = match values.next() {
+            Some(value) => value,
+            None => return Ok(None),
+        };
+
+        if values.next().is_some() {
+            return Err(InvalidTypedHeader);
         }
+
+        trim_whitespace_left(value.as_str())
+            .parse::<u32>()
+            .map_err(|_| InvalidTypedHeader)
+            .and_then(|cseq| CSeq::try_from(cseq).map(Some))
+    }
+
+    /// Converts the `CSeq` type to raw header values.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #![feature(try_from)]
+    /// #
+    /// use std::convert::TryFrom;
+    ///
+    /// use rtsp::*;
+    /// use rtsp::header::types::CSeq;
+    /// use rtsp::header::TypedHeader;
+    ///
+    /// let typed_header = CSeq::try_from(0).unwrap();
+    /// let expected_raw_header = vec![HeaderValue::try_from("0").unwrap()];
+    /// let mut raw_header = vec![];
+    /// typed_header.encode(&mut raw_header);
+    /// assert_eq!(raw_header, expected_raw_header);
+    /// ```
+    fn encode<Target>(&self, values: &mut Target)
+    where
+        Target: Extend<HeaderValue>,
+    {
+        // Unsafe Justification
+        //
+        // In order for this to be safe, we must ensure that `value` contains no unprintable
+        // ASCII-US characters and that all linebreaks of the form `"\r\n"` are followed by a space
+        // or tab. Since [`CSeq`] serializes into a number, it satisfies the constraints.
+
+        values.extend(once(unsafe {
+            HeaderValue::from_str_unchecked(self.0.to_string().as_str())
+        }))
     }
 }
 

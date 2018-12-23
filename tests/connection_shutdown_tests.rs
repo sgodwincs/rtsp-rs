@@ -8,7 +8,7 @@ extern crate tokio_timer;
 use bytes::BytesMut;
 use futures::{future, lazy, Future};
 use rtsp::protocol::{Connection, ConnectionHandle, OperationError, ShutdownType};
-use rtsp::{HeaderName, Method, HeaderMap, Request, Response, Service};
+use rtsp::{HeaderMap, HeaderName, Method, Request, Response, Service};
 use std::io::{self, Read, Write};
 use std::net::TcpListener;
 use std::time::{Duration, Instant};
@@ -45,7 +45,7 @@ where
     ServerHandler: FnOnce(TcpListener) -> () + Send + 'static,
     RequestService: Service<Request = Request<BytesMut>> + Send + 'static,
     RequestService::Future: Send + 'static,
-    RequestService::Response: Into<Response<BytesMut, HeaderMap>>,
+    RequestService::Response: Into<Response<BytesMut>>,
 {
     let server = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = server.local_addr().unwrap();

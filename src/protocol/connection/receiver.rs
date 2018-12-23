@@ -11,7 +11,7 @@ use tokio_timer::{Delay, Error as TimerError};
 
 use super::{PendingRequestResponse, PendingRequestUpdate, SenderHandle};
 use crate::header::types::CSeq;
-use crate::header::{HeaderName, HeaderValue, TypedHeader};
+use crate::header::{HeaderMapExtension, HeaderName, HeaderValue, TypedHeader};
 use crate::protocol::{
     CodecEvent, DecodeError, InvalidMessage, IrrecoverableInvalidRequest,
     IrrecoverableInvalidResponse, Message, MessageResult, ProtocolError,
@@ -400,14 +400,8 @@ impl RequestReceiver {
         forwarding_receiver: &mut ForwardingReceiver,
         request: Request<BytesMut>,
     ) -> Result<(), RequestReceiverError> {
-        let header_values = request
-            .headers()
-            .get_all(&HeaderName::CSeq)
-            .cloned()
-            .collect::<Vec<HeaderValue>>();
-
-        match CSeq::try_from_header_raw(&header_values) {
-            Ok(cseq) => {
+        match request.headers().typed_get::<CSeq>() {
+            Some(cseq) => {
                 let incoming_sequence_number =
                     forwarding_receiver.incoming_sequence_number_or_default(cseq);
 
@@ -420,7 +414,7 @@ impl RequestReceiver {
                     Ok(())
                 }
             }
-            Err(_) => Err(RequestReceiverError::BadRequest),
+            None => Err(RequestReceiverError::BadRequest),
         }
     }
 }
@@ -532,14 +526,7 @@ impl ResponseReceiver {
     pub fn handle_response(&mut self, response: Response<BytesMut>) {
         debug_assert!(!self.should_shutdown());
 
-        let header_values = response
-            .headers()
-            .get_all(&HeaderName::CSeq)
-            .cloned()
-            .collect::<Vec<HeaderValue>>();
-        let cseq = CSeq::try_from_header_raw(&header_values);
-
-        if let Ok(cseq) = cseq {
+        if let Some(cseq) = response.headers().typed_get::<CSeq>() {
             if response.status_code() == StatusCode::Continue {
                 let mut remove_pending_request = false;
 

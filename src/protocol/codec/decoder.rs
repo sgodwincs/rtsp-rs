@@ -73,7 +73,7 @@ use std::mem::replace;
 use std::{error, fmt};
 
 use crate::header::types::ContentLength;
-use crate::header::{HeaderName, HeaderValue, TypedHeader};
+use crate::header::{HeaderMapExtension, HeaderName, HeaderValue, TypedHeader};
 use crate::request::{Builder as RequestBuilder, BuilderError as RequestBuilderError, Request};
 use crate::response::{Builder as ResponseBuilder, BuilderError as ResponseBuilderError, Response};
 
@@ -540,12 +540,11 @@ impl RequestDecoder {
             Incomplete => Incomplete,
             Complete(None) => {
                 self.state = ParseState::Body;
-                let entry = self.builder.headers.entry(HeaderName::ContentLength);
-
-                match get_content_length(entry) {
-                    Ok(content_length) => self.content_length = content_length,
+                self.content_length = match self.builder.headers.typed_try_get::<ContentLength>() {
+                    Ok(Some(content_length)) => content_length,
+                    Ok(None) => ContentLength::default(),
                     Err(_) => return Error(InvalidRequest::InvalidContentLength),
-                }
+                };
 
                 Complete(())
             }
@@ -967,12 +966,11 @@ impl ResponseDecoder {
             Incomplete => Incomplete,
             Complete(None) => {
                 self.state = ParseState::Body;
-                let entry = self.builder.headers.entry(HeaderName::ContentLength);
-
-                match get_content_length(entry) {
-                    Ok(content_length) => self.content_length = content_length,
+                self.content_length = match self.builder.headers.typed_try_get::<ContentLength>() {
+                    Ok(Some(content_length)) => content_length,
+                    Ok(None) => ContentLength::default(),
                     Err(_) => return Error(InvalidResponse::InvalidContentLength),
-                }
+                };
 
                 Complete(())
             }
@@ -1186,25 +1184,6 @@ fn get_line<'a>(buffer: &mut &'a [u8]) -> Option<(&'a [u8], usize)> {
         Some((line, i))
     } else {
         None
-    }
-}
-
-/// Given the `Entry` for the `Content-Length` header (assuming use of `HeaderMap`), this
-/// function attempts to parse the given header and return the content length, defaulting to 0 if
-/// the header does not exist.
-fn get_content_length(header_entry: Entry<HeaderName, HeaderValue>) -> Result<ContentLength, ()> {
-    use ordered_multimap::list_ordered_multimap::Entry::*;
-
-    match header_entry {
-        Occupied(entry) => {
-            if entry.iter().count() > 1 {
-                Err(())
-            } else {
-                let header_values = &entry.iter().cloned().collect::<Vec<HeaderValue>>();
-                ContentLength::try_from_header_raw(header_values).map_err(|_| ())
-            }
-        }
-        Vacant(_) => Ok(ContentLength::default()),
     }
 }
 

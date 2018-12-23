@@ -8,7 +8,7 @@ use std::error::Error;
 use std::fmt;
 use std::mem::replace;
 
-use crate::header::{HeaderName, HeaderValue, HeaderMap, TypedHeader, TypedHeaderMap};
+use crate::header::{HeaderMap, HeaderMapExtension, HeaderName, HeaderValue, TypedHeader};
 use crate::method::Method;
 use crate::uri::RequestURI;
 use crate::version::Version;
@@ -25,15 +25,12 @@ use crate::version::Version;
 /// Note that it is not necessary to ever set the `Content-Length` header as it will be forcibly
 /// set during encoding even if it is already present.
 #[derive(Clone, Eq, PartialEq)]
-pub struct Request<B, H = HeaderMap>
-where
-    H: Default,
-{
+pub struct Request<B> {
     /// The body component of the request. This is generic to support arbitrary content types.
     body: B,
 
     /// A header map that will either be `HeaderMap` or `TypedHeaderMap`.
-    headers: H,
+    headers: HeaderMap,
 
     /// The RTSP method to be applied to the resource. This can be any standardized RTSP method or
     /// an extension method.
@@ -52,13 +49,8 @@ where
 }
 
 impl Request<()> {
-    /// Constructs a new builder that uses untyped headers.
+    /// Constructs a new builder.
     pub fn builder() -> Builder {
-        Builder::new()
-    }
-
-    /// Constructs a new builder that uses typed headers.
-    pub fn typed_builder() -> Builder<TypedHeaderMap> {
         Builder::new()
     }
 
@@ -173,10 +165,7 @@ impl Request<()> {
     }
 }
 
-impl<B, H> Request<B, H>
-where
-    H: Default,
-{
+impl<B> Request<B> {
     /// Returns an immutable reference to the request body.
     pub fn body(&self) -> &B {
         &self.body
@@ -189,17 +178,17 @@ where
     }
 
     /// Returns an immutable reference to the request header map.
-    pub fn headers(&self) -> &H {
+    pub fn headers(&self) -> &HeaderMap {
         &self.headers
     }
 
     /// Returns a mutable reference to the request header map.
-    pub fn headers_mut(&mut self) -> &mut H {
+    pub fn headers_mut(&mut self) -> &mut HeaderMap {
         &mut self.headers
     }
 
     /// Maps the body of this request to a new type `T` using the provided function.
-    pub fn map<T, F>(self, mut mapper: F) -> Request<T, H>
+    pub fn map<T, F>(self, mut mapper: F) -> Request<T>
     where
         F: FnMut(B) -> T,
     {
@@ -243,36 +232,9 @@ where
     }
 }
 
-impl<B> From<Request<B>> for Request<B, TypedHeaderMap> {
-    /// Converts the request from using untyped headers to typed headers.
-    fn from(value: Request<B>) -> Request<B, TypedHeaderMap> {
-        Request {
-            body: value.body,
-            headers: value.headers.into(),
-            method: value.method,
-            uri: value.uri,
-            version: value.version,
-        }
-    }
-}
-
-impl<B> From<Request<B, TypedHeaderMap>> for Request<B> {
-    /// Converts the request from using typed headers to untyped headers.
-    fn from(value: Request<B, TypedHeaderMap>) -> Request<B> {
-        Request {
-            body: value.body,
-            headers: value.headers.into(),
-            method: value.method,
-            uri: value.uri,
-            version: value.version,
-        }
-    }
-}
-
-impl<B, H> fmt::Debug for Request<B, H>
+impl<B> fmt::Debug for Request<B>
 where
     B: fmt::Debug,
-    H: fmt::Debug + Default,
 {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         formatter
@@ -286,22 +248,16 @@ where
     }
 }
 
-/// Alias for a request using typed headers.
-pub type TypedRequest<B> = Request<B, TypedHeaderMap>;
-
 /// An RTSP request builder
 ///
 /// This type can be used to construct a `Request` through a builder-like pattern.
 #[derive(Clone, Debug)]
-pub struct Builder<H = HeaderMap>
-where
-    H: Default,
-{
+pub struct Builder {
     /// A stored error used when making a `Request`.
     pub(crate) error: Option<BuilderError>,
 
     /// A header map that will either be `HeaderMap` or `TypedHeaderMap`.
-    pub(crate) headers: H,
+    pub(crate) headers: HeaderMap,
 
     /// The RTSP method to be applied to the resource. This can be any standardized RTSP method or
     /// an extension method.
@@ -319,12 +275,9 @@ where
     pub(crate) version: Version,
 }
 
-impl<H> Builder<H>
-where
-    H: Default,
-{
+impl Builder {
     /// Creates a new default instance of a `Builder` to construct a `Request`.
-    pub fn new() -> Builder<H> {
+    pub fn new() -> Builder {
         Builder::default()
     }
 
@@ -347,7 +300,7 @@ where
     ///     .build(())
     ///     .unwrap();
     /// ```
-    pub fn build<B>(&mut self, body: B) -> Result<Request<B, H>, BuilderError> {
+    pub fn build<B>(&mut self, body: B) -> Result<Request<B>, BuilderError> {
         if let Some(error) = self.error {
             return Err(error);
         }
@@ -356,7 +309,7 @@ where
             if let Some(uri) = replace(&mut self.uri, None) {
                 Ok(Request {
                     body,
-                    headers: replace(&mut self.headers, H::default()),
+                    headers: replace(&mut self.headers, HeaderMap::new()),
                     method,
                     uri,
                     version: self.version,
@@ -464,7 +417,7 @@ where
     }
 }
 
-impl Builder<HeaderMap> {
+impl Builder {
     /// Appends a header to this request.
     ///
     /// This function will append the provided key/value as a header to the internal `HeaderMap`
@@ -509,19 +462,6 @@ impl Builder<HeaderMap> {
         self
     }
 
-    /// Converts this builder into a builder that contains typed headers.
-    pub fn into_typed(self) -> Builder<TypedHeaderMap> {
-        Builder {
-            error: self.error,
-            headers: self.headers.into(),
-            method: self.method,
-            uri: self.uri,
-            version: self.version,
-        }
-    }
-}
-
-impl Builder<TypedHeaderMap> {
     /// Sets a typed header for this request.
     ///
     /// By default, the request contains no headers.
@@ -540,71 +480,25 @@ impl Builder<TypedHeaderMap> {
     /// use rtsp::*;
     /// use rtsp::header::types::*;
     ///
-    /// let request = Request::typed_builder()
+    /// let request = Request::builder()
     ///     .method(Method::Play)
     ///     .uri("rtsp://server.com")
-    ///     .header(ContentLength::try_from(5).unwrap())
+    ///     .typed_header(ContentLength::try_from(5).unwrap())
     ///     .build(())
     ///     .unwrap();
     /// ```
-    pub fn header<H: TypedHeader>(&mut self, header: H) -> &mut Self {
-        self.headers.set(header);
+    pub fn typed_header<H: TypedHeader>(&mut self, header: H) -> &mut Self {
+        self.headers.typed_insert(header);
         self
-    }
-
-    /// Sets a raw header for this request. This is slightly different from the untyped builder's
-    /// `header` function in that setting the raw value for a previously set header will end up
-    /// overwriting it.
-    ///
-    /// By default, the request contains no headers.
-    ///
-    /// # Errors
-    ///
-    /// An error will be stored in the builder if the given name is an invalid `HeaderName`, or the
-    /// given values contains an invalid `HeaderValue`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # #![feature(try_from)]
-    /// #
-    /// use std::convert::TryFrom;
-    ///
-    /// use rtsp::*;
-    ///
-    /// let request = Request::typed_builder()
-    ///     .method(Method::Play)
-    ///     .uri("rtsp://server.com")
-    ///     .header_raw(HeaderName::ContentLength, vec![HeaderValue::try_from("5").unwrap()])
-    ///     .build(())
-    ///     .unwrap();
-    /// ```
-    pub fn header_raw(&mut self, name: HeaderName, value: Vec<HeaderValue>) -> &mut Self {
-        self.headers.set_raw(name, value);
-        self
-    }
-
-    /// Converts this builder into a builder that contains untyped headers.
-    pub fn into_untyped(self) -> Builder<HeaderMap> {
-        Builder {
-            error: self.error,
-            headers: self.headers.into(),
-            method: self.method,
-            uri: self.uri,
-            version: self.version,
-        }
     }
 }
 
-impl<H> Default for Builder<H>
-where
-    H: Default,
-{
+impl Default for Builder {
     #[inline]
     fn default() -> Self {
         Builder {
             error: None,
-            headers: H::default(),
+            headers: HeaderMap::default(),
             method: None,
             uri: None,
             version: Version::default(),

@@ -7,7 +7,7 @@ use tokio_timer::Delay;
 
 use super::SenderHandle;
 use crate::header::types::{CSeq, ContentLength};
-use crate::header::{HeaderName, HeaderValue, HeaderMap, TypedHeader};
+use crate::header::{HeaderMap, HeaderMapExtension, HeaderName, HeaderValue, TypedHeader};
 use crate::protocol::{Message, Service};
 use crate::request::Request;
 use crate::response::{Response, BAD_REQUEST_RESPONSE, NOT_IMPLEMENTED_RESPONSE};
@@ -32,7 +32,7 @@ impl<S> RequestHandler<S>
 where
     S: Service<Request = Request<BytesMut>>,
     S::Future: Send + 'static,
-    S::Response: Into<Response<BytesMut, HeaderMap>>,
+    S::Response: Into<Response<BytesMut>>,
 {
     pub(crate) fn new(
         service: S,
@@ -108,20 +108,18 @@ where
             return;
         }
 
-        let header_values = &request
-            .headers()
-            .get_all(&HeaderName::ContentLength)
-            .cloned()
-            .collect::<Vec<HeaderValue>>();
-        let content_length = ContentLength::try_from_header_raw(header_values).unwrap();
-
-        if *content_length > 0 && !request.headers().contains_key(&HeaderName::ContentType) {
-            self.send_response(cseq, BAD_REQUEST_RESPONSE.clone());
-            return;
+        match request.headers().typed_get::<ContentLength>() {
+            Some(content_length)
+                if *content_length > 0
+                    && !request.headers().contains_key(&HeaderName::ContentType) =>
+            {
+                self.send_response(cseq, BAD_REQUEST_RESPONSE.clone());
+            }
+            _ => {
+                self.reset_continue_timer();
+                self.serviced_request = Some((cseq, self.service.call(request)));
+            }
         }
-
-        self.reset_continue_timer();
-        self.serviced_request = Some((cseq, self.service.call(request)))
     }
 
     fn reset_continue_timer(&mut self) {
@@ -132,8 +130,7 @@ where
     }
 
     fn send_response(&mut self, cseq: CSeq, mut response: Response<BytesMut>) {
-        let cseq = cseq.to_header_raw().remove(0);
-        response.headers_mut().insert(HeaderName::CSeq, cseq);
+        response.headers_mut().typed_insert(cseq);
 
         // We do not care if this fails. All requests that reach this handler will be processed
         // regardless of whether or not a response can actually be sent.
@@ -161,7 +158,7 @@ impl<S> Future for RequestHandler<S>
 where
     S: Service<Request = Request<BytesMut>>,
     S::Future: Send + 'static,
-    S::Response: Into<Response<BytesMut, HeaderMap>>,
+    S::Response: Into<Response<BytesMut>>,
 {
     type Item = ();
     type Error = ();

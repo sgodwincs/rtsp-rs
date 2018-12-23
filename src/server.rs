@@ -8,10 +8,10 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::header::types::Public;
-use crate::header::TypedHeaderMap;
+use crate::header::HeaderMap;
 use crate::method::Method;
 use crate::protocol::{ConnectionHandle, Service};
-use crate::request::{Request, TypedRequest};
+use crate::request::Request;
 use crate::response::{Response, NOT_IMPLEMENTED_RESPONSE};
 use crate::session::{InvalidSessionID, Session, SessionID, DEFAULT_SESSION_TIMEOUT};
 
@@ -29,10 +29,10 @@ struct ClientHandler {
 impl ClientHandler {
     fn handle_method_options(
         &mut self,
-        request: TypedRequest<BytesMut>,
+        request: Request<BytesMut>,
     ) -> impl Future<Item = Response<BytesMut>, Error = io::Error> {
-        let response = Response::typed_builder()
-            .header(SUPPORTED_METHODS.iter().cloned().collect::<Public>())
+        let response = Response::builder()
+            .typed_header(SUPPORTED_METHODS.iter().cloned().collect::<Public>())
             .build(BytesMut::new())
             .unwrap();
 
@@ -46,8 +46,7 @@ impl Service for ClientHandler {
     type Error = io::Error;
     type Future = Box<Future<Item = Self::Response, Error = Self::Error> + Send + 'static>;
 
-    fn call(&mut self, request: Self::Request) -> Self::Future {
-        let mut request: Request<_, TypedHeaderMap> = request.into();
+    fn call(&mut self, mut request: Self::Request) -> Self::Future {
         request.uri_mut().normalize();
 
         match request.method() {

@@ -2,7 +2,7 @@ use futures::sync::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
 use futures::{Async, AsyncSink, Poll, Sink, Stream};
 
 use crate::header::types::Date;
-use crate::header::{HeaderName, TypedHeader};
+use crate::header::{HeaderMapExtension, HeaderName, TypedHeader};
 use crate::protocol::{Message, ProtocolError};
 
 pub struct Sender {
@@ -44,18 +44,12 @@ impl Sender {
                     .expect("unbounded receiver `rx_outgoing_message` should not error")
                 {
                     Async::Ready(Some(mut message)) => {
-                        let date = Date::new()
-                            .to_header_raw()
-                            .into_iter()
-                            .nth(0)
-                            .expect("`Date` header should always have one header");
-
                         match message {
                             Message::Request(ref mut request) => {
-                                request.headers_mut().insert(HeaderName::Date, date);
+                                request.headers_mut().typed_insert(Date::new());
                             }
                             Message::Response(ref mut response) => {
-                                response.headers_mut().insert(HeaderName::Date, date);
+                                response.headers_mut().typed_insert(Date::new());
                             }
                         }
 

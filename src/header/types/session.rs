@@ -1,4 +1,5 @@
 use std::convert::TryFrom;
+use std::iter::once;
 use std::time::Duration;
 
 use crate::header::{HeaderName, HeaderValue, InvalidTypedHeader, TypedHeader};
@@ -113,65 +114,11 @@ impl Session {
 }
 
 impl TypedHeader for Session {
+    type DecodeError = InvalidTypedHeader;
+
     /// Returns the statically assigned `HeaderName` for this header.
     fn header_name() -> &'static HeaderName {
         &HeaderName::Session
-    }
-
-    /// Converts the `Session` type to raw header values.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # #![feature(try_from)]
-    /// #
-    /// use std::convert::TryFrom;
-    /// use std::time::Duration;
-    ///
-    /// use rtsp::*;
-    /// use rtsp::header::types::Session;
-    /// use rtsp::session::DEFAULT_SESSION_TIMEOUT;
-    ///
-    /// let typed_header = Session::without_timeout("QKyjN8nt2WqbWw4tIYof52").unwrap();
-    /// let raw_header = vec![HeaderValue::try_from("QKyjN8nt2WqbWw4tIYof52").unwrap()];
-    /// assert_eq!(typed_header.to_header_raw(), raw_header);
-    ///
-    /// let typed_header =
-    ///     Session::with_timeout("QKyjN8nt2WqbWw4tIYof52", Duration::from_secs(180)).unwrap();
-    /// let raw_header = vec![
-    ///     HeaderValue::try_from("QKyjN8nt2WqbWw4tIYof52; timeout = 180").unwrap()
-    /// ];
-    /// assert_eq!(typed_header.to_header_raw(), raw_header);
-    ///
-    /// let typed_header =
-    ///     Session::with_timeout("QKyjN8nt2WqbWw4tIYof52", DEFAULT_SESSION_TIMEOUT).unwrap();
-    /// let raw_header = vec![
-    ///     HeaderValue::try_from("QKyjN8nt2WqbWw4tIYof52").unwrap()
-    /// ];
-    /// assert_eq!(typed_header.to_header_raw(), raw_header);
-    /// ```
-    fn to_header_raw(&self) -> Vec<HeaderValue> {
-        let id = self.id.as_str();
-
-        let value = if let Some(timeout) = self.timeout {
-            if timeout.as_secs() == DEFAULT_SESSION_TIMEOUT.as_secs() {
-                id.to_string()
-            } else {
-                format!("{}; timeout = {}", id, timeout.as_secs())
-            }
-        } else {
-            id.to_string()
-        };
-
-        // Unsafe Justification
-        //
-        // In order for this to be safe, we must ensure that `value` contains no unprintable
-        // ASCII-US characters and that all linebreaks of the form `"\r\n"` are followed by a space
-        // or tab. In the above construction, the only thing that could violate this constraint
-        // would be the serialization of the session ID. However, a session ID can only have a
-        // subset of printable ASCII-US characters and cannot have newlines or carriage returns.
-
-        vec![unsafe { HeaderValue::from_str_unchecked(value) }]
     }
 
     /// Converts the raw header values to the `Session` header type. Based on the syntax provided by
@@ -199,40 +146,44 @@ impl TypedHeader for Session {
     ///
     /// use rtsp::*;
     /// use rtsp::header::types::Session;
+    /// use rtsp::header::TypedHeader;
+    ///
+    ///
+    /// let raw_header: Vec<HeaderValue> = vec![];
+    /// assert_eq!(Session::decode(&mut raw_header.iter()).unwrap(), None);
     ///
     /// let typed_header = Session::without_timeout("QKyjN8nt2WqbWw4tIYof52").unwrap();
     /// let raw_header = vec![HeaderValue::try_from("QKyjN8nt2WqbWw4tIYof52").unwrap()];
-    ///
-    /// assert_eq!(
-    ///     Session::try_from_header_raw(&raw_header).unwrap(),
-    ///     typed_header
-    /// );
+    /// assert_eq!(Session::decode(&mut raw_header.iter()).unwrap(), Some(typed_header));
     ///
     /// let typed_header =
     ///     Session::with_timeout("QKyjN8nt2WqbWw4tIYof52", Duration::from_secs(180)).unwrap();
     /// let raw_header = vec![
     ///     HeaderValue::try_from("QKyjN8nt2WqbWw4tIYof52; timeout = 180").unwrap()
     /// ];
-    ///
-    /// assert_eq!(
-    ///     Session::try_from_header_raw(&raw_header).unwrap(),
-    ///     typed_header
-    /// );
+    /// assert_eq!(Session::decode(&mut raw_header.iter()).unwrap(), Some(typed_header));
     ///
     /// let raw_header = vec![HeaderValue::try_from("invalid session").unwrap()];
-    ///
-    /// assert!(Session::try_from_header_raw(&raw_header).is_err());
+    /// assert!(Session::decode(&mut raw_header.iter()).is_err());
     /// ```
-    fn try_from_header_raw(header: &[HeaderValue]) -> Result<Self, InvalidTypedHeader> {
-        if header.len() == 0 || header.len() > 1 {
+    fn decode<'header, Iter>(values: &mut Iter) -> Result<Option<Self>, Self::DecodeError>
+    where
+        Iter: Iterator<Item = &'header HeaderValue>,
+    {
+        let value = match values.next() {
+            Some(value) => value,
+            None => return Ok(None),
+        };
+
+        if values.next().is_some() {
             return Err(InvalidTypedHeader);
         }
 
-        let parts = header[0].as_str().splitn(2, ';').collect::<Vec<&str>>();
+        let parts = value.as_str().splitn(2, ';').collect::<Vec<&str>>();
         let id = SessionID::try_from(trim_whitespace(parts[0])).map_err(|_| InvalidTypedHeader)?;
 
         if parts.len() == 1 {
-            Ok(Session { id, timeout: None })
+            Ok(Some(Session { id, timeout: None }))
         } else {
             let parts = parts[1]
                 .splitn(2, '=')
@@ -249,13 +200,78 @@ impl TypedHeader for Session {
                         if delta > MAX_SESSION_TIMEOUT {
                             Err(InvalidTypedHeader)
                         } else {
-                            Ok(Session {
+                            Ok(Some(Session {
                                 id,
                                 timeout: Some(Duration::new(delta, 0)),
-                            })
+                            }))
                         }
                     })
             }
         }
+    }
+
+    /// Converts the `Session` type to raw header values.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #![feature(try_from)]
+    /// #
+    /// use std::convert::TryFrom;
+    /// use std::time::Duration;
+    ///
+    /// use rtsp::*;
+    /// use rtsp::header::types::Session;
+    /// use rtsp::header::TypedHeader;
+    /// use rtsp::session::DEFAULT_SESSION_TIMEOUT;
+    ///
+    /// let typed_header = Session::without_timeout("QKyjN8nt2WqbWw4tIYof52").unwrap();
+    /// let expected_raw_header = vec![HeaderValue::try_from("QKyjN8nt2WqbWw4tIYof52").unwrap()];
+    /// let mut raw_header = vec![];
+    /// typed_header.encode(&mut raw_header);
+    /// assert_eq!(raw_header, expected_raw_header);
+    ///
+    /// let typed_header =
+    ///     Session::with_timeout("QKyjN8nt2WqbWw4tIYof52", Duration::from_secs(180)).unwrap();
+    /// let expected_raw_header = vec![
+    ///     HeaderValue::try_from("QKyjN8nt2WqbWw4tIYof52; timeout = 180").unwrap()
+    /// ];
+    /// let mut raw_header = vec![];
+    /// typed_header.encode(&mut raw_header);
+    /// assert_eq!(raw_header, expected_raw_header);
+    ///
+    /// let typed_header =
+    ///     Session::with_timeout("QKyjN8nt2WqbWw4tIYof52", DEFAULT_SESSION_TIMEOUT).unwrap();
+    /// let expected_raw_header = vec![
+    ///     HeaderValue::try_from("QKyjN8nt2WqbWw4tIYof52").unwrap()
+    /// ];
+    /// let mut raw_header = vec![];
+    /// typed_header.encode(&mut raw_header);
+    /// assert_eq!(raw_header, expected_raw_header);
+    /// ```
+    fn encode<Target>(&self, values: &mut Target)
+    where
+        Target: Extend<HeaderValue>,
+    {
+        let id = self.id.as_str();
+
+        let value = if let Some(timeout) = self.timeout {
+            if timeout.as_secs() == DEFAULT_SESSION_TIMEOUT.as_secs() {
+                id.to_string()
+            } else {
+                format!("{}; timeout = {}", id, timeout.as_secs())
+            }
+        } else {
+            id.to_string()
+        };
+
+        // Unsafe Justification
+        //
+        // In order for this to be safe, we must ensure that `value` contains no unprintable
+        // ASCII-US characters and that all linebreaks of the form `"\r\n"` are followed by a space
+        // or tab. In the above construction, the only thing that could violate this constraint
+        // would be the serialization of the session ID. However, a session ID can only have a
+        // subset of printable ASCII-US characters and cannot have newlines or carriage returns.
+        values.extend(once(unsafe { HeaderValue::from_str_unchecked(value) }));
     }
 }

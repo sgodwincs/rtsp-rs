@@ -29,7 +29,7 @@ use std::time::Duration;
 use tokio_io::{AsyncRead, AsyncWrite};
 
 use crate::header::types::CSeq;
-use crate::header::{HeaderName, HeaderMap, TypedHeader};
+use crate::header::{HeaderMap, HeaderMapExtension, HeaderName, TypedHeader};
 use crate::protocol::{Codec, Message, OperationError, Service};
 use crate::request::Request;
 use crate::response::Response;
@@ -59,7 +59,7 @@ impl Connection {
         Transport: AsyncRead + AsyncWrite + Send + 'static,
         S: Service<Request = Request<BytesMut>> + Send + 'static,
         S::Future: Send + 'static,
-        S::Response: Into<Response<BytesMut, HeaderMap>>,
+        S::Response: Into<Response<BytesMut>>,
     {
         Connection::with_config(transport, service, Config::default())
     }
@@ -73,7 +73,7 @@ impl Connection {
         Transport: AsyncRead + AsyncWrite + Send + 'static,
         S: Service<Request = Request<BytesMut>> + Send + 'static,
         S::Future: Send + 'static,
-        S::Response: Into<Response<BytesMut, HeaderMap>>,
+        S::Response: Into<Response<BytesMut>>,
     {
         let (tx_codec_event, rx_codec_event) = unbounded();
         let (tx_incoming_request, rx_incoming_request) = channel(config.request_buffer_size());
@@ -343,11 +343,7 @@ impl ConnectionHandle {
             .expect("locking `sequence_number` should not error");
         let sequence_number = *lock;
         let mut request = request.into().map(|body| BytesMut::from(body.as_ref()));
-        let cseq_header = CSeq::to_header_raw(&sequence_number)
-            .into_iter()
-            .nth(0)
-            .expect("`CSeq` header should always have one header");
-        request.headers_mut().insert(HeaderName::CSeq, cseq_header);
+        request.headers_mut().typed_insert(sequence_number);
 
         let (tx_response, rx_response) = oneshot::channel();
         let update = PendingRequestUpdate::AddPendingRequest((sequence_number, tx_response));

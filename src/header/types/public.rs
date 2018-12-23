@@ -1,7 +1,7 @@
 use itertools::Itertools;
 use std::collections::HashSet;
 use std::convert::TryFrom;
-use std::iter::FromIterator;
+use std::iter::{once, FromIterator};
 use std::ops::{Deref, DerefMut};
 
 use crate::header::{HeaderName, HeaderValue, InvalidTypedHeader, TypedHeader};
@@ -44,40 +44,11 @@ impl FromIterator<Method> for Public {
 }
 
 impl TypedHeader for Public {
+    type DecodeError = InvalidTypedHeader;
+
     /// Returns the statically assigned `HeaderName` for this header.
     fn header_name() -> &'static HeaderName {
         &HeaderName::Public
-    }
-
-    /// Converts the [`Public`] type to raw header values.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # #![feature(try_from)]
-    /// #
-    /// use std::convert::TryFrom;
-    ///
-    /// use rtsp::*;
-    /// use rtsp::header::types::Public;
-    ///
-    /// let typed_header = vec![Method::Play, Method::Setup].into_iter().collect::<Public>();
-    /// let raw_headers = vec![
-    ///     vec![HeaderValue::try_from("PLAY, SETUP").unwrap()],
-    ///     vec![HeaderValue::try_from("SETUP, PLAY").unwrap()]
-    /// ];
-    ///
-    /// assert!(typed_header.to_header_raw() == raw_headers[0] ||
-    ///         typed_header.to_header_raw() == raw_headers[1]);
-    /// ```
-    fn to_header_raw(&self) -> Vec<HeaderValue> {
-        // Unsafe Justification
-        //
-        // Header values must be valid UTF-8, and since we know that the [`Method`] type
-        // guarantees valid ASCII-US (with no newlines), it satisfies the constraints.
-
-        let value = self.iter().map(|method| method.as_str()).join(", ");
-        vec![unsafe { HeaderValue::from_str_unchecked(value) }]
     }
 
     /// Converts the raw header values to the [`Public`] header type. Based on the syntax
@@ -125,27 +96,26 @@ impl TypedHeader for Public {
     ///
     /// use rtsp::*;
     /// use rtsp::header::types::Public;
+    /// use rtsp::header::TypedHeader;
     ///
-    /// let typed_header = Public::new();
     /// let raw_header: Vec<HeaderValue> = vec![];
-    ///
-    /// assert_eq!(
-    ///     Public::try_from_header_raw(&raw_header).unwrap(),
-    ///     typed_header
-    /// );
+    /// assert_eq!(Public::decode(&mut raw_header.iter()).unwrap(), None);
     ///
     /// let typed_header = vec![Method::Play, Method::Setup].into_iter().collect::<Public>();
     /// let raw_header = vec![HeaderValue::try_from("SETUP, \"INVALID\", PLAY, PLAY").unwrap()];
-    /// println!("{:?}", raw_header);
     /// assert_eq!(
-    ///     Public::try_from_header_raw(&raw_header).unwrap(),
-    ///     typed_header
+    ///     Public::decode(&mut raw_header.iter()).unwrap(),
+    ///     Some(typed_header)
     /// );
     /// ```
-    fn try_from_header_raw(header: &[HeaderValue]) -> Result<Self, InvalidTypedHeader> {
+    fn decode<'header, Iter>(values: &mut Iter) -> Result<Option<Self>, Self::DecodeError>
+    where
+        Iter: Iterator<Item = &'header HeaderValue>,
+    {
         let mut methods = HashSet::new();
+        let mut present = false;
 
-        for value in header {
+        for value in values {
             let parts = value.as_str().split(',');
 
             for part in parts {
@@ -153,8 +123,50 @@ impl TypedHeader for Public {
                     methods.insert(method);
                 }
             }
+
+            present = true;
         }
 
-        Ok(Public(methods))
+        if present {
+            Ok(Some(Public(methods)))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Converts the [`Public`] type to raw header values.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #![feature(try_from)]
+    /// #
+    /// use std::convert::TryFrom;
+    ///
+    /// use rtsp::*;
+    /// use rtsp::header::types::Public;
+    /// use rtsp::header::TypedHeader;
+    ///
+    /// let typed_header = vec![Method::Play, Method::Setup].into_iter().collect::<Public>();
+    /// let expected_raw_headers = vec![
+    ///     vec![HeaderValue::try_from("PLAY, SETUP").unwrap()],
+    ///     vec![HeaderValue::try_from("SETUP, PLAY").unwrap()],
+    /// ];
+    /// let mut raw_header = vec![];
+    /// typed_header.encode(&mut raw_header);
+    /// assert!(raw_header == expected_raw_headers[0] ||
+    ///         raw_header == expected_raw_headers[1]);
+    /// ```
+    fn encode<Target>(&self, values: &mut Target)
+    where
+        Target: Extend<HeaderValue>,
+    {
+        // Unsafe Justification
+        //
+        // Header values must be valid UTF-8, and since we know that the [`Method`] type
+        // guarantees valid ASCII-US (with no newlines), it satisfies the constraints.
+
+        let value = self.iter().map(|method| method.as_str()).join(", ");
+        values.extend(once(unsafe { HeaderValue::from_str_unchecked(value) }));
     }
 }

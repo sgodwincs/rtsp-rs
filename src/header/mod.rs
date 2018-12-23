@@ -64,13 +64,11 @@
 pub mod common;
 pub mod map;
 pub mod name;
-pub mod typed_map;
 pub mod types;
 pub mod value;
 
+pub use self::map::{HeaderMap, HeaderMapExtension, TypedHeader, InvalidTypedHeader};
 pub use self::name::{HeaderName, InvalidHeaderName};
-pub use self::map::HeaderMap;
-pub use self::typed_map::{InvalidTypedHeader, TypedHeader, TypedHeaderMap};
 pub use self::value::{HeaderValue, InvalidHeaderValue};
 
 /// Maximum length of a header name
