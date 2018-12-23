@@ -98,31 +98,7 @@ macro_rules! status_codes {
                 )+
                     Extension(_) => None
                 }
-            }
-
-            /// Constructs a new [`StatusCode`] from a given `u16`.
-            ///
-            /// If the status code is not in the range [100, 599], an error will be returned.
-            fn from_u16(status_code: u16) -> Result<Self, InvalidStatusCode> {
-                use self::StatusCode::*;
-
-                if status_code < 100 || status_code >= 600 {
-                    return Err(InvalidStatusCode::OutOfRange);
-                }
-
-                // These status codes are not allowed in RTSP 2.0 and cannot be reused by
-                // extensions.
-                if status_code == 303 || status_code == 352 {
-                    return Err(InvalidStatusCode::Removed);
-                }
-
-                Ok(match status_code {
-                $(
-                    $code => $variant,
-                )+
-                    _ => Extension(ExtensionStatusCode(status_code))
-                })
-            }
+            } 
         }
 
         impl From<StatusCode> for u16 {
@@ -135,6 +111,31 @@ macro_rules! status_codes {
                 )+
                     Extension(code) => code.0
                 }
+            }
+        }
+
+        impl TryFrom<u16> for StatusCode {
+            type Error = InvalidStatusCode;
+
+            fn try_from(value: u16) -> Result<Self, Self::Error> {
+                use self::StatusCode::*;
+
+                if value < 100 || value >= 600 {
+                    return Err(InvalidStatusCode::OutOfRange);
+                }
+
+                // These status codes are not allowed in RTSP 2.0 and cannot be reused by
+                // extensions.
+                if value == 303 || value == 352 {
+                    return Err(InvalidStatusCode::Removed);
+                }
+
+                Ok(match value {
+                $(
+                    $code => $variant,
+                )+
+                    _ => Extension(ExtensionStatusCode(value))
+                })
             }
         }
 
@@ -437,7 +438,7 @@ impl<'a> TryFrom<&'a [u8]> for StatusCode {
         let c = u16::from(value[2].wrapping_sub(b'0'));
         let status_code = (a * 100) + (b * 10) + c;
 
-        StatusCode::from_u16(status_code)
+        StatusCode::try_from(status_code)
     }
 }
 
@@ -454,15 +455,7 @@ impl TryFrom<i16> for StatusCode {
 
     fn try_from(value: i16) -> Result<Self, Self::Error> {
         let value = u16::try_from(value).map_err(|_| InvalidStatusCode::OutOfRange)?;
-        StatusCode::from_u16(value)
-    }
-}
-
-impl TryFrom<u16> for StatusCode {
-    type Error = InvalidStatusCode;
-
-    fn try_from(value: u16) -> Result<Self, Self::Error> {
-        StatusCode::from_u16(value)
+        StatusCode::try_from(value)
     }
 }
 
@@ -471,7 +464,7 @@ impl TryFrom<i32> for StatusCode {
 
     fn try_from(value: i32) -> Result<Self, Self::Error> {
         let value = u16::try_from(value).map_err(|_| InvalidStatusCode::OutOfRange)?;
-        StatusCode::from_u16(value)
+        StatusCode::try_from(value)
     }
 }
 
@@ -480,7 +473,7 @@ impl TryFrom<u32> for StatusCode {
 
     fn try_from(value: u32) -> Result<Self, Self::Error> {
         let value = u16::try_from(value).map_err(|_| InvalidStatusCode::OutOfRange)?;
-        StatusCode::from_u16(value)
+        StatusCode::try_from(value)
     }
 }
 
@@ -489,7 +482,7 @@ impl TryFrom<i64> for StatusCode {
 
     fn try_from(value: i64) -> Result<Self, Self::Error> {
         let value = u16::try_from(value).map_err(|_| InvalidStatusCode::OutOfRange)?;
-        StatusCode::from_u16(value as u16)
+        StatusCode::try_from(value as u16)
     }
 }
 
@@ -498,7 +491,7 @@ impl TryFrom<u64> for StatusCode {
 
     fn try_from(value: u64) -> Result<Self, Self::Error> {
         let value = u16::try_from(value).map_err(|_| InvalidStatusCode::OutOfRange)?;
-        StatusCode::from_u16(value)
+        StatusCode::try_from(value)
     }
 }
 
@@ -507,7 +500,7 @@ impl TryFrom<i128> for StatusCode {
 
     fn try_from(value: i128) -> Result<Self, Self::Error> {
         let value = u16::try_from(value).map_err(|_| InvalidStatusCode::OutOfRange)?;
-        StatusCode::from_u16(value as u16)
+        StatusCode::try_from(value as u16)
     }
 }
 
@@ -516,7 +509,7 @@ impl TryFrom<u128> for StatusCode {
 
     fn try_from(value: u128) -> Result<Self, Self::Error> {
         let value = u16::try_from(value).map_err(|_| InvalidStatusCode::OutOfRange)?;
-        StatusCode::from_u16(value)
+        StatusCode::try_from(value)
     }
 }
 
