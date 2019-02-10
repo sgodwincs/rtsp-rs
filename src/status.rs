@@ -37,7 +37,7 @@ macro_rules! status_codes {
         /// [[RFC7826, Section 17]](https://tools.ietf.org/html/rfc7826#section-17)).
         ///
         /// Although the status code is represented as a `u16`, only values between [100, 599]
-        /// should be used since only these are defined as valid status codes with a status class by
+        /// can be used since only these are defined as valid status codes with a status class by
         /// RTSP.
         ///
         /// # Examples
