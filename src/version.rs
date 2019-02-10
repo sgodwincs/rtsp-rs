@@ -237,20 +237,16 @@ pub enum InvalidVersion {
 
 impl Display for InvalidVersion {
     fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
-        formatter.write_str(self.description())
-    }
-}
-
-impl Error for InvalidVersion {
-    fn description(&self) -> &str {
         use self::InvalidVersion::*;
 
         match *self {
-            Invalid => "invalid RTSP version",
-            Unknown => "unknown RTSP version",
+            Invalid => write!(formatter, "invalid RTSP version"),
+            Unknown => write!(formatter, "unknown RTSP version"),
         }
     }
 }
+
+impl Error for InvalidVersion {}
 
 impl From<!> for InvalidVersion {
     fn from(value: !) -> Self {

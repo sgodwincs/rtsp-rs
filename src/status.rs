@@ -98,7 +98,7 @@ macro_rules! status_codes {
                 )+
                     Extension(_) => None
                 }
-            } 
+            }
         }
 
         impl From<StatusCode> for u16 {
@@ -564,21 +564,17 @@ pub enum InvalidStatusCode {
 
 impl fmt::Display for InvalidStatusCode {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str(self.description())
-    }
-}
-
-impl Error for InvalidStatusCode {
-    fn description(&self) -> &str {
         use self::InvalidStatusCode::*;
 
         match self {
-            Invalid => "invalid RTSP status code",
-            OutOfRange => "out of range RTSP status code",
-            Removed => "removed status codes cannot be used",
+            Invalid => write!(formatter, "invalid RTSP status code"),
+            OutOfRange => write!(formatter, "out of range RTSP status code"),
+            Removed => write!(formatter, "removed status codes cannot be used"),
         }
     }
 }
+
+impl Error for InvalidStatusCode {}
 
 impl From<!> for InvalidStatusCode {
     fn from(value: !) -> Self {

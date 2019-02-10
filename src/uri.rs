@@ -1421,21 +1421,17 @@ pub enum InvalidAuthority {
 
 impl Display for InvalidAuthority {
     fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
-        formatter.write_str(self.description())
-    }
-}
-
-impl Error for InvalidAuthority {
-    fn description(&self) -> &str {
         use self::InvalidAuthority::*;
 
         match self {
-            InvalidHost(invalid_host) => invalid_host.description(),
-            InvalidPort(invalid_port) => invalid_port.description(),
-            InvalidUserInfo(invalid_user_info) => invalid_user_info.description(),
+            InvalidHost(invalid_host) => write!(formatter, "{}", invalid_host),
+            InvalidPort(invalid_port) => write!(formatter, "{}", invalid_port),
+            InvalidUserInfo(invalid_user_info) => write!(formatter, "{}", invalid_user_info),
         }
     }
 }
+
+impl Error for InvalidAuthority {}
 
 impl From<!> for InvalidAuthority {
     fn from(value: !) -> Self {
@@ -1506,24 +1502,22 @@ pub enum InvalidHost {
 
 impl Display for InvalidHost {
     fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
-        formatter.write_str(self.description())
-    }
-}
-
-impl Error for InvalidHost {
-    fn description(&self) -> &str {
         use self::InvalidHost::*;
 
         match self {
-            AddressMechanismNotSupported => "address mechanism not supported",
-            EmptyHost => "empty host",
-            InvalidIPv4OrRegisteredNameCharacter => "invalid IPv4 or registered name character",
-            InvalidIPv6Character => "invalid IPv6 character",
-            InvalidIPv6Format => "invalid IPv6 format",
-            InvalidIPvFutureCharacter => "invalid IPvFuture character",
+            AddressMechanismNotSupported => write!(formatter, "address mechanism not supported"),
+            EmptyHost => write!(formatter, "empty host"),
+            InvalidIPv4OrRegisteredNameCharacter => {
+                write!(formatter, "invalid IPv4 or registered name character")
+            }
+            InvalidIPv6Character => write!(formatter, "invalid IPv6 character"),
+            InvalidIPv6Format => write!(formatter, "invalid IPv6 format"),
+            InvalidIPvFutureCharacter => write!(formatter, "invalid IPvFuture character"),
         }
     }
 }
+
+impl Error for InvalidHost {}
 
 impl From<!> for InvalidHost {
     fn from(value: !) -> Self {
@@ -1585,26 +1579,22 @@ pub enum InvalidRequestURI {
 
 impl Display for InvalidRequestURI {
     fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
-        formatter.write_str(self.description())
-    }
-}
-
-impl Error for InvalidRequestURI {
-    fn description(&self) -> &str {
         use self::InvalidRequestURI::*;
 
         match self {
-            InvalidAuthority(invalid_authority) => invalid_authority.description(),
-            InvalidPath(invalid_path) => invalid_path.description(),
-            InvalidQuery(invalid_query) => invalid_query.description(),
-            InvalidRelativeReference => "invalid relative reference",
-            InvalidScheme(invalid_scheme) => invalid_scheme.description(),
-            MissingAuthority => "missing authority",
-            MissingPath => "missing path",
-            MissingScheme => "missing scheme",
+            InvalidAuthority(invalid_authority) => write!(formatter, "{}", invalid_authority),
+            InvalidPath(invalid_path) => write!(formatter, "{}", invalid_path),
+            InvalidQuery(invalid_query) => write!(formatter, "{}", invalid_query),
+            InvalidRelativeReference => write!(formatter, "invalid relative reference"),
+            InvalidScheme(invalid_scheme) => write!(formatter, "{}", invalid_scheme),
+            MissingAuthority => write!(formatter, "missing authority"),
+            MissingPath => write!(formatter, "missing path"),
+            MissingScheme => write!(formatter, "missing scheme"),
         }
     }
 }
+
+impl Error for InvalidRequestURI {}
 
 impl From<!> for InvalidRequestURI {
     fn from(value: !) -> Self {
@@ -1686,22 +1676,20 @@ pub enum InvalidScheme {
 
 impl Display for InvalidScheme {
     fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
-        formatter.write_str(self.description())
-    }
-}
-
-impl Error for InvalidScheme {
-    fn description(&self) -> &str {
         use self::InvalidScheme::*;
 
         match self {
-            CannotBeEmpty => "scheme cannot be empty",
-            InvalidCharacter => "invalid scheme character",
-            MustStartWithAlphabetic => "scheme must start with alphabetic character",
-            NonRTSPScheme => "non-RTSP scheme",
+            CannotBeEmpty => write!(formatter, "scheme cannot be empty"),
+            InvalidCharacter => write!(formatter, "invalid scheme character"),
+            MustStartWithAlphabetic => {
+                write!(formatter, "scheme must start with alphabetic character")
+            }
+            NonRTSPScheme => write!(formatter, "non-RTSP scheme"),
         }
     }
 }
+
+impl Error for InvalidScheme {}
 
 impl From<!> for InvalidScheme {
     fn from(value: !) -> Self {
