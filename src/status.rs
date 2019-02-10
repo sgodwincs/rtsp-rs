@@ -21,6 +21,7 @@
 
 use std::cmp::Ordering;
 use std::convert::TryFrom;
+use std::ops::Deref;
 use std::error::Error;
 use std::fmt::{self, Debug, Display, Formatter};
 
@@ -259,7 +260,7 @@ impl StatusCode {
 
 impl Debug for StatusCode {
     fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
-        Debug::fmt(&u16::from(*self), formatter)
+        write!(formatter, "{}", *self)
     }
 }
 
@@ -271,7 +272,7 @@ impl Default for StatusCode {
 
 impl Display for StatusCode {
     fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
-        Display::fmt(&u16::from(*self), formatter)
+        write!(formatter, "{}", *self)
     }
 }
 
@@ -517,6 +518,14 @@ impl TryFrom<u128> for StatusCode {
 /// standardized status codes.
 #[derive(Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct ExtensionStatusCode(u16);
+
+impl Deref for ExtensionStatusCode {
+    type Target = u16;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 /// Represents the class that a status code falls under.
 /// [[RFC7826, Section 17]](https://tools.ietf.org/html/rfc7826#section-17)

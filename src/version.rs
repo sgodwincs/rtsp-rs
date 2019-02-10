@@ -113,7 +113,7 @@ impl AsRef<str> for Version {
 
 impl Debug for Version {
     fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
-        formatter.write_str(self.as_str())
+        write!(formatter, "{}", self.as_str())
     }
 }
 
@@ -125,7 +125,7 @@ impl Default for Version {
 
 impl Display for Version {
     fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
-        formatter.write_str(self.as_str())
+        write!(formatter, "{}", self.as_str())
     }
 }
 
