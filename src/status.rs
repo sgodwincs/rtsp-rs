@@ -567,8 +567,8 @@ impl fmt::Display for InvalidStatusCode {
         use self::InvalidStatusCode::*;
 
         match self {
-            Invalid => write!(formatter, "invalid RTSP status code"),
-            OutOfRange => write!(formatter, "out of range RTSP status code"),
+            Invalid => write!(formatter, "invalid status code"),
+            OutOfRange => write!(formatter, "out of range status code"),
             Removed => write!(formatter, "removed status codes cannot be used"),
         }
     }

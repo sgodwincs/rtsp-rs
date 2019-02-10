@@ -240,8 +240,8 @@ impl Display for InvalidVersion {
         use self::InvalidVersion::*;
 
         match *self {
-            Invalid => write!(formatter, "invalid RTSP version"),
-            Unknown => write!(formatter, "unknown RTSP version"),
+            Invalid => write!(formatter, "invalid version"),
+            Unknown => write!(formatter, "unknown version"),
         }
     }
 }
