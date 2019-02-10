@@ -1548,7 +1548,7 @@ impl From<InvalidURIHost> for InvalidHost {
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub enum InvalidRequestURI {
     /// The authority component of the relative reference was invalid.
