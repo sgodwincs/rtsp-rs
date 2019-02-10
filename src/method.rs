@@ -271,38 +271,51 @@ impl<'a> TryFrom<&'a [u8]> for Method {
     fn try_from(value: &'a [u8]) -> Result<Self, Self::Error> {
         use self::Method::*;
 
-        let value = value.to_ascii_uppercase();
+        macro_rules! check_method {
+            ($method:ident) => {
+                let bytes = $method.as_str().as_bytes();
+                let starts_with = value
+                    .iter()
+                    .take(bytes.len())
+                    .map(|byte| byte.to_ascii_uppercase())
+                    .eq(bytes.iter().cloned());
+
+                if starts_with && value.len() == bytes.len() {
+                    return Ok($method);
+                }
+            };
+        }
 
         match value.len() {
-            4 => match value.as_slice() {
-                b"PLAY" => Ok(Play),
-                _ => Method::extension(value.as_slice()),
-            },
-            5 => match value.as_slice() {
-                b"PAUSE" => Ok(Pause),
-                b"SETUP" => Ok(Setup),
-                _ => Method::extension(value.as_slice()),
-            },
-            7 => match value.as_slice() {
-                b"OPTIONS" => Ok(Options),
-                _ => Method::extension(value.as_slice()),
-            },
-            8 => match value.as_slice() {
-                b"DESCRIBE" => Ok(Describe),
-                b"REDIRECT" => Ok(Redirect),
-                b"TEARDOWN" => Ok(Teardown),
-                _ => Method::extension(value.as_slice()),
-            },
-            11 => match value.as_slice() {
-                b"PLAY_NOTIFY" => Ok(PlayNotify),
-                _ => Method::extension(value.as_slice()),
-            },
-            13 => match value.as_slice() {
-                b"GET_PARAMETER" => Ok(GetParameter),
-                b"SET_PARAMETER" => Ok(SetParameter),
-                _ => Method::extension(value.as_slice()),
-            },
-            _ => Method::extension(value.as_slice()),
+            4 => {
+                check_method!(Play);
+                Method::extension(value)
+            }
+            5 => {
+                check_method!(Pause);
+                check_method!(Setup);
+                Method::extension(value)
+            }
+            7 => {
+                check_method!(Options);
+                Method::extension(value)
+            }
+            8 => {
+                check_method!(Describe);
+                check_method!(Redirect);
+                check_method!(Teardown);
+                Method::extension(value)
+            }
+            11 => {
+                check_method!(PlayNotify);
+                Method::extension(value)
+            }
+            13 => {
+                check_method!(GetParameter);
+                check_method!(SetParameter);
+                Method::extension(value)
+            }
+            _ => Method::extension(value),
         }
     }
 }
