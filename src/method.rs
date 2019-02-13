@@ -1,8 +1,7 @@
 //! RTSP Method
 //!
-//! This module contains RTSP-method related structs, errors, and such. The main type of this
-//! module, `Method`, is also re-exported at the root of the crate as `rtsp::Method` and is
-//! primarily intended to be imported through that location.
+//! This module contains RTSP-method related structs, errors, and such. Each variant on the
+//! [`Method`] type represents either a specific standardized method or a custom method.
 //!
 //! # Examples
 //!
@@ -17,14 +16,16 @@
 //! assert_eq!(Method::Describe.as_str(), "DESCRIBE");
 //! ```
 
-use ascii::AsciiString;
 use std::convert::{AsRef, TryFrom};
 use std::error::Error;
-use std::fmt;
+use std::fmt::{self, Debug, Display, Formatter};
+use std::ops::Deref;
+use std::str;
 
-use crate::syntax::is_token;
+use crate::syntax;
 
-/// An RTSP request method.
+/// An RTSP request method (as defined in
+/// [[RFC7826, Section 13]](https://tools.ietf.org/html/rfc7826#section-13)).
 ///
 /// Each variant (excluding `Extension`) represents a standardized RTSP method.
 ///
@@ -122,25 +123,12 @@ impl Method {
         }
     }
 
-    /// A helper function that creates a new `Method` instance with the given method name extension.
-    /// It first checks to see if the method name is valid, and if not, it will return an error.
-    fn extension(name: &[u8]) -> Result<Method, InvalidMethod> {
-        if !Method::is_valid_method_name(name) {
-            return Err(InvalidMethod);
-        }
-
-        // Unsafe Justification
-        //
-        // The method above [`Method::is_valid_method_name`] ensures that the name is valid which
-        // implies that it is a valid ASCII string.
-
-        let name = unsafe { AsciiString::from_ascii_unchecked(name) };
-        Ok(Method::Extension(ExtensionMethod(name)))
-    }
-
-    /// Returns whether the given method name is valid. Based on
-    /// [[RFC7826, Section 20.1](https://tools.ietf.org/html/rfc7826#section-20.1)], a method name
-    /// follows the following rules:
+    /// A helper function that creates a new [`Method`] instance with the given method name
+    /// extension. It first checks to see if the method name is valid, and if not, it will return an
+    /// error.
+    ///
+    /// Based on, [[RFC7826, Section 20.1](https://tools.ietf.org/html/rfc7826#section-20.1)], a
+    /// method name follows the following rules:
     ///
     /// ```text
     /// token = 1*(%x21 / %x23-27 / %x2A-2B / %x2D-2E / %x30-39
@@ -161,13 +149,29 @@ impl Method {
     /// ```
     ///
     /// There is an exception not covered from the above ABNF, specifically, method names cannot
-    /// start with `$`.
-    fn is_valid_method_name(name: &[u8]) -> bool {
-        if name.is_empty() || name[0] == b'$' {
-            return false;
+    /// start with `'$'`.
+    fn extension(value: &[u8]) -> Result<Method, InvalidMethod> {
+        if value.is_empty() {
+            return Err(InvalidMethod::CannotBeEmpty);
         }
 
-        is_token(name)
+        if value[0] == b'$' {
+            return Err(InvalidMethod::CannotStartWithDollarSign);
+        }
+
+        if !syntax::is_token(value) {
+            return Err(InvalidMethod::InvalidCharacter);
+        }
+
+        // Unsafe: The function above [`syntax::is_token`] ensures that the value is valid ASCII-US.
+        let value = unsafe { str::from_utf8_unchecked(value) }.to_ascii_uppercase();
+        Ok(Method::Extension(ExtensionMethod(value)))
+    }
+}
+
+impl AsRef<[u8]> for Method {
+    fn as_ref(&self) -> &[u8] {
+        self.as_str().as_bytes()
     }
 }
 
@@ -177,98 +181,76 @@ impl AsRef<str> for Method {
     }
 }
 
-/// Performs equality checking of a `Method` with a `str`. This check is case insensitive.
-///
-/// # Examples
-///
-/// ```
-/// # #![feature(try_from)]
-/// #
-/// use std::convert::TryFrom;
-///
-/// use rtsp::Method;
-///
-/// assert_eq!(Method::try_from("eXtEnSiOn").unwrap(), *"exTENSION");
-/// ```
+impl Debug for Method {
+    fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
+        write!(formatter, "{}", self.as_str())
+    }
+}
+
+impl Display for Method {
+    fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
+        write!(formatter, "{}", self.as_str())
+    }
+}
+
+impl From<Method> for String {
+    fn from(value: Method) -> Self {
+        value.to_string()
+    }
+}
+
+impl PartialEq<[u8]> for Method {
+    fn eq(&self, other: &[u8]) -> bool {
+        self.as_str().as_bytes().eq_ignore_ascii_case(other)
+    }
+}
+
+impl PartialEq<Method> for [u8] {
+    fn eq(&self, other: &Method) -> bool {
+        self.eq_ignore_ascii_case(other.as_str().as_bytes())
+    }
+}
+
+impl<'method> PartialEq<&'method [u8]> for Method {
+    fn eq(&self, other: &&'method [u8]) -> bool {
+        self.as_str().as_bytes().eq_ignore_ascii_case(other)
+    }
+}
+
+impl<'method> PartialEq<Method> for &'method [u8] {
+    fn eq(&self, other: &Method) -> bool {
+        self.eq_ignore_ascii_case(other.as_str().as_bytes())
+    }
+}
+
 impl PartialEq<str> for Method {
     fn eq(&self, other: &str) -> bool {
-        self.as_ref() == other.to_ascii_uppercase()
+        self.as_str().eq_ignore_ascii_case(other)
     }
 }
 
-/// Performs equality checking of a `Method` with a `&str`. This check is case insensitive.
-///
-/// # Examples
-///
-/// ```
-/// # #![feature(try_from)]
-/// #
-/// use std::convert::TryFrom;
-///
-/// use rtsp::Method;
-///
-/// assert_eq!(Method::try_from("extension").unwrap(), "extension");
-/// ```
-impl<'a> PartialEq<&'a str> for Method {
-    fn eq(&self, other: &&'a str) -> bool {
-        self.as_ref() == (*other).to_ascii_uppercase()
+impl PartialEq<Method> for str {
+    fn eq(&self, other: &Method) -> bool {
+        self.eq_ignore_ascii_case(other.as_str())
     }
 }
 
-impl fmt::Debug for Method {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.as_ref())
+impl<'method> PartialEq<&'method str> for Method {
+    fn eq(&self, other: &&'method str) -> bool {
+        self.as_str().eq_ignore_ascii_case(other)
     }
 }
 
-impl fmt::Display for Method {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.as_ref())
+impl<'method> PartialEq<Method> for &'method str {
+    fn eq(&self, other: &Method) -> bool {
+        self.eq_ignore_ascii_case(other.as_str())
     }
 }
 
-/// Provides a fallible conversion from a byte slice to a `Method`. Note that you cannot do the
-/// following:
-///
-/// ```compile_fail
-/// let play = Method::try_from(b"PLAY").unwrap();
-/// ```
-///
-/// This is because `b"PLAY"` is of type `&[u8; 4]` and so it must be converted to `&[u8]` in order
-/// to perform the conversion. Another `TryFrom` implementation from `&[u8, N: usize]` will be
-/// provided once constant generics land on nightly.
-impl<'a> TryFrom<&'a [u8]> for Method {
+impl<'method> TryFrom<&'method [u8]> for Method {
     type Error = InvalidMethod;
 
-    /// Converts a `&[u8]` to an RTSP method. The method name must not start with `$` and must
-    /// contain only valid token characters. Since valid token characters includes only a subset of
-    /// the ASCII-US character set, care should be taken when converting a UTF-8 encoded string to a
-    /// method name.
-    ///
-    /// The conversion is case insensitive, but the method name is converted to uppercase.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # #![feature(try_from)]
-    /// #
-    /// use std::convert::TryFrom;
-    ///
-    /// use rtsp::Method;
-    ///
-    /// let play = Method::try_from(&b"PLAY"[..]).unwrap();
-    /// assert_eq!(play, Method::Play);
-    ///
-    /// let describe = Method::try_from(&b"describe"[..]).unwrap();
-    /// assert_eq!(describe, Method::Describe);
-    ///
-    /// let extension = Method::try_from(&b"Ext"[..]).unwrap();
-    /// assert_eq!(extension.as_str(), "EXT");
-    ///
-    /// let error = Method::try_from(&b"$Ext"[..]);
-    /// assert!(error.is_err());
-    /// ```
-    fn try_from(value: &'a [u8]) -> Result<Self, Self::Error> {
+    fn try_from(value: &'method [u8]) -> Result<Self, Self::Error> {
         use self::Method::*;
 
         macro_rules! check_method {
@@ -320,72 +302,96 @@ impl<'a> TryFrom<&'a [u8]> for Method {
     }
 }
 
-impl<'a> TryFrom<&'a str> for Method {
+impl<'method> TryFrom<&'method str> for Method {
     type Error = InvalidMethod;
 
-    fn try_from(value: &'a str) -> Result<Self, Self::Error> {
+    fn try_from(value: &'method str) -> Result<Self, Self::Error> {
         Method::try_from(value.as_bytes())
     }
 }
 
 /// A wrapper type used to avoid users creating extension methods that are actually standardized
 /// methods.
-#[derive(Clone, Eq, Hash, PartialEq)]
-pub struct ExtensionMethod(AsciiString);
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct ExtensionMethod(String);
 
-impl fmt::Debug for ExtensionMethod {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.0)
+impl AsRef<[u8]> for ExtensionMethod {
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_bytes()
     }
 }
 
-impl fmt::Display for ExtensionMethod {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.0)
+impl AsRef<str> for ExtensionMethod {
+    fn as_ref(&self) -> &str {
+        &self.0
     }
 }
 
-/// Performs equality checking of a `ExtensionMethod` with a `str`. This check is case insensitive.
-///
-/// # Examples
-///
-/// ```
-/// # #![feature(try_from)]
-/// #
-/// use std::convert::TryFrom;
-///
-/// use rtsp::Method;
-///
-/// match Method::try_from("extension").unwrap() {
-///     Method::Extension(extension) => assert_eq!(extension, *"eXtEnSiOn"),
-///     _ => panic!("expected extension method")
-/// }
-/// ```
+impl Deref for ExtensionMethod {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Display for ExtensionMethod {
+    fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
+        write!(formatter, "{}", self.0)
+    }
+}
+
+impl From<ExtensionMethod> for String {
+    fn from(value: ExtensionMethod) -> Self {
+        value.to_string()
+    }
+}
+
+impl PartialEq<[u8]> for ExtensionMethod {
+    fn eq(&self, other: &[u8]) -> bool {
+        self.as_str().as_bytes().eq_ignore_ascii_case(other)
+    }
+}
+
+impl PartialEq<ExtensionMethod> for [u8] {
+    fn eq(&self, other: &ExtensionMethod) -> bool {
+        self.eq_ignore_ascii_case(other.as_str().as_bytes())
+    }
+}
+
+impl<'method> PartialEq<&'method [u8]> for ExtensionMethod {
+    fn eq(&self, other: &&'method [u8]) -> bool {
+        self.as_str().as_bytes().eq_ignore_ascii_case(other)
+    }
+}
+
+impl<'method> PartialEq<ExtensionMethod> for &'method [u8] {
+    fn eq(&self, other: &ExtensionMethod) -> bool {
+        self.eq_ignore_ascii_case(other.as_str().as_bytes())
+    }
+}
+
 impl PartialEq<str> for ExtensionMethod {
     fn eq(&self, other: &str) -> bool {
-        self.0 == other.to_ascii_uppercase()
+        self.as_str().eq_ignore_ascii_case(other)
     }
 }
 
-/// Performs equality checking of a `ExtensionMethod` with a `&str`. This check is case insensitive.
-///
-/// # Examples
-///
-/// ```
-/// # #![feature(try_from)]
-/// #
-/// use std::convert::TryFrom;
-///
-/// use rtsp::Method;
-///
-/// match Method::try_from("extension").unwrap() {
-///     Method::Extension(extension) => assert_eq!(extension, "eXtEnSiOn"),
-///     _ => panic!("expected extension method")
-/// }
-/// ```
-impl<'a> PartialEq<&'a str> for ExtensionMethod {
-    fn eq(&self, other: &&'a str) -> bool {
-        self.0 == (*other).to_ascii_uppercase()
+impl PartialEq<ExtensionMethod> for str {
+    fn eq(&self, other: &ExtensionMethod) -> bool {
+        self.eq_ignore_ascii_case(other.as_str())
+    }
+}
+
+impl<'method> PartialEq<&'method str> for ExtensionMethod {
+    fn eq(&self, other: &&'method str) -> bool {
+        self.as_str().eq_ignore_ascii_case(other)
+    }
+}
+
+impl<'method> PartialEq<ExtensionMethod> for &'method str {
+    fn eq(&self, other: &ExtensionMethod) -> bool {
+        self.eq_ignore_ascii_case(other.as_str())
     }
 }
 
@@ -412,21 +418,37 @@ impl ExtensionMethod {
     }
 }
 
-/// A possible error value when converting to a `Method` from a `&[u8]` or `&str`.
-///
-/// This error indicates that the method name was of size 0, started with `$`, or contained invalid
-/// token characters.
+/// A possible error value when converting to a [`Method`] from a `&[u8]` or `&str`.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub struct InvalidMethod;
+#[non_exhaustive]
+pub enum InvalidMethod {
+    // The method was empty.
+    CannotBeEmpty,
 
-impl fmt::Display for InvalidMethod {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.description())
+    // The method started with `'$'`. This is not allowed because interleaved RTP messages through
+    // RTSP are indicated by this.
+    CannotStartWithDollarSign,
+
+    // The method contained an invalid character.
+    InvalidCharacter,
+}
+
+impl Display for InvalidMethod {
+    fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
+        use self::InvalidMethod::*;
+
+        match self {
+            CannotBeEmpty => write!(formatter, "method cannot be empty"),
+            CannotStartWithDollarSign => write!(formatter, "method cannot start with '$'"),
+            InvalidCharacter => write!(formatter, "invalid method character"),
+        }
     }
 }
 
-impl Error for InvalidMethod {
-    fn description(&self) -> &str {
-        "invalid RTSP method"
+impl Error for InvalidMethod {}
+
+impl From<!> for InvalidMethod {
+    fn from(value: !) -> Self {
+        value
     }
 }
