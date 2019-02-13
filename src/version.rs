@@ -129,7 +129,7 @@ impl Display for Version {
     }
 }
 
-impl<'query> From<Version> for String {
+impl From<Version> for String {
     fn from(value: Version) -> Self {
         value.to_string()
     }
@@ -141,19 +141,19 @@ impl PartialEq<[u8]> for Version {
     }
 }
 
-impl<'query> PartialEq<Version> for [u8] {
+impl PartialEq<Version> for [u8] {
     fn eq(&self, other: &Version) -> bool {
         self.eq_ignore_ascii_case(other.as_str().as_bytes())
     }
 }
 
-impl<'a> PartialEq<&'a [u8]> for Version {
-    fn eq(&self, other: &&'a [u8]) -> bool {
+impl<'version> PartialEq<&'version [u8]> for Version {
+    fn eq(&self, other: &&'version [u8]) -> bool {
         self.as_str().as_bytes().eq_ignore_ascii_case(other)
     }
 }
 
-impl<'a, 'query> PartialEq<Version> for &'a [u8] {
+impl<'version> PartialEq<Version> for &'version [u8] {
     fn eq(&self, other: &Version) -> bool {
         self.eq_ignore_ascii_case(other.as_str().as_bytes())
     }
@@ -165,19 +165,19 @@ impl PartialEq<str> for Version {
     }
 }
 
-impl<'query> PartialEq<Version> for str {
+impl PartialEq<Version> for str {
     fn eq(&self, other: &Version) -> bool {
         self.eq_ignore_ascii_case(other.as_str())
     }
 }
 
-impl<'a> PartialEq<&'a str> for Version {
-    fn eq(&self, other: &&'a str) -> bool {
+impl<'version> PartialEq<&'version str> for Version {
+    fn eq(&self, other: &&'version str) -> bool {
         self.as_str().eq_ignore_ascii_case(other)
     }
 }
 
-impl<'a, 'query> PartialEq<Version> for &'a str {
+impl<'version> PartialEq<Version> for &'version str {
     fn eq(&self, other: &Version) -> bool {
         self.eq_ignore_ascii_case(other.as_str())
     }
@@ -225,6 +225,7 @@ impl<'version> TryFrom<&'version str> for Version {
 
 /// A possible error value when converting to a [`Version`] from a `&[u8]` or `&str`.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub enum InvalidVersion {
     /// This error indicates that the version was not of the form `"RTSP/*.*"` where `'*'` are 1
     /// digit numbers.

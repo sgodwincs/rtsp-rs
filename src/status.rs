@@ -21,9 +21,9 @@
 
 use std::cmp::Ordering;
 use std::convert::TryFrom;
-use std::ops::Deref;
 use std::error::Error;
 use std::fmt::{self, Debug, Display, Formatter};
+use std::ops::Deref;
 
 use crate::reason::ReasonPhrase;
 
@@ -426,10 +426,10 @@ impl PartialOrd for StatusCode {
     }
 }
 
-impl<'a> TryFrom<&'a [u8]> for StatusCode {
+impl<'status> TryFrom<&'status [u8]> for StatusCode {
     type Error = InvalidStatusCode;
 
-    fn try_from(value: &'a [u8]) -> Result<Self, Self::Error> {
+    fn try_from(value: &'status [u8]) -> Result<Self, Self::Error> {
         if value.len() != 3 {
             return Err(InvalidStatusCode::Invalid);
         }
@@ -443,10 +443,10 @@ impl<'a> TryFrom<&'a [u8]> for StatusCode {
     }
 }
 
-impl<'a> TryFrom<&'a str> for StatusCode {
+impl<'status> TryFrom<&'status str> for StatusCode {
     type Error = InvalidStatusCode;
 
-    fn try_from(value: &'a str) -> Result<Self, Self::Error> {
+    fn try_from(value: &'status str) -> Result<Self, Self::Error> {
         StatusCode::try_from(value.as_bytes())
     }
 }

@@ -1323,7 +1323,7 @@ impl PartialEq<[u8]> for Scheme {
     }
 }
 
-impl<'query> PartialEq<Scheme> for [u8] {
+impl PartialEq<Scheme> for [u8] {
     fn eq(&self, other: &Scheme) -> bool {
         self.eq_ignore_ascii_case(other.as_str().as_bytes())
     }
@@ -1335,7 +1335,7 @@ impl<'a> PartialEq<&'a [u8]> for Scheme {
     }
 }
 
-impl<'a, 'query> PartialEq<Scheme> for &'a [u8] {
+impl<'a> PartialEq<Scheme> for &'a [u8] {
     fn eq(&self, other: &Scheme) -> bool {
         self.eq_ignore_ascii_case(other.as_str().as_bytes())
     }
@@ -1347,7 +1347,7 @@ impl PartialEq<str> for Scheme {
     }
 }
 
-impl<'query> PartialEq<Scheme> for str {
+impl PartialEq<Scheme> for str {
     fn eq(&self, other: &Scheme) -> bool {
         self.eq_ignore_ascii_case(other.as_str())
     }
@@ -1359,7 +1359,7 @@ impl<'a> PartialEq<&'a str> for Scheme {
     }
 }
 
-impl<'a, 'query> PartialEq<Scheme> for &'a str {
+impl<'a> PartialEq<Scheme> for &'a str {
     fn eq(&self, other: &Scheme) -> bool {
         self.eq_ignore_ascii_case(other.as_str())
     }
