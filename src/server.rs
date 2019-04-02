@@ -31,6 +31,8 @@ impl ClientHandler {
         &mut self,
         request: Request<BytesMut>,
     ) -> impl Future<Item = Response<BytesMut>, Error = io::Error> {
+        let request = request.map(|_| BytesMut::new());
+
         let mut builder = Response::builder();
         builder
             .typed_header(SUPPORTED_METHODS.iter().cloned().collect::<Public>())
