@@ -1,10 +1,11 @@
-use ascii::{AsciiChar, AsciiString};
 use chrono::{offset, DateTime, Utc};
-use rand::{thread_rng, Rng};
+use rand::seq::SliceRandom;
+use rand::thread_rng;
 use std::convert::TryFrom;
 use std::error::Error;
+use std::fmt::{self, Display, Formatter};
+use std::str;
 use std::time::Duration;
-use std::{fmt, str};
 
 pub const DEFAULT_SESSION_TIMEOUT: Duration = Duration::from_secs(60);
 pub const MAX_SESSION_TIMEOUT: u64 = 9_999_999_999_999_999_999;
@@ -19,20 +20,18 @@ pub const SESSION_ID_GENERATED_LENGTH: usize = 22;
 
 /// A wrapper type used to avoid users creating invalid session identifiers.
 #[derive(Clone, Eq, Hash, PartialEq)]
-pub struct SessionID(AsciiString);
+pub struct SessionID(String);
 
 impl SessionID {
     pub fn random() -> Self {
         let mut rng = thread_rng();
-        let mut session_id = AsciiString::with_capacity(SESSION_ID_GENERATED_LENGTH);
+        let mut session_id = String::with_capacity(SESSION_ID_GENERATED_LENGTH);
 
         for _ in 0..SESSION_ID_GENERATED_LENGTH {
-            let c = *rng
-                .choose(&SESSION_ID_ALPHABET)
+            let c = *SESSION_ID_ALPHABET
+                .choose(&mut rng)
                 .expect("`SESSION_ID_ALPHABET` should not be empty");
-            let c = AsciiChar::from(c)
-                .expect("None of the characters in the alphabet should be non ASCII");
-            session_id.push(c);
+            session_id.push(c as char);
         }
 
         SessionID(session_id)
@@ -43,11 +42,9 @@ impl SessionID {
     /// # Examples
     ///
     /// ```
-    /// # #![feature(try_from)]
-    /// #
     /// use std::convert::TryFrom;
     ///
-    /// use rtsp::SessionID;
+    /// use rtsp::session::SessionID;
     ///
     /// assert_eq!(
     ///     SessionID::try_from("QKyjN8nt2WqbWw4tIYof52").unwrap().as_str(),
@@ -82,11 +79,9 @@ impl fmt::Display for SessionID {
 /// # Examples
 ///
 /// ```
-/// # #![feature(try_from)]
-/// #
 /// use std::convert::TryFrom;
 ///
-/// use rtsp::SessionID;
+/// use rtsp::session::SessionID;
 ///
 /// assert_eq!(SessionID::try_from("QKyjN8nt2WqbWw4tIYof52").unwrap(), "QKyjN8nt2WqbWw4tIYof52");
 /// ```
@@ -101,11 +96,9 @@ impl PartialEq<str> for SessionID {
 /// # Examples
 ///
 /// ```
-/// # #![feature(try_from)]
-/// #
 /// use std::convert::TryFrom;
 ///
-/// use rtsp::SessionID;
+/// use rtsp::session::SessionID;
 ///
 /// assert_eq!(SessionID::try_from("QKyjN8nt2WqbWw4tIYof52").unwrap(), "QKyjN8nt2WqbWw4tIYof52");
 /// ```
@@ -115,53 +108,23 @@ impl<'a> PartialEq<&'a str> for SessionID {
     }
 }
 
-/// Provides a fallible conversion from a byte slice to a `SessionID`. Note that you cannot do
-/// the following:
-///
-/// ```compile_fail
-/// let session_id = SessionID::try_from(b"QKyjN8nt2WqbWw4tIYof52").unwrap();
-/// ```
-///
-/// This is because `b"QKyjN8nt2WqbWw4tIYof52"` is of type `&[u8; 22]` and so it must be converted
-/// to `&[u8]` in order to perform the conversion. Another `TryFrom` implementation from
-/// `&[u8, N: usize]` will be provided once constant generics land on nightly.
 impl<'a> TryFrom<&'a [u8]> for SessionID {
-    type Error = InvalidSessionID;
+    type Error = SessionIDError;
 
-    /// Converts a `&[u8]` to an RTSP session ID. The session ID must follow the following rules:
-    ///
-    /// ```text
-    /// UPALPHA = %x41-5A ; any US-ASCII uppercase letter "A".."Z"
-    /// LOALPHA = %x61-7A ; any US-ASCII lowercase letter "a".."z"
-    /// ALPHA = UPALPHA / LOALPHA
-    /// DIGIT = %x30-39 ; any US-ASCII digit "0".."9"
-    /// safe = "$" / "-" / "_" / "." / "+"
-    /// session-id =  1*256( ALPHA / DIGIT / safe )
-    /// ```
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # #![feature(try_from)]
-    /// #
-    /// use std::convert::TryFrom;
-    ///
-    /// use rtsp::SessionID;
-    ///
-    /// let session_id = SessionID::try_from(&b"QKyjN8nt2WqbWw4tIYof52"[..]).unwrap();
-    /// assert_eq!(session_id.as_str(), "QKyjN8nt2WqbWw4tIYof52");
-    ///
-    /// let error = SessionID::try_from(&b""[..]);
-    /// assert!(error.is_err());
-    /// ```
     fn try_from(value: &'a [u8]) -> Result<Self, Self::Error> {
+        use self::SessionIDError::*;
+
         // Although the syntax in the specification allows session IDs of length 1, it also states
         // earlier in the specfication that "Session identifiers are strings of a length between
         // 8-128 characters." Obviously, there is some disconnect here, so I will go with the more
         // secure approach.
 
-        if value.len() < 8 || value.len() > 256 {
-            return Err(InvalidSessionID);
+        if value.len() < 8 {
+            return Err(TooShort);
+        }
+
+        if value.len() > 256 {
+            return Err(TooLong);
         }
 
         for &b in value.iter() {
@@ -173,17 +136,17 @@ impl<'a> TryFrom<&'a [u8]> for SessionID {
                     && b != b'.'
                     && b != b'+')
             {
-                return Err(InvalidSessionID);
+                return Err(InvalidCharacter);
             }
         }
 
-        let value = unsafe { AsciiString::from_ascii_unchecked(value) };
+        let value = unsafe { str::from_utf8_unchecked(value) }.to_string();
         Ok(SessionID(value))
     }
 }
 
 impl<'a> TryFrom<&'a str> for SessionID {
-    type Error = InvalidSessionID;
+    type Error = SessionIDError;
 
     fn try_from(value: &'a str) -> Result<Self, Self::Error> {
         SessionID::try_from(value.as_bytes())
@@ -194,19 +157,25 @@ impl<'a> TryFrom<&'a str> for SessionID {
 ///
 /// This error indicates that the session ID was empty or contained invalid characters.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub struct InvalidSessionID;
+pub enum SessionIDError {
+    InvalidCharacter,
+    TooLong,
+    TooShort,
+}
 
-impl fmt::Display for InvalidSessionID {
-    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str(self.description())
+impl Display for SessionIDError {
+    fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
+        use self::SessionIDError::*;
+
+        match self {
+            InvalidCharacter => write!(formatter, "invalid session identifier character"),
+            TooLong => write!(formatter, "session identifier is too long"),
+            TooShort => write!(formatter, "session identifier is too short"),
+        }
     }
 }
 
-impl Error for InvalidSessionID {
-    fn description(&self) -> &str {
-        "invalid RTSP session identifier"
-    }
-}
+impl Error for SessionIDError {}
 
 pub trait Session {
     fn expire_time(&self) -> DateTime<Utc>;

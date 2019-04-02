@@ -1,12 +1,12 @@
-mod content_length;
-mod cseq;
-mod date;
-mod expires;
-mod public;
-mod session;
+pub mod content_length;
+pub mod cseq;
+pub mod date;
+pub mod expires;
+pub mod public;
+pub mod session;
 
-pub use self::content_length::{ContentLength, MAX_CONTENT_LENGTH};
-pub use self::cseq::{CSeq, MAX_CSEQ};
+pub use self::content_length::ContentLength;
+pub use self::cseq::CSeq;
 pub use self::date::Date;
 pub use self::expires::Expires;
 pub use self::public::Public;

@@ -1,25 +1,30 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeZone, Utc};
+use std::convert::Infallible;
+use std::error::Error;
+use std::fmt::{self, Display, Formatter};
 use std::iter::once;
 use std::ops::{Deref, DerefMut};
 
-use crate::header::common::parse_date_time;
-use crate::header::{HeaderName, HeaderValue, InvalidTypedHeader, TypedHeader};
+use crate::header::common::date::{self, DateTimeError};
+use crate::header::map::TypedHeader;
+use crate::header::name::HeaderName;
+use crate::header::value::HeaderValue;
 
 /// The `"Date"` typed header as described by
 /// [RFC7826](https://tools.ietf.org/html/rfc7826#section-18.21).
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Date(pub DateTime<Utc>);
+pub struct Date(DateTime<Utc>);
 
 impl Date {
     /// Constructs a new header set to the current date.
     pub fn new() -> Self {
-        Date::default()
+        Date(Utc::now())
     }
 }
 
 impl Default for Date {
     fn default() -> Self {
-        Date(Utc::now())
+        Date::new()
     }
 }
 
@@ -37,13 +42,17 @@ impl DerefMut for Date {
     }
 }
 
-impl TypedHeader for Date {
-    type DecodeError = InvalidTypedHeader;
-
-    /// Returns the statically assigned `HeaderName` for this header.
-    fn header_name() -> &'static HeaderName {
-        &HeaderName::Date
+impl<TTimeZone> From<DateTime<TTimeZone>> for Date
+where
+    TTimeZone: TimeZone,
+{
+    fn from(value: DateTime<TTimeZone>) -> Self {
+        Date(value.with_timezone(&Utc))
     }
+}
+
+impl TypedHeader for Date {
+    type DecodeError = DateError;
 
     /// Converts the raw header values to the [`Date`] header type. Based on the syntax
     /// provided by [RFC7826](https://tools.ietf.org/html/rfc7826#section-20) and
@@ -125,22 +134,20 @@ impl TypedHeader for Date {
     /// # Examples
     ///
     /// ```
-    /// # #![feature(try_from)]
-    /// #
     /// # extern crate chrono;
     /// # extern crate rtsp;
     /// #
     /// use chrono::{TimeZone, Utc};
     /// use std::convert::TryFrom;
     ///
-    /// use rtsp::*;
+    /// use rtsp::header::map::TypedHeader;
     /// use rtsp::header::types::Date;
-    /// use rtsp::header::TypedHeader;
+    /// use rtsp::header::value::HeaderValue;
     ///
     /// let raw_header: Vec<HeaderValue> = vec![];
     /// assert_eq!(Date::decode(&mut raw_header.iter()).unwrap(), None);
     ///
-    /// let typed_header = Date(Utc.ymd(2014, 7, 10).and_hms(9, 10, 11));
+    /// let typed_header = Date::from(Utc.ymd(2014, 7, 10).and_hms(9, 10, 11));
     /// let raw_header = vec![
     ///     HeaderValue::try_from("Thu, 10 Jul 2014 09:10:11 +0000").unwrap()
     /// ];
@@ -156,10 +163,10 @@ impl TypedHeader for Date {
         };
 
         if values.next().is_some() {
-            return Err(InvalidTypedHeader);
+            return Err(DateError::MoreThanOneHeader);
         }
 
-        let date_time = parse_date_time(value.as_str()).map_err(|_| InvalidTypedHeader)?;
+        let date_time = date::parse_date_time(value.as_str())?;
         Ok(Some(Date(date_time)))
     }
 
@@ -168,19 +175,17 @@ impl TypedHeader for Date {
     /// # Examples
     ///
     /// ```
-    /// # #![feature(try_from)]
-    /// #
     /// # extern crate chrono;
     /// # extern crate rtsp;
     /// #
     /// use chrono::{TimeZone, Utc};
     /// use std::convert::TryFrom;
     ///
-    /// use rtsp::*;
+    /// use rtsp::header::map::TypedHeader;
     /// use rtsp::header::types::Date;
-    /// use rtsp::header::TypedHeader;
+    /// use rtsp::header::value::HeaderValue;
     ///
-    /// let typed_header = Date(Utc.ymd(2014, 7, 10).and_hms(9, 10, 11));
+    /// let typed_header = Date::from(Utc.ymd(2014, 7, 10).and_hms(9, 10, 11));
     /// let expected_raw_header = vec![
     ///     HeaderValue::try_from("Thu, 10 Jul 2014 09:10:11 +0000").unwrap()
     /// ];
@@ -198,6 +203,47 @@ impl TypedHeader for Date {
         // guarantees valid ASCII-US (with no newlines), it satisfies the constraints.
 
         let value = self.format("%a, %e %b %Y %H:%M:%S %z").to_string();
-        values.extend(once(unsafe { HeaderValue::from_str_unchecked(value) }));
+        values.extend(once(unsafe { HeaderValue::from_string_unchecked(value) }));
+    }
+
+    /// Returns the statically assigned [`HeaderName`] for this header.
+    fn header_name() -> &'static HeaderName {
+        &HeaderName::Date
+    }
+}
+
+/// A possible error value when converting to a [`Date`] from [`HeaderName`]s.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
+pub enum DateError {
+    /// The `"Date"` header represented an invalid date time.
+    InvalidDateTime,
+
+    /// There was more than one `"Date"` header.
+    MoreThanOneHeader,
+}
+
+impl Display for DateError {
+    fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
+        use self::DateError::*;
+
+        match self {
+            InvalidDateTime => write!(formatter, "invalid date time"),
+            MoreThanOneHeader => write!(formatter, "more than one date header"),
+        }
+    }
+}
+
+impl Error for DateError {}
+
+impl From<Infallible> for DateError {
+    fn from(_: Infallible) -> Self {
+        DateError::InvalidDateTime
+    }
+}
+
+impl From<DateTimeError> for DateError {
+    fn from(_: DateTimeError) -> Self {
+        DateError::InvalidDateTime
     }
 }

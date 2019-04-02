@@ -1,17 +1,3 @@
-use regex::Regex;
-
-#[macro_use]
-macro_rules! byte_map {
-    ($($flag:expr,)*) => ([
-        $($flag != 0,)*
-    ])
-}
-
-lazy_static! {
-    static ref QUOTED_STRING_RE: Regex =
-        Regex::new(r#""((?:[ !#-\[\]-~]|[^[:ascii:]]|\\"|\\)*)""#).unwrap();
-}
-
 #[rustfmt::skip]
 pub const TOKEN_CHAR_MAP: [u8; 256] = [
  // 0     1     2     3     4     5     6     7     8     9     A     B     C     D     E     F
@@ -55,16 +41,6 @@ where
     true
 }
 
-/// A helper function used to get the inner text out of a quoted string. A quoted string must use
-/// double quotes and is encoded using UTF-8 with some exceptions regarding ASCII-US characters. Any
-/// use of `'\'` and `'"'` must be escaped with a preceding `'\'`. If the given string is not a
-/// valid quoted string, the return value will be `None`.
-pub fn extract_quoted_string(string: &str) -> Option<&str> {
-    QUOTED_STRING_RE
-        .find(string)
-        .map(|m| &string[m.start() + 1..m.end() - 1])
-}
-
 /// A helper function used to trim whitespace as it is used in
 /// [[RFC7826](https://tools.ietf.org/html/rfc7826)]. Specifically, whitespace includes `' '`,
 /// `'\t'`, and `"\r\n"`. The trim functions defined on the `str` slice do not seem to be enough to
@@ -99,39 +75,28 @@ pub fn trim_whitespace_right(mut string: &str) -> &str {
 
 #[cfg(test)]
 mod test {
-    use super::*;
+    use crate::syntax;
 
     #[test]
     fn test_is_token() {
-        assert_eq!(true, is_token("this-is_a_~token~"));
-        assert_eq!(true, is_token("token"));
-        assert_eq!(false, is_token("not a token"));
-    }
-
-    #[test]
-    fn test_extract_quoted_string() {
-        assert_eq!(Some(""), extract_quoted_string(r#""""#));
-        assert_eq!(Some("a"), extract_quoted_string(r#""a""#));
-        assert_eq!(None, extract_quoted_string(r#""this is a test value"#));
-        assert_eq!(
-            Some("this is a test value"),
-            extract_quoted_string(r#""this is a test value""#)
-        );
+        assert_eq!(true, syntax::is_token("this-is_a_~token~"));
+        assert_eq!(true, syntax::is_token("token"));
+        assert_eq!(false, syntax::is_token("not a token"));
     }
 
     #[test]
     fn test_trim_whitespace() {
         assert_eq!(
             "this is a test value",
-            trim_whitespace("this is a test value")
+            syntax::trim_whitespace("this is a test value")
         );
         assert_eq!(
             "this is a test value",
-            trim_whitespace("   this is a test value\t\r\n")
+            syntax::trim_whitespace("   this is a test value\t\r\n")
         );
         assert_eq!(
             "this is a test value\n",
-            trim_whitespace("this is a test value\n")
+            syntax::trim_whitespace("this is a test value\n")
         );
     }
 }

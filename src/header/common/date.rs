@@ -1,31 +1,27 @@
 use chrono::{DateTime, Datelike, FixedOffset, TimeZone, Utc, Weekday};
 use std::error::Error;
-use std::fmt;
+use std::fmt::{self, Display, Formatter};
 use std::str::Chars;
 
 /// A generic error type indicating that the parsing of the datetime failed.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub struct InvalidDateTime;
+pub struct DateTimeError;
 
-impl fmt::Display for InvalidDateTime {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", Error::description(self))
+impl Display for DateTimeError {
+    fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
+        write!(formatter, "invalid date time")
     }
 }
 
-impl Error for InvalidDateTime {
-    fn description(&self) -> &str {
-        "invalid date time"
-    }
-}
+impl Error for DateTimeError {}
 
 fn get_new_iter<'a, F>(
     value: &'a str,
     parse_function: F,
     bytes_parsed: &mut usize,
-) -> Result<Chars<'a>, InvalidDateTime>
+) -> Result<Chars<'a>, DateTimeError>
 where
-    F: Fn(&str) -> Result<(&str, &str), InvalidDateTime>,
+    F: Fn(&str) -> Result<(&str, &str), DateTimeError>,
 {
     let (part_1, part_2) = parse_function(value.split_at(*bytes_parsed).1)?;
     *bytes_parsed += part_1.len();
@@ -38,24 +34,24 @@ fn is_comment_text(char_: char) -> bool {
         || (char_ >= ']' && char_ <= '~')
 }
 
-fn parse_comment(value: &str) -> Result<(&str, &str), InvalidDateTime> {
+fn parse_comment(value: &str) -> Result<(&str, &str), DateTimeError> {
     let mut bytes_parsed = 0;
     let mut chars = value.chars();
 
-    if chars.next().ok_or(InvalidDateTime)? != '(' {
-        return Err(InvalidDateTime);
+    if chars.next().ok_or(DateTimeError)? != '(' {
+        return Err(DateTimeError);
     }
 
     bytes_parsed += 1;
 
     loop {
-        match chars.next().ok_or(InvalidDateTime)? {
+        match chars.next().ok_or(DateTimeError)? {
             ' ' | '\t' => chars = get_new_iter(value, parse_folding_whitespace, &mut bytes_parsed)?,
             '(' => chars = get_new_iter(value, parse_comment, &mut bytes_parsed)?,
             ')' => return Ok(value.split_at(bytes_parsed + 1)),
             '\\' => chars = get_new_iter(value, parse_quoted_pair, &mut bytes_parsed)?,
             char_ if is_comment_text(char_) => bytes_parsed += 1,
-            _ => return Err(InvalidDateTime),
+            _ => return Err(DateTimeError),
         }
     }
 }
@@ -63,7 +59,7 @@ fn parse_comment(value: &str) -> Result<(&str, &str), InvalidDateTime> {
 fn parse_comment_and_folding_whitespace(
     value: &str,
     optional: bool,
-) -> Result<(&str, &str), InvalidDateTime> {
+) -> Result<(&str, &str), DateTimeError> {
     let mut bytes_parsed = 0;
     let mut chars = value.chars();
     let mut first_found = false;
@@ -82,14 +78,14 @@ fn parse_comment_and_folding_whitespace(
                 return if first_found || optional {
                     Ok(value.split_at(bytes_parsed))
                 } else {
-                    Err(InvalidDateTime)
+                    Err(DateTimeError)
                 };
             }
         }
     }
 }
 
-fn parse_date(value: &str) -> Result<(u32, u32, i32, &str), InvalidDateTime> {
+fn parse_date(value: &str) -> Result<(u32, u32, i32, &str), DateTimeError> {
     let (day, value) = parse_day(value)?;
     let (_, value) = parse_comment_and_folding_whitespace(value, false)?;
     let (month, value) = parse_month(value)?;
@@ -99,20 +95,20 @@ fn parse_date(value: &str) -> Result<(u32, u32, i32, &str), InvalidDateTime> {
     Ok((day, month, year, value))
 }
 
-pub fn parse_date_time(value: &str) -> Result<DateTime<Utc>, InvalidDateTime> {
+pub fn parse_date_time(value: &str) -> Result<DateTime<Utc>, DateTimeError> {
     let (_, value) = parse_comment_and_folding_whitespace(value, true)?;
 
     let (weekday, value) = if value
         .chars()
         .next()
-        .ok_or(InvalidDateTime)?
+        .ok_or(DateTimeError)?
         .is_ascii_alphabetic()
     {
         let (weekday, value) = parse_day_of_week(value)?;
         let (_, value) = parse_comment_and_folding_whitespace(value, true)?;
 
-        if value.chars().next().ok_or(InvalidDateTime)? != ',' {
-            return Err(InvalidDateTime);
+        if value.chars().next().ok_or(DateTimeError)? != ',' {
+            return Err(DateTimeError);
         }
 
         let (_, value) = parse_comment_and_folding_whitespace(value.split_at(1).1, true)?;
@@ -130,45 +126,42 @@ pub fn parse_date_time(value: &str) -> Result<DateTime<Utc>, InvalidDateTime> {
     let offset = (offset / 100) * 3600 + (offset % 100) * 60;
 
     let date_time = FixedOffset::east_opt(offset)
-        .ok_or(InvalidDateTime)?
+        .ok_or(DateTimeError)?
         .ymd_opt(year, month, day)
         .and_hms_opt(hour, minute, second.unwrap_or(0))
         .single()
-        .ok_or(InvalidDateTime)?
+        .ok_or(DateTimeError)?
         .with_timezone(&Utc);
 
     if let Some(weekday) = weekday {
         if weekday != date_time.weekday() {
-            return Err(InvalidDateTime);
+            return Err(DateTimeError);
         }
     }
 
     Ok(date_time)
 }
 
-fn parse_day(value: &str) -> Result<(u32, &str), InvalidDateTime> {
+fn parse_day(value: &str) -> Result<(u32, &str), DateTimeError> {
     let mut chars = value.chars();
     let first_digit = chars
         .next()
-        .ok_or(InvalidDateTime)?
+        .ok_or(DateTimeError)?
         .to_digit(10)
-        .ok_or(InvalidDateTime)?;
+        .ok_or(DateTimeError)?;
 
-    match chars.next() {
-        Some(second_digit) => {
-            if let Some(second_digit) = second_digit.to_digit(10) {
-                return Ok((first_digit * 10 + second_digit, value.split_at(2).1));
-            }
+    if let Some(second_digit) = chars.next() {
+        if let Some(second_digit) = second_digit.to_digit(10) {
+            return Ok((first_digit * 10 + second_digit, value.split_at(2).1));
         }
-        _ => (),
     }
 
     Ok((first_digit, value.split_at(1).1))
 }
 
-fn parse_day_of_week(value: &str) -> Result<(Weekday, &str), InvalidDateTime> {
+fn parse_day_of_week(value: &str) -> Result<(Weekday, &str), DateTimeError> {
     if value.len() < 3 {
-        return Err(InvalidDateTime);
+        return Err(DateTimeError);
     }
 
     let (part_1, part_2) = value.split_at(3);
@@ -180,13 +173,13 @@ fn parse_day_of_week(value: &str) -> Result<(Weekday, &str), InvalidDateTime> {
         "thu" => Weekday::Thu,
         "fri" => Weekday::Fri,
         "sat" => Weekday::Sat,
-        _ => return Err(InvalidDateTime),
+        _ => return Err(DateTimeError),
     };
 
     Ok((weekday, part_2))
 }
 
-fn parse_folding_whitespace(value: &str) -> Result<(&str, &str), InvalidDateTime> {
+fn parse_folding_whitespace(value: &str) -> Result<(&str, &str), DateTimeError> {
     enum ParseState {
         CRLF,
         InitialWhitespace,
@@ -205,7 +198,7 @@ fn parse_folding_whitespace(value: &str) -> Result<(&str, &str), InvalidDateTime
                         bytes_parsed += 2;
                         parse_state = ParseState::Whitespace(true);
                     }
-                    _ => return Err(InvalidDateTime),
+                    _ => return Err(DateTimeError),
                 },
                 None | Some(_) => return Ok(value.split_at(bytes_parsed)),
             },
@@ -216,7 +209,7 @@ fn parse_folding_whitespace(value: &str) -> Result<(&str, &str), InvalidDateTime
                         bytes_parsed += 1;
                         required = false;
                     }
-                    _ if required => return Err(InvalidDateTime),
+                    _ if required => return Err(DateTimeError),
                     Some(&'\r') => {
                         parse_state = ParseState::CRLF;
                         break;
@@ -225,22 +218,22 @@ fn parse_folding_whitespace(value: &str) -> Result<(&str, &str), InvalidDateTime
                 }
             },
             ParseState::InitialWhitespace => {
-                let char_ = chars.next().ok_or(InvalidDateTime)?;
+                let char_ = chars.next().ok_or(DateTimeError)?;
                 bytes_parsed += 1;
 
                 if char_ == ' ' || char_ == '\t' {
                     parse_state = ParseState::Whitespace(false);
                 } else {
-                    return Err(InvalidDateTime);
+                    return Err(DateTimeError);
                 }
             }
         }
     }
 }
 
-fn parse_month(value: &str) -> Result<(u32, &str), InvalidDateTime> {
+fn parse_month(value: &str) -> Result<(u32, &str), DateTimeError> {
     if value.len() < 3 {
-        return Err(InvalidDateTime);
+        return Err(DateTimeError);
     }
 
     let (part_1, part_2) = value.split_at(3);
@@ -257,58 +250,60 @@ fn parse_month(value: &str) -> Result<(u32, &str), InvalidDateTime> {
         "oct" => 10,
         "nov" => 11,
         "dec" => 12,
-        _ => return Err(InvalidDateTime),
+        _ => return Err(DateTimeError),
     };
 
     Ok((month, part_2))
 }
 
-fn parse_quoted_pair(value: &str) -> Result<(&str, &str), InvalidDateTime> {
+fn parse_quoted_pair(value: &str) -> Result<(&str, &str), DateTimeError> {
     let mut chars = value.chars();
-    let char_1 = chars.next().ok_or(InvalidDateTime)?;
-    let char_2 = chars.next().ok_or(InvalidDateTime)?;
+    let char_1 = chars.next().ok_or(DateTimeError)?;
+    let char_2 = chars.next().ok_or(DateTimeError)?;
 
     if char_1 == '\\' && ((char_2 > '!' && char_2 < '~') || char_2 == ' ' || char_2 == '\t') {
         Ok(value.split_at(2))
     } else {
-        Err(InvalidDateTime)
+        Err(DateTimeError)
     }
 }
 
-fn parse_time(value: &str) -> Result<(u32, u32, Option<u32>, i32, &str), InvalidDateTime> {
+fn parse_time(value: &str) -> Result<(u32, u32, Option<u32>, i32, &str), DateTimeError> {
     let (hour, minute, second, value) = parse_time_of_day(value)?;
     let (_, value) = parse_comment_and_folding_whitespace(value, false)?;
     let (offset, value) = parse_time_zone(value)?;
     Ok((hour, minute, second, offset, value))
 }
 
-fn parse_time_of_day(value: &str) -> Result<(u32, u32, Option<u32>, &str), InvalidDateTime> {
-    fn parse_2_digit_number(value: &str) -> Result<(u32, &str), InvalidDateTime> {
+fn parse_time_of_day(value: &str) -> Result<(u32, u32, Option<u32>, &str), DateTimeError> {
+    fn parse_2_digit_number(value: &str) -> Result<(u32, &str), DateTimeError> {
         let mut chars = value.chars();
         let first_digit = chars
             .next()
-            .ok_or(InvalidDateTime)?
+            .ok_or(DateTimeError)?
             .to_digit(10)
-            .ok_or(InvalidDateTime)?;
+            .ok_or(DateTimeError)?;
         let second_digit = chars
             .next()
-            .ok_or(InvalidDateTime)?
+            .ok_or(DateTimeError)?
             .to_digit(10)
-            .ok_or(InvalidDateTime)?;
+            .ok_or(DateTimeError)?;
 
         Ok((first_digit * 10 + second_digit, value.split_at(2).1))
     }
 
-    fn parse_colon(original_value: &str, optional: bool) -> Result<&str, InvalidDateTime> {
+    fn parse_colon(original_value: &str, optional: bool) -> Result<&str, DateTimeError> {
         let (_, value) = parse_comment_and_folding_whitespace(original_value, true)?;
 
         match value.chars().next() {
             Some(':') => Ok(parse_comment_and_folding_whitespace(value.split_at(1).1, true)?.1),
-            None | Some(_) => if optional {
-                Ok(original_value)
-            } else {
-                Err(InvalidDateTime)
-            },
+            None | Some(_) => {
+                if optional {
+                    Ok(original_value)
+                } else {
+                    Err(DateTimeError)
+                }
+            }
         }
     }
 
@@ -326,17 +321,18 @@ fn parse_time_of_day(value: &str) -> Result<(u32, u32, Option<u32>, &str), Inval
     }
 }
 
-fn parse_time_zone(value: &str) -> Result<(i32, &str), InvalidDateTime> {
+#[allow(clippy::zero_prefixed_literal)]
+fn parse_time_zone(value: &str) -> Result<(i32, &str), DateTimeError> {
     if value.starts_with('+') || value.starts_with('-') {
         let mut chars = value.chars();
         let sign = chars.next().unwrap();
         let offset = chars.take(4).collect::<String>();
 
         if offset.len() != 4 {
-            return Err(InvalidDateTime);
+            return Err(DateTimeError);
         }
 
-        let mut offset = offset.parse::<i32>().map_err(|_| InvalidDateTime)?;
+        let mut offset = offset.parse::<i32>().map_err(|_| DateTimeError)?;
 
         if sign == '-' {
             offset *= -1;
@@ -363,40 +359,39 @@ fn parse_time_zone(value: &str) -> Result<(i32, &str), InvalidDateTime> {
             "pst" => -0800,
             string if string.len() == 1 => match string.chars().next().unwrap() {
                 'a'..='i' | 'k'..='z' => 0000,
-                _ => return Err(InvalidDateTime),
+                _ => return Err(DateTimeError),
             },
-            _ => return Err(InvalidDateTime),
+            _ => return Err(DateTimeError),
         };
 
         Ok((offset, value.split_at(timezone.len()).1))
     }
 }
 
-fn parse_year(value: &str) -> Result<(i32, &str), InvalidDateTime> {
+fn parse_year(value: &str) -> Result<(i32, &str), DateTimeError> {
+    let chars = value.chars();
     let mut bytes_parsed = 0;
-    let mut chars = value.chars();
     let mut year: i32 = 0;
 
-    loop {
-        match chars.next() {
-            Some(char_) => match char_.to_digit(10) {
-                Some(digit) => {
-                    year = year.checked_mul(10).ok_or(InvalidDateTime)? + digit as i32;
-                    bytes_parsed += 1;
-                }
-                None => break,
-            },
+    for char_ in chars {
+        match char_.to_digit(10) {
+            Some(digit) => {
+                year = year.checked_mul(10).ok_or(DateTimeError)? + digit as i32;
+                bytes_parsed += 1;
+            }
             None => break,
         }
     }
 
     match bytes_parsed {
-        0 | 1 => return Err(InvalidDateTime),
-        2 => if year >= 0 && year <= 49 {
-            year += 2000;
-        } else {
-            year += 1900;
-        },
+        0 | 1 => return Err(DateTimeError),
+        2 => {
+            if year >= 0 && year <= 49 {
+                year += 2000;
+            } else {
+                year += 1900;
+            }
+        }
         3 => year += 1900,
         _ => (),
     }

@@ -1,4 +1,4 @@
-//! RTSP Method
+//! Method
 //!
 //! This module contains RTSP-method related structs, errors, and such. Each variant on the
 //! [`Method`] type represents either a specific standardized method or a custom method.
@@ -6,17 +6,15 @@
 //! # Examples
 //!
 //! ```
-//! # #![feature(try_from)]
-//! #
 //! use std::convert::TryFrom;
 //!
-//! use rtsp::Method;
+//! use rtsp::method::Method;
 //!
 //! assert_eq!(Method::Play, Method::try_from("PLAY").unwrap());
 //! assert_eq!(Method::Describe.as_str(), "DESCRIBE");
 //! ```
 
-use std::convert::{AsRef, TryFrom};
+use std::convert::{AsRef, Infallible, TryFrom};
 use std::error::Error;
 use std::fmt::{self, Debug, Display, Formatter};
 use std::ops::Deref;
@@ -27,16 +25,14 @@ use crate::syntax;
 /// An RTSP request method (as defined in
 /// [[RFC7826, Section 13]](https://tools.ietf.org/html/rfc7826#section-13)).
 ///
-/// Each variant (excluding `Extension`) represents a standardized RTSP method.
+/// Each variant (excluding [`Method::Extension`]) represents a standardized RTSP method.
 ///
 /// # Examples
 ///
 /// ```
-/// # #![feature(try_from)]
-/// #
 /// use std::convert::TryFrom;
 ///
-/// use rtsp::Method;
+/// use rtsp::method::Method;
 ///
 /// assert_eq!(Method::Play, Method::try_from("PLAY").unwrap());
 /// assert_eq!(Method::Describe.as_str(), "DESCRIBE");
@@ -90,17 +86,17 @@ pub enum Method {
 }
 
 impl Method {
-    /// Returns a `&str` representation of the RTSP method. The returned string is uppercase even
-    /// if the method originally was a non-uppercase extension method.
+    /// Returns a `&str` representation of the RTSP method.
+    ///
+    /// The returned string is uppercase even if the method originally was a non-uppercase extension
+    /// method.
     ///
     /// # Examples
     ///
     /// ```
-    /// # #![feature(try_from)]
-    /// #
     /// use std::convert::TryFrom;
     ///
-    /// use rtsp::Method;
+    /// use rtsp::method::Method;
     ///
     /// assert_eq!(Method::Play.as_str(), "PLAY");
     /// assert_eq!(Method::try_from("extension").unwrap().as_str(), "EXTENSION");
@@ -108,7 +104,7 @@ impl Method {
     pub fn as_str(&self) -> &str {
         use self::Method::*;
 
-        match *self {
+        match self {
             Describe => "DESCRIBE",
             GetParameter => "GET_PARAMETER",
             Options => "OPTIONS",
@@ -119,13 +115,14 @@ impl Method {
             SetParameter => "SET_PARAMETER",
             Setup => "SETUP",
             Teardown => "TEARDOWN",
-            Extension(ref name) => name.as_str(),
+            Extension(name) => name.as_str(),
         }
     }
 
     /// A helper function that creates a new [`Method`] instance with the given method name
-    /// extension. It first checks to see if the method name is valid, and if not, it will return an
-    /// error.
+    /// extension.
+    ///
+    /// It first checks to see if the method name is valid, and if not, it will return an error.
     ///
     /// Based on, [[RFC7826, Section 20.1](https://tools.ietf.org/html/rfc7826#section-20.1)], a
     /// method name follows the following rules:
@@ -149,18 +146,18 @@ impl Method {
     /// ```
     ///
     /// There is an exception not covered from the above ABNF, specifically, method names cannot
-    /// start with `'$'`.
-    fn extension(value: &[u8]) -> Result<Method, InvalidMethod> {
+    /// start with `'$'` as this is an indicator of RTP packet interleaving.
+    fn extension(value: &[u8]) -> Result<Method, MethodError> {
         if value.is_empty() {
-            return Err(InvalidMethod::CannotBeEmpty);
+            return Err(MethodError::Empty);
         }
 
         if value[0] == b'$' {
-            return Err(InvalidMethod::CannotStartWithDollarSign);
+            return Err(MethodError::StartsWithDollarSign);
         }
 
         if !syntax::is_token(value) {
-            return Err(InvalidMethod::InvalidCharacter);
+            return Err(MethodError::InvalidCharacter);
         }
 
         // Unsafe: The function above [`syntax::is_token`] ensures that the value is valid ASCII-US.
@@ -248,7 +245,7 @@ impl<'method> PartialEq<Method> for &'method str {
 }
 
 impl<'method> TryFrom<&'method [u8]> for Method {
-    type Error = InvalidMethod;
+    type Error = MethodError;
 
     fn try_from(value: &'method [u8]) -> Result<Self, Self::Error> {
         use self::Method::*;
@@ -259,7 +256,7 @@ impl<'method> TryFrom<&'method [u8]> for Method {
                 let starts_with = value
                     .iter()
                     .take(bytes.len())
-                    .map(|byte| byte.to_ascii_uppercase())
+                    .map(u8::to_ascii_uppercase)
                     .eq(bytes.iter().cloned());
 
                 if starts_with && value.len() == bytes.len() {
@@ -303,7 +300,7 @@ impl<'method> TryFrom<&'method [u8]> for Method {
 }
 
 impl<'method> TryFrom<&'method str> for Method {
-    type Error = InvalidMethod;
+    type Error = MethodError;
 
     fn try_from(value: &'method str) -> Result<Self, Self::Error> {
         Method::try_from(value.as_bytes())
@@ -396,17 +393,17 @@ impl<'method> PartialEq<ExtensionMethod> for &'method str {
 }
 
 impl ExtensionMethod {
-    /// Returns a `&str` representation of the extension method. The returned string is uppercase
-    /// even if the extension method originally was a non-uppercase method.
+    /// Returns a `&str` representation of the extension method.
+    ///
+    /// The returned string is uppercase even if the extension method originally was a non-uppercase
+    /// method.
     ///
     /// # Examples
     ///
     /// ```
-    /// # #![feature(try_from)]
-    /// #
     /// use std::convert::TryFrom;
     ///
-    /// use rtsp::Method;
+    /// use rtsp::method::Method;
     ///
     /// match Method::try_from("extension").unwrap() {
     ///     Method::Extension(extension) => assert_eq!(extension.as_str(), "EXTENSION"),
@@ -421,34 +418,34 @@ impl ExtensionMethod {
 /// A possible error value when converting to a [`Method`] from a `&[u8]` or `&str`.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
-pub enum InvalidMethod {
+pub enum MethodError {
     // The method was empty.
-    CannotBeEmpty,
-
-    // The method started with `'$'`. This is not allowed because interleaved RTP messages through
-    // RTSP are indicated by this.
-    CannotStartWithDollarSign,
+    Empty,
 
     // The method contained an invalid character.
     InvalidCharacter,
+
+    // The method started with `'$'`. This is not allowed because interleaved RTP messages through
+    // RTSP are indicated by this.
+    StartsWithDollarSign,
 }
 
-impl Display for InvalidMethod {
+impl Display for MethodError {
     fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
-        use self::InvalidMethod::*;
+        use self::MethodError::*;
 
         match self {
-            CannotBeEmpty => write!(formatter, "method cannot be empty"),
-            CannotStartWithDollarSign => write!(formatter, "method cannot start with '$'"),
+            Empty => write!(formatter, "empty method"),
             InvalidCharacter => write!(formatter, "invalid method character"),
+            StartsWithDollarSign => write!(formatter, "method starts with '$'"),
         }
     }
 }
 
-impl Error for InvalidMethod {}
+impl Error for MethodError {}
 
-impl From<!> for InvalidMethod {
-    fn from(value: !) -> Self {
-        value
+impl From<Infallible> for MethodError {
+    fn from(_: Infallible) -> Self {
+        MethodError::Empty
     }
 }

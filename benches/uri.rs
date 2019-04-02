@@ -1,18 +1,16 @@
-#![feature(try_from)]
-
 #[macro_use]
 extern crate criterion;
 extern crate rtsp;
 
 use criterion::Criterion;
-use rtsp::RequestURI;
+use rtsp::uri::request::URI;
 use std::convert::TryFrom;
 
 fn uri_benchmark(criterion: &mut Criterion) {
     let uri = "rtsp://user:pass@192.168.1.1:8080/this/is/a/test/path?thisis=aquery";
 
     criterion.bench_function("parse request URI", move |bencher| {
-        bencher.iter(|| RequestURI::try_from(uri).unwrap())
+        bencher.iter(|| URI::try_from(uri).unwrap())
     });
 }
 

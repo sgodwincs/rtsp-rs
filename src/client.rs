@@ -1,11 +1,12 @@
 use bytes::BytesMut;
-use futures::Future;
+use futures::future::Future;
 use std::io;
 use std::net::SocketAddr;
-use tokio_executor::{DefaultExecutor, Executor, SpawnError};
+use tokio_executor::{DefaultExecutor, Executor};
 use tokio_tcp::TcpStream;
 
-use crate::protocol::{Connection, ConnectionHandle, EmptyService, OperationError};
+use crate::protocol::connection::{Connection, ConnectionHandle, OperationError};
+use crate::protocol::service::EmptyService;
 use crate::request::Request;
 use crate::response::Response;
 
@@ -17,8 +18,7 @@ impl Client {
     pub fn connect(address: SocketAddr) -> impl Future<Item = Client, Error = io::Error> {
         TcpStream::connect(&address).and_then(|tcp_stream| {
             let mut executor = DefaultExecutor::current();
-            let (connection, handler, handle) =
-                Connection::new::<_, EmptyService>(tcp_stream, None);
+            let (connection, handler, handle) = Connection::new::<EmptyService>(tcp_stream, None);
 
             executor.spawn(Box::new(connection)).unwrap();
 

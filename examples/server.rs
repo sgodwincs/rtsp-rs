@@ -5,8 +5,10 @@ extern crate tokio;
 
 use bytes::BytesMut;
 use futures::{future, Future, Stream};
-use rtsp::protocol::Connection;
-use rtsp::{Request, Response, Service};
+use rtsp::protocol::connection::Connection;
+use rtsp::protocol::service::Service;
+use rtsp::request::Request;
+use rtsp::response::Response;
 use std::io;
 use std::net::SocketAddr;
 use tokio::net::TcpListener;
@@ -30,7 +32,7 @@ fn main() {
         // Only shutdown when the client has finished. The shutdown will be fired when both the
         // connection and handler spawned above have finished.
 
-        tokio::spawn(handle.take_shutdown().unwrap().then(|_| {
+        tokio::spawn(handle.shutdown_receiver().then(|_| {
             std::mem::drop(handle);
             Ok(())
         }));
@@ -50,7 +52,9 @@ impl Service for Application {
     type Future = Box<Future<Item = Self::Response, Error = Self::Error> + Send + 'static>;
 
     fn call(&mut self, _request: Self::Request) -> Self::Future {
-        let response = Response::builder().build("".into()).unwrap();
+        let mut builder = Response::builder();
+        builder.body("".into());
+        let response = builder.build().unwrap();
         Box::new(future::ok(response))
     }
 }

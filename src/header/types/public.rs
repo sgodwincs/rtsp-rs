@@ -1,17 +1,19 @@
 use itertools::Itertools;
-use std::collections::HashSet;
+use linked_hash_set::LinkedHashSet;
 use std::convert::TryFrom;
 use std::iter::{once, FromIterator};
 use std::ops::{Deref, DerefMut};
 
-use crate::header::{HeaderName, HeaderValue, InvalidTypedHeader, TypedHeader};
-use crate::method::Method;
-use crate::syntax::trim_whitespace;
+use crate::header::map::TypedHeader;
+use crate::header::name::HeaderName;
+use crate::header::value::HeaderValue;
+use crate::method::{Method, MethodError};
+use crate::syntax;
 
 /// The `"Public"` typed header as described by
 /// [RFC7826](https://tools.ietf.org/html/rfc7826#section-18.39).
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct Public(pub HashSet<Method>);
+pub struct Public(LinkedHashSet<Method>);
 
 impl Public {
     /// Constructs a new header with no methods by default.
@@ -21,15 +23,15 @@ impl Public {
 }
 
 impl Deref for Public {
-    type Target = HashSet<Method>;
+    type Target = LinkedHashSet<Method>;
 
-    fn deref(&self) -> &HashSet<Method> {
+    fn deref(&self) -> &LinkedHashSet<Method> {
         &self.0
     }
 }
 
 impl DerefMut for Public {
-    fn deref_mut(&mut self) -> &mut HashSet<Method> {
+    fn deref_mut(&mut self) -> &mut LinkedHashSet<Method> {
         &mut self.0
     }
 }
@@ -39,17 +41,12 @@ impl FromIterator<Method> for Public {
     where
         I: IntoIterator<Item = Method>,
     {
-        Public(HashSet::from_iter(iterator))
+        Public(LinkedHashSet::from_iter(iterator))
     }
 }
 
 impl TypedHeader for Public {
-    type DecodeError = InvalidTypedHeader;
-
-    /// Returns the statically assigned `HeaderName` for this header.
-    fn header_name() -> &'static HeaderName {
-        &HeaderName::Public
-    }
+    type DecodeError = PublicError;
 
     /// Converts the raw header values to the [`Public`] header type. Based on the syntax
     /// provided by [RFC7826](https://tools.ietf.org/html/rfc7826#section-20), this header has the
@@ -90,19 +87,18 @@ impl TypedHeader for Public {
     /// # Examples
     ///
     /// ```
-    /// # #![feature(try_from)]
-    /// #
     /// use std::convert::TryFrom;
     ///
-    /// use rtsp::*;
+    /// use rtsp::header::map::TypedHeader;
     /// use rtsp::header::types::Public;
-    /// use rtsp::header::TypedHeader;
+    /// use rtsp::header::value::HeaderValue;
+    /// use rtsp::method::Method;
     ///
     /// let raw_header: Vec<HeaderValue> = vec![];
     /// assert_eq!(Public::decode(&mut raw_header.iter()).unwrap(), None);
     ///
     /// let typed_header = vec![Method::Play, Method::Setup].into_iter().collect::<Public>();
-    /// let raw_header = vec![HeaderValue::try_from("SETUP, \"INVALID\", PLAY, PLAY").unwrap()];
+    /// let raw_header = vec![HeaderValue::try_from("SETUP, PLAY").unwrap()];
     /// assert_eq!(
     ///     Public::decode(&mut raw_header.iter()).unwrap(),
     ///     Some(typed_header)
@@ -112,16 +108,14 @@ impl TypedHeader for Public {
     where
         Iter: Iterator<Item = &'header HeaderValue>,
     {
-        let mut methods = HashSet::new();
+        let mut methods = LinkedHashSet::new();
         let mut present = false;
 
         for value in values {
             let parts = value.as_str().split(',');
 
             for part in parts {
-                if let Ok(method) = Method::try_from(trim_whitespace(part)) {
-                    methods.insert(method);
-                }
+                methods.insert(Method::try_from(syntax::trim_whitespace(part))?);
             }
 
             present = true;
@@ -139,13 +133,12 @@ impl TypedHeader for Public {
     /// # Examples
     ///
     /// ```
-    /// # #![feature(try_from)]
-    /// #
     /// use std::convert::TryFrom;
     ///
-    /// use rtsp::*;
+    /// use rtsp::header::map::TypedHeader;
     /// use rtsp::header::types::Public;
-    /// use rtsp::header::TypedHeader;
+    /// use rtsp::header::value::HeaderValue;
+    /// use rtsp::method::Method;
     ///
     /// let typed_header = vec![Method::Play, Method::Setup].into_iter().collect::<Public>();
     /// let expected_raw_headers = vec![
@@ -166,7 +159,15 @@ impl TypedHeader for Public {
         // Header values must be valid UTF-8, and since we know that the [`Method`] type
         // guarantees valid ASCII-US (with no newlines), it satisfies the constraints.
 
-        let value = self.iter().map(|method| method.as_str()).join(", ");
-        values.extend(once(unsafe { HeaderValue::from_str_unchecked(value) }));
+        let value = self.iter().map(Method::as_str).join(", ");
+        values.extend(once(unsafe { HeaderValue::from_string_unchecked(value) }));
+    }
+
+    /// Returns the statically assigned [`HeaderName`] for this header.
+    fn header_name() -> &'static HeaderName {
+        &HeaderName::Public
     }
 }
+
+/// A possible error value when converting to a [`Public`] from [`HeaderName`]s.
+pub type PublicError = MethodError;

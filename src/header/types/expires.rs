@@ -1,14 +1,19 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeZone, Utc};
+use std::convert::Infallible;
+use std::error::Error;
+use std::fmt::{self, Display, Formatter};
 use std::iter::once;
 use std::ops::{Deref, DerefMut};
 
-use crate::header::common::parse_date_time;
-use crate::header::{HeaderName, HeaderValue, InvalidTypedHeader, TypedHeader};
+use crate::header::common::date::{self, DateTimeError};
+use crate::header::map::TypedHeader;
+use crate::header::name::HeaderName;
+use crate::header::value::HeaderValue;
 
 /// The `"Expires"` typed header as described by
 /// [RFC7826](https://tools.ietf.org/html/rfc7826#section-18.21).
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Expires(pub DateTime<Utc>);
+pub struct Expires(DateTime<Utc>);
 
 impl Deref for Expires {
     type Target = DateTime<Utc>;
@@ -24,13 +29,17 @@ impl DerefMut for Expires {
     }
 }
 
-impl TypedHeader for Expires {
-    type DecodeError = InvalidTypedHeader;
-
-    /// Returns the statically assigned `HeaderName` for this header.
-    fn header_name() -> &'static HeaderName {
-        &HeaderName::Expires
+impl<TTimeZone> From<DateTime<TTimeZone>> for Expires
+where
+    TTimeZone: TimeZone,
+{
+    fn from(value: DateTime<TTimeZone>) -> Self {
+        Expires(value.with_timezone(&Utc))
     }
+}
+
+impl TypedHeader for Expires {
+    type DecodeError = ExpiresError;
 
     /// Converts the raw header values to the [`Expires`] header type. Based on the syntax
     /// provided by [RFC7826](https://tools.ietf.org/html/rfc7826#section-20) and
@@ -112,22 +121,20 @@ impl TypedHeader for Expires {
     /// # Examples
     ///
     /// ```
-    /// # #![feature(try_from)]
-    /// #
     /// # extern crate chrono;
     /// # extern crate rtsp;
     /// #
     /// use chrono::{TimeZone, Utc};
     /// use std::convert::TryFrom;
     ///
-    /// use rtsp::*;
+    /// use rtsp::header::map::TypedHeader;
     /// use rtsp::header::types::Expires;
-    /// use rtsp::header::TypedHeader;
+    /// use rtsp::header::value::HeaderValue;
     ///
     /// let raw_header: Vec<HeaderValue> = vec![];
     /// assert_eq!(Expires::decode(&mut raw_header.iter()).unwrap(), None);
     ///
-    /// let typed_header = Expires(Utc.ymd(2014, 7, 10).and_hms(9, 10, 11));
+    /// let typed_header = Expires::from(Utc.ymd(2014, 7, 10).and_hms(9, 10, 11));
     /// let raw_header = vec![
     ///     HeaderValue::try_from("Thu, 10 Jul 2014 09:10:11 +0000").unwrap()
     /// ];
@@ -143,10 +150,10 @@ impl TypedHeader for Expires {
         };
 
         if values.next().is_some() {
-            return Err(InvalidTypedHeader);
+            return Err(ExpiresError::MoreThanOneHeader);
         }
 
-        let date_time = parse_date_time(value.as_str()).map_err(|_| InvalidTypedHeader)?;
+        let date_time = date::parse_date_time(value.as_str())?;
         Ok(Some(Expires(date_time)))
     }
 
@@ -155,19 +162,17 @@ impl TypedHeader for Expires {
     /// # Examples
     ///
     /// ```
-    /// # #![feature(try_from)]
-    /// #
     /// # extern crate chrono;
     /// # extern crate rtsp;
     /// #
     /// use chrono::{TimeZone, Utc};
     /// use std::convert::TryFrom;
     ///
-    /// use rtsp::*;
+    /// use rtsp::header::map::TypedHeader;
     /// use rtsp::header::types::Expires;
-    /// use rtsp::header::TypedHeader;
+    /// use rtsp::header::value::HeaderValue;
     ///
-    /// let typed_header = Expires(Utc.ymd(2014, 7, 10).and_hms(9, 10, 11));
+    /// let typed_header = Expires::from(Utc.ymd(2014, 7, 10).and_hms(9, 10, 11));
     /// let expected_raw_header = vec![
     ///     HeaderValue::try_from("Thu, 10 Jul 2014 09:10:11 +0000").unwrap()
     /// ];
@@ -185,6 +190,47 @@ impl TypedHeader for Expires {
         // guarantees valid ASCII-US (with no newlines), it satisfies the constraints.
 
         let value = self.format("%a, %e %b %Y %H:%M:%S %z").to_string();
-        values.extend(once(unsafe { HeaderValue::from_str_unchecked(value) }));
+        values.extend(once(unsafe { HeaderValue::from_string_unchecked(value) }));
+    }
+
+    /// Returns the statically assigned [`HeaderName`] for this header.
+    fn header_name() -> &'static HeaderName {
+        &HeaderName::Expires
+    }
+}
+
+/// A possible error value when converting to a [`Expires`] from [`HeaderName`]s.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
+pub enum ExpiresError {
+    /// The `"Expires"` header represented an invalid date time.
+    InvalidDateTime,
+
+    /// There was more than one `"Expires"` header.
+    MoreThanOneHeader,
+}
+
+impl Display for ExpiresError {
+    fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
+        use self::ExpiresError::*;
+
+        match self {
+            InvalidDateTime => write!(formatter, "invalid date time"),
+            MoreThanOneHeader => write!(formatter, "more than one expires header"),
+        }
+    }
+}
+
+impl Error for ExpiresError {}
+
+impl From<Infallible> for ExpiresError {
+    fn from(_: Infallible) -> Self {
+        ExpiresError::InvalidDateTime
+    }
+}
+
+impl From<DateTimeError> for ExpiresError {
+    fn from(_: DateTimeError) -> Self {
+        ExpiresError::InvalidDateTime
     }
 }

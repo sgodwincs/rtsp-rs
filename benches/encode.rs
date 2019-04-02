@@ -5,24 +5,41 @@ extern crate rtsp;
 
 use bytes::BytesMut;
 use criterion::Criterion;
-use rtsp::{HeaderName, Request, Response};
-use rtsp::protocol::{encode_request, encode_response};
+use rtsp::header::name::HeaderName;
+use rtsp::header::value::HeaderValue;
+use rtsp::method::Method;
+use rtsp::protocol::codec::encoder::request;
+use rtsp::protocol::codec::encoder::response;
+use rtsp::request::Request;
+use rtsp::response::Response;
+use rtsp::uri::request::URI;
+use std::convert::TryFrom;
 
 fn encode_benchmark(criterion: &mut Criterion) {
-    criterion.bench_function("encode request", move |bencher| {
-        let request = Request::builder()
-            .method("SETUP")
-            .uri("rtsp://example.com/foo/bar/baz.rm")
-            .header(HeaderName::CSeq, "302")
-            .header(
+    criterion.bench_function("encode request", |bencher| {
+        let request = Request::<()>::builder()
+            .with_method(Method::Setup)
+            .with_uri(URI::try_from("rtsp://example.com/foo/bar/baz.rm").unwrap())
+            .with_header(HeaderName::CSeq, HeaderValue::try_from("302").unwrap())
+            .with_header(
                 HeaderName::Transport,
-                "RTP/AVP;multicast;mode=\"PLAY\",\r
-        RTP/AVP;unicast;dest_addr=\"192.0.2.5:3456\"/\r
-        \"192.0.2.5:3457\";mode=\"PLAY\"",
+                HeaderValue::try_from(
+                    "RTP/AVP;multicast;mode=\"PLAY\",\r
+	RTP/AVP;unicast;dest_addr=\"192.0.2.5:3456\"/\r
+	\"192.0.2.5:3457\";mode=\"PLAY\"",
+                )
+                .unwrap(),
             )
-            .header(HeaderName::AcceptRanges, "npt, smpte, clock")
-            .header(HeaderName::UserAgent, "PhonyClient/1.2")
-            .build("")
+            .with_header(
+                HeaderName::AcceptRanges,
+                HeaderValue::try_from("npt, smpte, clock").unwrap(),
+            )
+            .with_header(
+                HeaderName::UserAgent,
+                HeaderValue::try_from("PhonyClient/1.2").unwrap(),
+            )
+            .with_body("")
+            .build()
             .unwrap();
 
         // Make sure that allocating is not part of the benchmark.
@@ -30,28 +47,44 @@ fn encode_benchmark(criterion: &mut Criterion) {
 
         bencher.iter(|| {
             buffer.clear();
-            encode_request(&request, &mut buffer);
-        }); 
+            request::encode(&request, &mut buffer);
+        });
     });
 
-    criterion.bench_function("encode response", move |bencher| {
-        let response = Response::builder()
-            .header(HeaderName::CSeq, "302")
-            .header(HeaderName::Date, "Fri, 20 Dec 2013 10:20:32 +0000")
-            .header(HeaderName::Session, "rQi1hBrGlFdiYld241FxUO")
-            .header(
+    criterion.bench_function("encode response", |bencher| {
+        let response = Response::<()>::builder()
+            .with_header(HeaderName::CSeq, HeaderValue::try_from("302").unwrap())
+            .with_header(
+                HeaderName::Date,
+                HeaderValue::try_from("Fri, 20 Dec 2013 10:20:32 +0000").unwrap(),
+            )
+            .with_header(
+                HeaderName::Session,
+                HeaderValue::try_from("rQi1hBrGlFdiYld241FxUO").unwrap(),
+            )
+            .with_header(
                 HeaderName::Transport,
-                "RTP/AVP;unicast;dest_addr=\"192.0.2.5:3456\"/\r
-        \"192.0.2.5:3457\";src_addr=\"192.0.2.224:6256\"/\r
-        \"192.0.2.224:6257\";mode=\"PLAY\"",
+                HeaderValue::try_from(
+                    "RTP/AVP;unicast;dest_addr=\"192.0.2.5:3456\"/\r
+	\"192.0.2.5:3457\";src_addr=\"192.0.2.224:6256\"/\r
+	\"192.0.2.224:6257\";mode=\"PLAY\"",
+                )
+                .unwrap(),
             )
-            .header(HeaderName::AcceptRanges, "npt")
-            .header(
+            .with_header(
+                HeaderName::AcceptRanges,
+                HeaderValue::try_from("npt").unwrap(),
+            )
+            .with_header(
                 HeaderName::MediaProperties,
-                "Random-Access=0.6, Dynamic,\r
-        Time-Limited=20081128T165900",
+                HeaderValue::try_from(
+                    "Random-Access=0.6, Dynamic,\r
+	Time-Limited=20081128T165900",
+                )
+                .unwrap(),
             )
-            .build("")
+            .with_body("")
+            .build()
             .unwrap();
 
         // Make sure that allocating is not part of the benchmark.
@@ -59,7 +92,7 @@ fn encode_benchmark(criterion: &mut Criterion) {
 
         bencher.iter(|| {
             buffer.clear();
-            encode_response(&response, &mut buffer);
+            response::encode(&response, &mut buffer);
         });
     });
 }

@@ -9,7 +9,7 @@
 //! # Examples
 //!
 //! ```
-//! use rtsp::Version;
+//! use rtsp::version::Version;
 //!
 //! let rtsp10 = Version::RTSP10;
 //! let rtsp20 = Version::RTSP20;
@@ -18,7 +18,7 @@
 //! assert_eq!(rtsp20.as_str(), "RTSP/2.0")
 //! ```
 
-use std::convert::TryFrom;
+use std::convert::{Infallible, TryFrom};
 use std::error::Error;
 use std::fmt::{self, Debug, Display, Formatter};
 
@@ -43,11 +43,9 @@ impl Version {
     /// # Examples
     ///
     /// ```
-    /// # #![feature(try_from)]
-    /// #
     /// use std::convert::TryFrom;
     ///
-    /// use rtsp::Version;
+    /// use rtsp::version::Version;
     ///
     /// assert_eq!(Version::RTSP20.as_str(), "RTSP/2.0");
     /// ```
@@ -60,12 +58,12 @@ impl Version {
         }
     }
 
-    /// Returns whether or not the version is [`Version::RTSP10`].
+    /// Returns whether the version is [`Version::RTSP10`].
     ///
     /// # Examples
     ///
     /// ```
-    /// use rtsp::Version;
+    /// use rtsp::version::Version;
     ///
     /// assert!(Version::RTSP10.is_rtsp10());
     /// assert!(!Version::RTSP20.is_rtsp10());
@@ -79,12 +77,12 @@ impl Version {
         }
     }
 
-    /// Returns whether or not the version is [`Version::RTSP20`].
+    /// Returns whether the version is [`Version::RTSP20`].
     ///
     /// # Examples
     ///
     /// ```
-    /// use rtsp::Version;
+    /// use rtsp::version::Version;
     ///
     /// assert!(!Version::RTSP10.is_rtsp20());
     /// assert!(Version::RTSP20.is_rtsp20());
@@ -184,7 +182,7 @@ impl<'version> PartialEq<Version> for &'version str {
 }
 
 impl<'version> TryFrom<&'version [u8]> for Version {
-    type Error = InvalidVersion;
+    type Error = VersionError;
 
     fn try_from(value: &'version [u8]) -> Result<Self, Self::Error> {
         use self::Version::*;
@@ -193,30 +191,30 @@ impl<'version> TryFrom<&'version [u8]> for Version {
             || value
                 .iter()
                 .take(5)
-                .map(|byte| byte.to_ascii_uppercase())
+                .map(u8::to_ascii_uppercase)
                 .ne(b"RTSP/".iter().cloned())
             || value[6] != b'.'
         {
-            return Err(InvalidVersion::Invalid);
+            return Err(VersionError::Invalid);
         }
 
-        let major = value[5].checked_sub(b'0').ok_or(InvalidVersion::Invalid)?;
-        let minor = value[7].checked_sub(b'0').ok_or(InvalidVersion::Invalid)?;
+        let major = value[5].checked_sub(b'0').ok_or(VersionError::Invalid)?;
+        let minor = value[7].checked_sub(b'0').ok_or(VersionError::Invalid)?;
 
         if major == 1 && minor == 0 {
             Ok(RTSP10)
         } else if major == 2 && minor == 0 {
             Ok(RTSP20)
         } else if major > 9 || minor > 9 {
-            Err(InvalidVersion::Invalid)
+            Err(VersionError::Invalid)
         } else {
-            Err(InvalidVersion::Unknown)
+            Err(VersionError::Unknown)
         }
     }
 }
 
 impl<'version> TryFrom<&'version str> for Version {
-    type Error = InvalidVersion;
+    type Error = VersionError;
 
     fn try_from(value: &'version str) -> Result<Self, Self::Error> {
         Version::try_from(value.as_bytes())
@@ -226,50 +224,50 @@ impl<'version> TryFrom<&'version str> for Version {
 /// A possible error value when converting to a [`Version`] from a `&[u8]` or `&str`.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
-pub enum InvalidVersion {
-    /// This error indicates that the version was not of the form `"RTSP/*.*"` where `'*'` are 1
-    /// digit numbers.
+pub enum VersionError {
+    /// The version was not of the form `"RTSP/*.*"` where each `'*'` is a one digit number.
     Invalid,
 
-    /// This error indicates that the version was of the correct form, but the version is not
-    /// recognized.
+    /// The version was of the correct form, but the version was not recognized.
     Unknown,
 }
 
-impl Display for InvalidVersion {
+impl Display for VersionError {
     fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
-        use self::InvalidVersion::*;
+        use self::VersionError::*;
 
-        match *self {
+        match self {
             Invalid => write!(formatter, "invalid version"),
             Unknown => write!(formatter, "unknown version"),
         }
     }
 }
 
-impl Error for InvalidVersion {}
+impl Error for VersionError {}
 
-impl From<!> for InvalidVersion {
-    fn from(value: !) -> Self {
-        value
+impl From<Infallible> for VersionError {
+    fn from(_: Infallible) -> Self {
+        VersionError::Invalid
     }
 }
 
 #[cfg(test)]
 mod test {
-    use super::*;
+    use std::convert::TryFrom;
+
+    use crate::version::{Version, VersionError};
 
     #[test]
-    fn test_parse() {
+    fn test_version_try_from() {
         assert_eq!(Version::try_from("rtsp/1.0"), Ok(Version::RTSP10));
         assert_eq!(Version::try_from("RTSP/1.0"), Ok(Version::RTSP10));
         assert_eq!(Version::try_from("rtsp/2.0"), Ok(Version::RTSP20));
         assert_eq!(Version::try_from("RTSP/2.0"), Ok(Version::RTSP20));
 
-        assert_eq!(Version::try_from(""), Err(InvalidVersion::Invalid));
-        assert_eq!(Version::try_from("rtsp/"), Err(InvalidVersion::Invalid));
-        assert_eq!(Version::try_from("rtsp/0.0"), Err(InvalidVersion::Unknown));
-        assert_eq!(Version::try_from("rtsp/9.9"), Err(InvalidVersion::Unknown));
-        assert_eq!(Version::try_from("rtsp/A.A"), Err(InvalidVersion::Invalid));
+        assert_eq!(Version::try_from(""), Err(VersionError::Invalid));
+        assert_eq!(Version::try_from("rtsp/"), Err(VersionError::Invalid));
+        assert_eq!(Version::try_from("rtsp/0.0"), Err(VersionError::Unknown));
+        assert_eq!(Version::try_from("rtsp/9.9"), Err(VersionError::Unknown));
+        assert_eq!(Version::try_from("rtsp/A.A"), Err(VersionError::Invalid));
     }
 }

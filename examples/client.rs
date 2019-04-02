@@ -5,7 +5,11 @@ extern crate tokio;
 
 use bytes::BytesMut;
 use futures::Future;
-use rtsp::{Client, Method, Request};
+use rtsp::client::Client;
+use rtsp::method::Method;
+use rtsp::request::Request;
+use rtsp::uri::request::URI;
+use std::convert::TryFrom;
 use std::net::SocketAddr;
 
 fn main() {
@@ -20,11 +24,13 @@ fn main() {
             Err(())
         })
         .and_then(|mut client| {
-            let request = Request::builder()
+            let mut builder = Request::builder();
+            builder
                 .method(Method::Setup)
-                .uri("rtsp://127.0.0.1/")
-                .build(BytesMut::new())
-                .unwrap();
+                .uri(URI::try_from("rtsp://127.0.0.1/").unwrap())
+                .body(BytesMut::new());
+            let request = builder.build().unwrap();
+
             client.send_request(request).then(|result| {
                 match result {
                     Ok(response) => println!("response: {:?}", response),

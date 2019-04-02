@@ -1,12 +1,12 @@
-//! RTSP Header Name
+//! Header Name
 
-use ascii::AsciiString;
-use std::convert::TryFrom;
+use std::convert::{Infallible, TryFrom};
 use std::error::Error;
-use std::fmt;
+use std::fmt::{self, Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
+use std::str;
 
-use crate::syntax::is_token;
+use crate::syntax;
 
 macro_rules! standard_headers {
     (
@@ -17,8 +17,7 @@ macro_rules! standard_headers {
     ) => {
         /// An RTSP header name.
         ///
-        /// All standardized header names are supported with an ASCII encoded extension that is
-        /// always lowercase.
+        /// All standardized header names are supported with an ASCII encoded extension.
         #[derive(Clone, Eq, Hash, PartialEq)]
         #[non_exhaustive]
         pub enum HeaderName {
@@ -28,11 +27,22 @@ macro_rules! standard_headers {
         )+
 
             /// A header name that is not one of the standardized header names. This is encoded
-            /// using ASCII-US and is always lowercase.
+            /// using ASCII-US.
             Extension(ExtensionHeaderName)
         }
 
         impl HeaderName {
+            /// Returns a `&str` representation of the header name.
+            ///
+            /// # Examples
+            ///
+            /// ```
+            /// use std::convert::TryFrom;
+            ///
+            /// use rtsp::header::name::HeaderName;
+            ///
+            /// assert_eq!(HeaderName::ContentLength.as_str(), "content-length");
+            /// ```
             pub fn as_str(&self) -> &str {
                 use self::HeaderName::*;
 
@@ -43,7 +53,17 @@ macro_rules! standard_headers {
                     Extension(ref extension) => extension.as_str()
                 }
             }
-
+            /// Returns a `&str` canonical representation of the header name.
+            ///
+            /// # Examples
+            ///
+            /// ```
+            /// use std::convert::TryFrom;
+            ///
+            /// use rtsp::header::name::HeaderName;
+            ///
+            /// assert_eq!(HeaderName::ContentLength.canonical_name(), "Content-Length");
+            /// ```
             pub fn canonical_name(&self) -> &str {
                 use self::HeaderName::*;
 
@@ -56,56 +76,61 @@ macro_rules! standard_headers {
             }
         }
 
-        #[test]
-        fn test_standard_header_as_str() {
-        $(
-            let header_name = HeaderName::$variant;
-            assert_eq!(header_name.as_str(), $name);
-        )+
-        }
+        #[cfg(test)]
+        mod test {
+            use crate::header::name::HeaderName;
 
-        #[test]
-        fn test_standard_header_canonical_name() {
-        $(
-            let header_name = HeaderName::$variant;
-            assert_eq!(header_name.canonical_name(), $canonical_name);
-        )+
-        }
+            #[test]
+            fn test_standard_header_as_str() {
+            $(
+                let header_name = HeaderName::$variant;
+                assert_eq!(header_name.as_str(), $name);
+            )+
+            }
 
-        #[test]
-        fn test_standard_header_name_equality() {
-        $(
-            let header_name = HeaderName::$variant;
-            assert_eq!(header_name.as_str(), header_name.canonical_name().to_lowercase().as_str());
-        )+
+            #[test]
+            fn test_standard_header_canonical_name() {
+            $(
+                let header_name = HeaderName::$variant;
+                assert_eq!(header_name.canonical_name(), $canonical_name);
+            )+
+            }
+
+            #[test]
+            fn test_standard_header_name_equality() {
+            $(
+                let header_name = HeaderName::$variant;
+                assert_eq!(
+                    header_name.as_str(),
+                    header_name.canonical_name().to_lowercase().as_str()
+                );
+            )+
+            }
         }
     }
 }
 
 impl HeaderName {
-    /// A helper function that creates a new `HeaderName` instance with the given header name
-    /// extension. It first checks to see if the header name is valid, and if not, it will return an
-    /// error.
+    /// A helper function that creates a new [`HeaderName`] instance with the given header name
+    /// extension.
     ///
-    /// It is assumed that `name_lower` is the lowercase equivalent of `name`. Breaking this
-    /// constraint can lead to invalid header names.
-    fn extension(name: &[u8], name_lower: &[u8]) -> Result<HeaderName, InvalidHeaderName> {
-        if !is_token(name) {
-            return Err(InvalidHeaderName);
+    /// It first checks to see if the header name is valid, and if not, it will return an error.
+    fn extension(name: &[u8]) -> Result<HeaderName, HeaderNameError> {
+        if name.is_empty() {
+            return Err(HeaderNameError::Empty);
         }
 
-        debug_assert_eq!(name.to_ascii_lowercase().as_slice(), name_lower);
-        debug_assert!(is_token(name_lower));
+        if !syntax::is_token(name) {
+            return Err(HeaderNameError::InvalidCharacter);
+        }
 
-        // Unsafe Justification
-        //
-        // We need to make sure that `name` and `name_lower` are valid ASCII-US strings. The
-        // [`syntax::is_token`] function ensures that it is a proper subset, but it is a constraint
-        // of this function that `name_lower` *must* be the lowercase equivalent of `name`.
-
-        let name = unsafe { AsciiString::from_ascii_unchecked(name) };
-        let name_lower = unsafe { AsciiString::from_ascii_unchecked(name_lower) };
-        Ok(HeaderName::Extension(ExtensionHeaderName(name, name_lower)))
+        // Unsafe: The function above [`syntax::is_token`] ensures that the value is valid ASCII-US.
+        let name = unsafe { str::from_utf8_unchecked(name) }.to_string();
+        let name_lowercase = name.to_ascii_lowercase();
+        Ok(HeaderName::Extension(ExtensionHeaderName(
+            name,
+            name_lowercase,
+        )))
     }
 }
 
@@ -121,270 +146,216 @@ impl AsRef<str> for HeaderName {
     }
 }
 
-impl fmt::Debug for HeaderName {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.canonical_name())
+impl Debug for HeaderName {
+    fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
+        write!(formatter, "{}", self.canonical_name())
     }
 }
 
-impl fmt::Display for HeaderName {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.canonical_name())
+impl Display for HeaderName {
+    fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
+        write!(formatter, "{}", self.canonical_name())
     }
 }
 
-/// Performs equality checking of a `HeaderName` with a `str`. This check is case insensitive.
-///
-/// # Examples
-///
-/// ```
-/// # #![feature(try_from)]
-/// #
-/// use std::convert::TryFrom;
-///
-/// use rtsp::HeaderName;
-///
-/// assert_eq!(HeaderName::try_from("eXtEnSiOn").unwrap(), *"exTENSION");
-/// ```
+impl From<HeaderName> for String {
+    fn from(value: HeaderName) -> Self {
+        value.to_string()
+    }
+}
+
+impl PartialEq<[u8]> for HeaderName {
+    fn eq(&self, other: &[u8]) -> bool {
+        self.as_str().as_bytes().eq_ignore_ascii_case(other)
+    }
+}
+
+impl PartialEq<HeaderName> for [u8] {
+    fn eq(&self, other: &HeaderName) -> bool {
+        self.eq_ignore_ascii_case(other.as_str().as_bytes())
+    }
+}
+
+impl<'header> PartialEq<&'header [u8]> for HeaderName {
+    fn eq(&self, other: &&'header [u8]) -> bool {
+        self.as_str().as_bytes().eq_ignore_ascii_case(other)
+    }
+}
+
+impl<'header> PartialEq<HeaderName> for &'header [u8] {
+    fn eq(&self, other: &HeaderName) -> bool {
+        self.eq_ignore_ascii_case(other.as_str().as_bytes())
+    }
+}
+
 impl PartialEq<str> for HeaderName {
     fn eq(&self, other: &str) -> bool {
-        self.as_str() == other.to_ascii_lowercase()
+        self.as_str().eq_ignore_ascii_case(other)
     }
 }
 
 impl PartialEq<HeaderName> for str {
     fn eq(&self, other: &HeaderName) -> bool {
-        self.to_ascii_lowercase() == other.as_str()
+        self.eq_ignore_ascii_case(other.as_str())
     }
 }
 
-/// Performs equality checking of a `HeaderName` with a `&str`. This check is case insensitive.
-///
-/// # Examples
-///
-/// ```
-/// # #![feature(try_from)]
-/// #
-/// use std::convert::TryFrom;
-///
-/// use rtsp::HeaderName;
-///
-/// assert_eq!(HeaderName::try_from("extension").unwrap(), "extension");
-/// ```
-impl<'a> PartialEq<&'a str> for HeaderName {
-    fn eq(&self, other: &&'a str) -> bool {
-        self.as_str() == (*other).to_ascii_lowercase()
+impl<'header> PartialEq<&'header str> for HeaderName {
+    fn eq(&self, other: &&'header str) -> bool {
+        self.as_str().eq_ignore_ascii_case(other)
     }
 }
 
-impl<'a> PartialEq<HeaderName> for &'a str {
+impl<'header> PartialEq<HeaderName> for &'header str {
     fn eq(&self, other: &HeaderName) -> bool {
-        self.to_ascii_lowercase() == other.as_str()
+        self.eq_ignore_ascii_case(other.as_str())
     }
 }
 
-impl PartialEq<String> for HeaderName {
-    fn eq(&self, other: &String) -> bool {
-        self.as_str() == other.as_str()
-    }
-}
-
-impl PartialEq<HeaderName> for String {
-    fn eq(&self, other: &HeaderName) -> bool {
-        self.as_str() == other.as_str()
-    }
-}
-
-impl<'a> PartialEq<&'a HeaderName> for HeaderName {
-    fn eq(&self, other: &&'a HeaderName) -> bool {
-        *self == **other
-    }
-}
-
-impl<'a> PartialEq<HeaderName> for &'a HeaderName {
-    fn eq(&self, other: &HeaderName) -> bool {
-        *other == *self
-    }
-}
-
-impl<'a> From<&'a HeaderName> for HeaderName {
-    fn from(src: &'a HeaderName) -> HeaderName {
-        src.clone()
-    }
-}
-
-/// Provides a fallible conversion from a byte slice to a `HeaderName`. Note that you cannot do the
-/// following:
-///
-/// ```compile_fail
-/// let allow = HeaderName::try_from(b"Allow").unwrap();
-/// ```
-///
-/// This is because `b"Allow"` is of type `&[u8; 5]` and so it must be converted to `&[u8]` in order
-/// to perform the conversion. Another `TryFrom` implementation from `&[u8, N: usize]` will be
-/// provided once constant generics land on nightly.
 impl<'a> TryFrom<&'a [u8]> for HeaderName {
-    type Error = InvalidHeaderName;
+    type Error = HeaderNameError;
 
-    /// Converts a `&[u8]` to an RTSP header name. The header name must contain only valid token
-    /// characters. Since valid token characters includes only a subset of the ASCII-US character
-    /// set, care should be taken when converting a UTF-8 encoded string to a header name.
-    ///
-    /// The conversion is case insensitive, but the header name is converted to lowercase.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # #![feature(try_from)]
-    /// #
-    /// use std::convert::TryFrom;
-    ///
-    /// use rtsp::HeaderName;
-    ///
-    /// let content_length = HeaderName::try_from(&b"Content-Length"[..]).unwrap();
-    /// assert_eq!(content_length, HeaderName::ContentLength);
-    ///
-    /// let referrer = HeaderName::try_from(&b"ReFeRrEr"[..]).unwrap();
-    /// assert_eq!(referrer, HeaderName::Referrer);
-    ///
-    /// let extension = HeaderName::try_from(&b"Ext"[..]).unwrap();
-    /// assert_eq!(extension.as_str(), "ext");
-    ///
-    /// let error = HeaderName::try_from(&b""[..]);
-    /// assert!(error.is_err());
-    /// ```
     fn try_from(value: &'a [u8]) -> Result<Self, Self::Error> {
         use self::HeaderName::*;
 
-        if value.is_empty() || value.len() > super::MAX_HEADER_NAME_LENGTH {
-            return Err(InvalidHeaderName);
+        macro_rules! check_header_name {
+            ($header_name:ident) => {
+                let bytes = $header_name.as_str().as_bytes();
+                let starts_with = value
+                    .iter()
+                    .take(bytes.len())
+                    .map(u8::to_ascii_lowercase)
+                    .eq(bytes.iter().cloned());
+
+                if starts_with && value.len() == bytes.len() {
+                    return Ok($header_name);
+                }
+            };
         }
 
-        let value_lower = value.to_ascii_lowercase();
-
-        match value_lower.len() {
-            3 => match value_lower.as_slice() {
-                b"via" => Ok(Via),
-                _ => HeaderName::extension(value, value_lower.as_slice()),
-            },
-            4 => match value_lower.as_slice() {
-                b"cseq" => Ok(CSeq),
-                b"date" => Ok(Date),
-                b"from" => Ok(From),
-                b"mtag" => Ok(MTag),
-                _ => HeaderName::extension(value, value_lower.as_slice()),
-            },
-            5 => match value_lower.as_slice() {
-                b"allow" => Ok(Allow),
-                b"range" => Ok(Range),
-                b"scale" => Ok(Scale),
-                b"speed" => Ok(Speed),
-                _ => HeaderName::extension(value, value_lower.as_slice()),
-            },
-            6 => match value_lower.as_slice() {
-                b"accept" => Ok(Accept),
-                b"public" => Ok(Public),
-                b"server" => Ok(Server),
-                _ => HeaderName::extension(value, value_lower.as_slice()),
-            },
-            7 => match value_lower.as_slice() {
-                b"expires" => Ok(Expires),
-                b"require" => Ok(Require),
-                b"session" => Ok(Session),
-                _ => HeaderName::extension(value, value_lower.as_slice()),
-            },
-            8 => match value_lower.as_slice() {
-                b"if-match" => Ok(IfMatch),
-                b"location" => Ok(Location),
-                b"referrer" => Ok(Referrer),
-                b"rtp-info" => Ok(RTPInfo),
-                _ => HeaderName::extension(value, value_lower.as_slice()),
-            },
-            9 => match value_lower.as_slice() {
-                b"bandwidth" => Ok(Bandwidth),
-                b"blocksize" => Ok(Blocksize),
-                b"supported" => Ok(Supported),
-                b"timestamp" => Ok(Timestamp),
-                b"transport" => Ok(Transport),
-                _ => HeaderName::extension(value, value_lower.as_slice()),
-            },
-            10 => match value_lower.as_slice() {
-                b"connection" => Ok(Connection),
-                b"seek-style" => Ok(SeekStyle),
-                b"user-agent" => Ok(UserAgent),
-                _ => HeaderName::extension(value, value_lower.as_slice()),
-            },
-            11 => match value_lower.as_slice() {
-                b"media-range" => Ok(MediaRange),
-                b"retry-after" => Ok(RetryAfter),
-                b"unsupported" => Ok(Unsupported),
-                _ => HeaderName::extension(value, value_lower.as_slice()),
-            },
-            12 => match value_lower.as_slice() {
-                b"content-base" => Ok(ContentBase),
-                b"content-type" => Ok(ContentType),
-                _ => HeaderName::extension(value, value_lower.as_slice()),
-            },
-            13 => match value_lower.as_slice() {
-                b"accept-ranges" => Ok(AcceptRanges),
-                b"authorization" => Ok(Authorization),
-                b"cache-control" => Ok(CacheControl),
-                b"if-none-match" => Ok(IfNoneMatch),
-                b"last-modified" => Ok(LastModified),
-                b"notify-reason" => Ok(NotifyReason),
-                b"proxy-require" => Ok(ProxyRequire),
-                _ => HeaderName::extension(value, value_lower.as_slice()),
-            },
-            14 => match value_lower.as_slice() {
-                b"content-length" => Ok(ContentLength),
-                b"request-status" => Ok(RequestStatus),
-                _ => HeaderName::extension(value, value_lower.as_slice()),
-            },
-            15 => match value_lower.as_slice() {
-                b"accept-encoding" => Ok(AcceptEncoding),
-                b"accept-language" => Ok(AcceptLanguage),
-                b"proxy-supported" => Ok(ProxySupported),
-                _ => HeaderName::extension(value, value_lower.as_slice()),
-            },
-            16 => match value_lower.as_slice() {
-                b"content-encoding" => Ok(ContentEncoding),
-                b"content-language" => Ok(ContentLanguage),
-                b"content-location" => Ok(ContentLocation),
-                b"media-properties" => Ok(MediaProperties),
-                b"terminate-reason" => Ok(TerminateReason),
-                b"www-authenticate" => Ok(WWWAuthenticate),
-                _ => HeaderName::extension(value, value_lower.as_slice()),
-            },
-            17 => match value_lower.as_slice() {
-                b"if-modified-since" => Ok(IfModifiedSince),
-                _ => HeaderName::extension(value, value_lower.as_slice()),
-            },
-            18 => match value_lower.as_slice() {
-                b"accept-credentials" => Ok(AcceptCredentials),
-                b"pipelined-requests" => Ok(PipelinedRequests),
-                b"proxy-authenticate" => Ok(ProxyAuthenticate),
-                _ => HeaderName::extension(value, value_lower.as_slice()),
-            },
-            19 => match value_lower.as_slice() {
-                b"authentication-info" => Ok(AuthenticationInfo),
-                b"proxy-authorization" => Ok(ProxyAuthorization),
-                _ => HeaderName::extension(value, value_lower.as_slice()),
-            },
-            22 => match value_lower.as_slice() {
-                b"connection-credentials" => Ok(ConnectionCredentials),
-                _ => HeaderName::extension(value, value_lower.as_slice()),
-            },
-            25 => match value_lower.as_slice() {
-                b"proxy-authentication-info" => Ok(ProxyAuthenticationInfo),
-                _ => HeaderName::extension(value, value_lower.as_slice()),
-            },
-            _ => HeaderName::extension(value, value_lower.as_slice()),
+        match value.len() {
+            3 => {
+                check_header_name!(Via);
+                HeaderName::extension(value)
+            }
+            4 => {
+                check_header_name!(CSeq);
+                check_header_name!(Date);
+                check_header_name!(From);
+                check_header_name!(MTag);
+                HeaderName::extension(value)
+            }
+            5 => {
+                check_header_name!(Allow);
+                check_header_name!(Range);
+                check_header_name!(Scale);
+                check_header_name!(Speed);
+                HeaderName::extension(value)
+            }
+            6 => {
+                check_header_name!(Accept);
+                check_header_name!(Public);
+                check_header_name!(Server);
+                HeaderName::extension(value)
+            }
+            7 => {
+                check_header_name!(Expires);
+                check_header_name!(Require);
+                check_header_name!(Session);
+                HeaderName::extension(value)
+            }
+            8 => {
+                check_header_name!(IfMatch);
+                check_header_name!(Location);
+                check_header_name!(Referrer);
+                check_header_name!(RTPInfo);
+                HeaderName::extension(value)
+            }
+            9 => {
+                check_header_name!(Bandwidth);
+                check_header_name!(Blocksize);
+                check_header_name!(Supported);
+                check_header_name!(Timestamp);
+                check_header_name!(Transport);
+                HeaderName::extension(value)
+            }
+            10 => {
+                check_header_name!(Connection);
+                check_header_name!(SeekStyle);
+                check_header_name!(UserAgent);
+                HeaderName::extension(value)
+            }
+            11 => {
+                check_header_name!(MediaRange);
+                check_header_name!(RetryAfter);
+                check_header_name!(Unsupported);
+                HeaderName::extension(value)
+            }
+            12 => {
+                check_header_name!(ContentBase);
+                check_header_name!(ContentType);
+                HeaderName::extension(value)
+            }
+            13 => {
+                check_header_name!(AcceptRanges);
+                check_header_name!(Authorization);
+                check_header_name!(CacheControl);
+                check_header_name!(IfNoneMatch);
+                check_header_name!(LastModified);
+                check_header_name!(NotifyReason);
+                check_header_name!(ProxyRequire);
+                HeaderName::extension(value)
+            }
+            14 => {
+                check_header_name!(ContentLength);
+                check_header_name!(RequestStatus);
+                HeaderName::extension(value)
+            }
+            15 => {
+                check_header_name!(AcceptEncoding);
+                check_header_name!(AcceptLanguage);
+                check_header_name!(ProxySupported);
+                HeaderName::extension(value)
+            }
+            16 => {
+                check_header_name!(ContentEncoding);
+                check_header_name!(ContentLanguage);
+                check_header_name!(ContentLocation);
+                check_header_name!(MediaProperties);
+                check_header_name!(TerminateReason);
+                check_header_name!(WWWAuthenticate);
+                HeaderName::extension(value)
+            }
+            17 => {
+                check_header_name!(IfModifiedSince);
+                HeaderName::extension(value)
+            }
+            18 => {
+                check_header_name!(AcceptCredentials);
+                check_header_name!(PipelinedRequests);
+                check_header_name!(ProxyAuthenticate);
+                HeaderName::extension(value)
+            }
+            19 => {
+                check_header_name!(AuthenticationInfo);
+                check_header_name!(ProxyAuthorization);
+                HeaderName::extension(value)
+            }
+            22 => {
+                check_header_name!(ConnectionCredentials);
+                HeaderName::extension(value)
+            }
+            25 => {
+                check_header_name!(ProxyAuthenticationInfo);
+                HeaderName::extension(value)
+            }
+            _ => HeaderName::extension(value),
         }
     }
 }
 
 impl<'a> TryFrom<&'a str> for HeaderName {
-    type Error = InvalidHeaderName;
+    type Error = HeaderNameError;
 
     fn try_from(value: &'a str) -> Result<Self, Self::Error> {
         HeaderName::try_from(value.as_bytes())
@@ -393,72 +364,8 @@ impl<'a> TryFrom<&'a str> for HeaderName {
 
 /// A wrapper type used to avoid users creating extension header names that are actually
 /// standardized header names.
-#[derive(Clone, Eq, PartialEq)]
-pub struct ExtensionHeaderName(AsciiString, AsciiString);
-
-impl fmt::Debug for ExtensionHeaderName {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl fmt::Display for ExtensionHeaderName {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl Hash for ExtensionHeaderName {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.1.hash(state);
-    }
-}
-
-/// Performs equality checking of a `ExtensionHeaderName` with a `str`. This check is case
-/// insensitive.
-///
-/// # Examples
-///
-/// ```
-/// # #![feature(try_from)]
-/// #
-/// use std::convert::TryFrom;
-///
-/// use rtsp::HeaderName;
-///
-/// match HeaderName::try_from("extension").unwrap() {
-///     HeaderName::Extension(extension) => assert_eq!(extension, *"eXtEnSiOn"),
-///     _ => panic!("expected extension header name")
-/// }
-/// ```
-impl PartialEq<str> for ExtensionHeaderName {
-    fn eq(&self, other: &str) -> bool {
-        self.1 == other.to_ascii_lowercase()
-    }
-}
-
-/// Performs equality checking of a `ExtensionHeaderName` with a `&str`. This check is case
-/// insensitive.
-///
-/// # Examples
-///
-/// ```
-/// # #![feature(try_from)]
-/// #
-/// use std::convert::TryFrom;
-///
-/// use rtsp::HeaderName;
-///
-/// match HeaderName::try_from("extension").unwrap() {
-///     HeaderName::Extension(extension) => assert_eq!(extension, "eXtEnSiOn"),
-///     _ => panic!("expected extension header name")
-/// }
-/// ```
-impl<'a> PartialEq<&'a str> for ExtensionHeaderName {
-    fn eq(&self, other: &&'a str) -> bool {
-        self.1 == (*other).to_ascii_lowercase()
-    }
-}
+#[derive(Clone)]
+pub struct ExtensionHeaderName(String, String);
 
 impl ExtensionHeaderName {
     /// Returns a `&str` representation of the extension header name. The returned string is
@@ -467,11 +374,9 @@ impl ExtensionHeaderName {
     /// # Examples
     ///
     /// ```
-    /// # #![feature(try_from)]
-    /// #
     /// use std::convert::TryFrom;
     ///
-    /// use rtsp::HeaderName;
+    /// use rtsp::header::name::HeaderName;
     ///
     /// match HeaderName::try_from("ExTeNsIoN").unwrap() {
     ///     HeaderName::Extension(extension) => assert_eq!(extension.as_str(), "extension"),
@@ -488,11 +393,9 @@ impl ExtensionHeaderName {
     /// # Examples
     ///
     /// ```
-    /// # #![feature(try_from)]
-    /// #
     /// use std::convert::TryFrom;
     ///
-    /// use rtsp::HeaderName;
+    /// use rtsp::header::name::HeaderName;
     ///
     /// match HeaderName::try_from("ExTeNsIoN").unwrap() {
     ///     HeaderName::Extension(extension) => assert_eq!(extension.canonical_name(), "ExTeNsIoN"),
@@ -504,21 +407,115 @@ impl ExtensionHeaderName {
     }
 }
 
-/// A possible error value when converting to a `HeaderName` from a `&[u8]` or `&str`.
-///
-/// This error indicates that the header name was of size 0 or contained invalid token characters.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub struct InvalidHeaderName;
-
-impl fmt::Display for InvalidHeaderName {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.description())
+impl Debug for ExtensionHeaderName {
+    fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
+        write!(formatter, "{}", self.1)
     }
 }
 
-impl Error for InvalidHeaderName {
-    fn description(&self) -> &str {
-        "invalid RTSP header name"
+impl Display for ExtensionHeaderName {
+    fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
+        write!(formatter, "{}", self.1)
+    }
+}
+
+impl Eq for ExtensionHeaderName {}
+
+impl From<ExtensionHeaderName> for String {
+    fn from(value: ExtensionHeaderName) -> Self {
+        value.to_string()
+    }
+}
+
+impl Hash for ExtensionHeaderName {
+    fn hash<TState>(&self, state: &mut TState)
+    where
+        TState: Hasher,
+    {
+        self.1.hash(state);
+    }
+}
+
+impl PartialEq for ExtensionHeaderName {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_str().eq_ignore_ascii_case(other.as_str())
+    }
+}
+
+impl PartialEq<[u8]> for ExtensionHeaderName {
+    fn eq(&self, other: &[u8]) -> bool {
+        self.as_str().as_bytes().eq_ignore_ascii_case(other)
+    }
+}
+
+impl PartialEq<ExtensionHeaderName> for [u8] {
+    fn eq(&self, other: &ExtensionHeaderName) -> bool {
+        self.eq_ignore_ascii_case(other.as_str().as_bytes())
+    }
+}
+
+impl<'header> PartialEq<&'header [u8]> for ExtensionHeaderName {
+    fn eq(&self, other: &&'header [u8]) -> bool {
+        self.as_str().as_bytes().eq_ignore_ascii_case(other)
+    }
+}
+
+impl<'header> PartialEq<ExtensionHeaderName> for &'header [u8] {
+    fn eq(&self, other: &ExtensionHeaderName) -> bool {
+        self.eq_ignore_ascii_case(other.as_str().as_bytes())
+    }
+}
+
+impl PartialEq<str> for ExtensionHeaderName {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str().eq_ignore_ascii_case(other)
+    }
+}
+
+impl PartialEq<ExtensionHeaderName> for str {
+    fn eq(&self, other: &ExtensionHeaderName) -> bool {
+        self.eq_ignore_ascii_case(other.as_str())
+    }
+}
+
+impl<'header> PartialEq<&'header str> for ExtensionHeaderName {
+    fn eq(&self, other: &&'header str) -> bool {
+        self.as_str().eq_ignore_ascii_case(other)
+    }
+}
+
+impl<'header> PartialEq<ExtensionHeaderName> for &'header str {
+    fn eq(&self, other: &ExtensionHeaderName) -> bool {
+        self.eq_ignore_ascii_case(other.as_str())
+    }
+}
+
+/// A possible error value when converting to a [`HeaderName`] from a `&[u8]` or `&str`.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum HeaderNameError {
+    /// The header name was empty.
+    Empty,
+
+    /// The header name contained an invalid token character.
+    InvalidCharacter,
+}
+
+impl Display for HeaderNameError {
+    fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
+        use self::HeaderNameError::*;
+
+        match self {
+            Empty => write!(formatter, "empty header name"),
+            InvalidCharacter => write!(formatter, "invalid header name character"),
+        }
+    }
+}
+
+impl Error for HeaderNameError {}
+
+impl From<Infallible> for HeaderNameError {
+    fn from(_: Infallible) -> Self {
+        HeaderNameError::Empty
     }
 }
 

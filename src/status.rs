@@ -7,11 +7,9 @@
 //! # Example
 //!
 //! ```
-//! # #![feature(try_from)]
-//! #
 //! use std::convert::TryFrom;
 //!
-//! use rtsp::{StatusCode, StatusCodeClass};
+//! use rtsp::status::{StatusCode, StatusCodeClass};
 //!
 //! assert_eq!(StatusCode::try_from(200), Ok(StatusCode::OK));
 //! assert_eq!(StatusCode::try_from("404").unwrap(), StatusCode::NotFound);
@@ -20,7 +18,7 @@
 //! ```
 
 use std::cmp::Ordering;
-use std::convert::TryFrom;
+use std::convert::{Infallible, TryFrom};
 use std::error::Error;
 use std::fmt::{self, Debug, Display, Formatter};
 use std::ops::Deref;
@@ -44,11 +42,9 @@ macro_rules! status_codes {
         /// # Examples
         ///
         /// ```
-        /// # #![feature(try_from)]
-        /// #
         /// use std::convert::TryFrom;
         ///
-        /// use rtsp::{StatusCode, StatusCodeClass};
+        /// use rtsp::status::{StatusCode, StatusCodeClass};
         ///
         /// assert_eq!(StatusCode::try_from(200).unwrap(), StatusCode::OK);
         /// assert_eq!(StatusCode::try_from("404").unwrap(), StatusCode::NotFound);
@@ -73,29 +69,25 @@ macro_rules! status_codes {
             /// Get the standardised reason phrase for this status code.
             ///
             /// This is mostly here for servers writing responses but could potentially have an
-            /// application at other times.
-            ///
-            /// The reason phrase is defined as being exclusively for human readers. You should
-            /// avoid deriving any meaning from it at all costs.
+            /// application at other times. However, the reason phrase is defined as being
+            /// exclusively for human readers. You should avoid deriving any meaning from it.
             ///
             /// # Examples
             ///
             /// ```
-            /// use rtsp::StatusCode;
+            /// use rtsp::status::StatusCode;
             ///
             /// assert_eq!(StatusCode::OK.canonical_reason().unwrap().as_str(), "OK");
             /// ```
             pub fn canonical_reason(&self) -> Option<ReasonPhrase> {
                 use self::StatusCode::*;
 
-                // Unsafe Justification
-                //
-                // Since the phrases used here are defined at compile time, we can be sure that they
-                // are all valid reason phrases. Perhaps this use of unsafe can eventually be
-                // replaced using a constant function constructor.
+                // Unsafe: Since the phrases used here are defined at compile time, we can be sure
+                // that they are all valid reason phrases. Perhaps this use of unsafe can eventually
+                // be replaced using a constant function constructor.
                 match *self {
                 $(
-                    $variant => Some(unsafe { ReasonPhrase::from_str_unchecked($phrase) }),
+                    $variant => Some(unsafe { ReasonPhrase::from_static_str_unchecked($phrase) }),
                 )+
                     Extension(_) => None
                 }
@@ -116,19 +108,19 @@ macro_rules! status_codes {
         }
 
         impl TryFrom<u16> for StatusCode {
-            type Error = InvalidStatusCode;
+            type Error = StatusCodeError;
 
             fn try_from(value: u16) -> Result<Self, Self::Error> {
                 use self::StatusCode::*;
 
                 if value < 100 || value >= 600 {
-                    return Err(InvalidStatusCode::OutOfRange);
+                    return Err(StatusCodeError::OutOfRange);
                 }
 
                 // These status codes are not allowed in RTSP 2.0 and cannot be reused by
                 // extensions.
                 if value == 303 || value == 352 {
-                    return Err(InvalidStatusCode::Removed);
+                    return Err(StatusCodeError::Removed);
                 }
 
                 Ok(match value {
@@ -140,26 +132,31 @@ macro_rules! status_codes {
             }
         }
 
-        #[test]
-        fn test_status_code_canonical_reason() {
-        $(
-            let status_code = StatusCode::$variant;
-            assert_eq!(status_code.canonical_reason().unwrap().as_str(), $phrase);
-        )+
+        #[cfg(test)]
+        mod test {
+            use crate::status::{ExtensionStatusCode, StatusCode};
 
-            let status_code = StatusCode::Extension(ExtensionStatusCode(599));
-            assert!(status_code.canonical_reason().is_none());
-        }
+            #[test]
+            fn test_status_code_canonical_reason() {
+            $(
+                let status_code = StatusCode::$variant;
+                assert_eq!(status_code.canonical_reason().unwrap().as_str(), $phrase);
+            )+
 
-        #[test]
-        fn test_from_status_code_to_u16() {
-        $(
-            let status_code = StatusCode::$variant;
-            assert_eq!(u16::from(status_code), $code);
-        )+
+                let status_code = StatusCode::Extension(ExtensionStatusCode(599));
+                assert!(status_code.canonical_reason().is_none());
+            }
 
-            let status_code = StatusCode::Extension(ExtensionStatusCode(599));
-            assert_eq!(u16::from(status_code), 599);
+            #[test]
+            fn test_u16_from_status_code() {
+            $(
+                let status_code = StatusCode::$variant;
+                assert_eq!(u16::from(status_code), $code);
+            )+
+
+                let status_code = StatusCode::Extension(ExtensionStatusCode(599));
+                assert_eq!(u16::from(status_code), 599);
+            }
         }
     }
 }
@@ -170,7 +167,7 @@ impl StatusCode {
     /// # Examples
     ///
     /// ```
-    /// use rtsp::{StatusCode, StatusCodeClass};
+    /// use rtsp::status::{StatusCode, StatusCodeClass};
     ///
     /// assert_eq!(StatusCode::BadRequest.class(), StatusCodeClass::ClientError);
     /// ```
@@ -187,12 +184,12 @@ impl StatusCode {
         }
     }
 
-    /// Returns whether or not the status code is of the client error class (between [400, 499]).
+    /// Returns whether the status code is of the client error class (between [400, 499]).
     ///
     /// # Examples
     ///
     /// ```
-    /// use rtsp::StatusCode;
+    /// use rtsp::status::StatusCode;
     ///
     /// assert!(StatusCode::NotFound.is_client_error());
     /// assert!(!StatusCode::InternalServerError.is_client_error());
@@ -201,12 +198,12 @@ impl StatusCode {
         self.class() == StatusCodeClass::ClientError
     }
 
-    /// Returns whether or not the status code is of the informational class (between [100, 199]).
+    /// Returns whether the status code is of the informational class (between [100, 199]).
     ///
     /// # Examples
     ///
     /// ```
-    /// use rtsp::StatusCode;
+    /// use rtsp::status::StatusCode;
     ///
     /// assert!(StatusCode::Continue.is_informational());
     /// assert!(!StatusCode::OK.is_informational());
@@ -215,12 +212,12 @@ impl StatusCode {
         self.class() == StatusCodeClass::Informational
     }
 
-    /// Returns whether or not the status code is of the redirection class (between [300, 399]).
+    /// Returns whether the status code is of the redirection class (between [300, 399]).
     ///
     /// # Examples
     ///
     /// ```
-    /// use rtsp::StatusCode;
+    /// use rtsp::status::StatusCode;
     ///
     /// assert!(StatusCode::Found.is_redirection());
     /// assert!(!StatusCode::BadRequest.is_redirection());
@@ -229,12 +226,12 @@ impl StatusCode {
         self.class() == StatusCodeClass::Redirection
     }
 
-    /// Returns whether or not the status code is of the server error class (between [100, 199]).
+    /// Returns whether the status code is of the server error class (between [100, 199]).
     ///
     /// # Examples
     ///
     /// ```
-    /// use rtsp::StatusCode;
+    /// use rtsp::status::StatusCode;
     ///
     /// assert!(StatusCode::InternalServerError.is_server_error());
     /// assert!(!StatusCode::OK.is_server_error());
@@ -243,12 +240,12 @@ impl StatusCode {
         self.class() == StatusCodeClass::ServerError
     }
 
-    /// Returns whether or not the status code is of the success class (between [200, 299]).
+    /// Returns whether the status code is of the success class (between [200, 299]).
     ///
     /// # Examples
     ///
     /// ```
-    /// use rtsp::StatusCode;
+    /// use rtsp::status::StatusCode;
     ///
     /// assert!(StatusCode::OK.is_success());
     /// assert!(!StatusCode::NotFound.is_success());
@@ -260,7 +257,7 @@ impl StatusCode {
 
 impl Debug for StatusCode {
     fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
-        write!(formatter, "{}", *self)
+        write!(formatter, "{}", u16::from(*self))
     }
 }
 
@@ -272,7 +269,7 @@ impl Default for StatusCode {
 
 impl Display for StatusCode {
     fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
-        write!(formatter, "{}", *self)
+        write!(formatter, "{}", u16::from(*self))
     }
 }
 
@@ -427,11 +424,11 @@ impl PartialOrd for StatusCode {
 }
 
 impl<'status> TryFrom<&'status [u8]> for StatusCode {
-    type Error = InvalidStatusCode;
+    type Error = StatusCodeError;
 
     fn try_from(value: &'status [u8]) -> Result<Self, Self::Error> {
         if value.len() != 3 {
-            return Err(InvalidStatusCode::Invalid);
+            return Err(StatusCodeError::Invalid);
         }
 
         let a = u16::from(value[0].wrapping_sub(b'0'));
@@ -444,7 +441,7 @@ impl<'status> TryFrom<&'status [u8]> for StatusCode {
 }
 
 impl<'status> TryFrom<&'status str> for StatusCode {
-    type Error = InvalidStatusCode;
+    type Error = StatusCodeError;
 
     fn try_from(value: &'status str) -> Result<Self, Self::Error> {
         StatusCode::try_from(value.as_bytes())
@@ -452,64 +449,64 @@ impl<'status> TryFrom<&'status str> for StatusCode {
 }
 
 impl TryFrom<i16> for StatusCode {
-    type Error = InvalidStatusCode;
+    type Error = StatusCodeError;
 
     fn try_from(value: i16) -> Result<Self, Self::Error> {
-        let value = u16::try_from(value).map_err(|_| InvalidStatusCode::OutOfRange)?;
+        let value = u16::try_from(value).map_err(|_| StatusCodeError::OutOfRange)?;
         StatusCode::try_from(value)
     }
 }
 
 impl TryFrom<i32> for StatusCode {
-    type Error = InvalidStatusCode;
+    type Error = StatusCodeError;
 
     fn try_from(value: i32) -> Result<Self, Self::Error> {
-        let value = u16::try_from(value).map_err(|_| InvalidStatusCode::OutOfRange)?;
+        let value = u16::try_from(value).map_err(|_| StatusCodeError::OutOfRange)?;
         StatusCode::try_from(value)
     }
 }
 
 impl TryFrom<u32> for StatusCode {
-    type Error = InvalidStatusCode;
+    type Error = StatusCodeError;
 
     fn try_from(value: u32) -> Result<Self, Self::Error> {
-        let value = u16::try_from(value).map_err(|_| InvalidStatusCode::OutOfRange)?;
+        let value = u16::try_from(value).map_err(|_| StatusCodeError::OutOfRange)?;
         StatusCode::try_from(value)
     }
 }
 
 impl TryFrom<i64> for StatusCode {
-    type Error = InvalidStatusCode;
+    type Error = StatusCodeError;
 
     fn try_from(value: i64) -> Result<Self, Self::Error> {
-        let value = u16::try_from(value).map_err(|_| InvalidStatusCode::OutOfRange)?;
+        let value = u16::try_from(value).map_err(|_| StatusCodeError::OutOfRange)?;
         StatusCode::try_from(value as u16)
     }
 }
 
 impl TryFrom<u64> for StatusCode {
-    type Error = InvalidStatusCode;
+    type Error = StatusCodeError;
 
     fn try_from(value: u64) -> Result<Self, Self::Error> {
-        let value = u16::try_from(value).map_err(|_| InvalidStatusCode::OutOfRange)?;
+        let value = u16::try_from(value).map_err(|_| StatusCodeError::OutOfRange)?;
         StatusCode::try_from(value)
     }
 }
 
 impl TryFrom<i128> for StatusCode {
-    type Error = InvalidStatusCode;
+    type Error = StatusCodeError;
 
     fn try_from(value: i128) -> Result<Self, Self::Error> {
-        let value = u16::try_from(value).map_err(|_| InvalidStatusCode::OutOfRange)?;
+        let value = u16::try_from(value).map_err(|_| StatusCodeError::OutOfRange)?;
         StatusCode::try_from(value as u16)
     }
 }
 
 impl TryFrom<u128> for StatusCode {
-    type Error = InvalidStatusCode;
+    type Error = StatusCodeError;
 
     fn try_from(value: u128) -> Result<Self, Self::Error> {
-        let value = u16::try_from(value).map_err(|_| InvalidStatusCode::OutOfRange)?;
+        let value = u16::try_from(value).map_err(|_| StatusCodeError::OutOfRange)?;
         StatusCode::try_from(value)
     }
 }
@@ -555,25 +552,25 @@ pub enum StatusCodeClass {
 /// A generic error indicating that the status code was invalid.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
-pub enum InvalidStatusCode {
-    /// This error indicates that when converting to a [`StatusCode`] from a byte string, that the
-    /// byte string was not of the form `"***"` where each `'*'` is a digit.
+pub enum StatusCodeError {
+    /// When converting to a [`StatusCode`] from a byte string, the byte string was not of the form
+    /// `"***"` where each `'*'` is a digit.
     Invalid,
 
-    /// This error indicates that when converting to a [`StatusCode`] from an integer, the value was
-    /// out of range (i.e. outside of the range [100, 599]).
+    /// When converting to a [`StatusCode`] from an integer, the value was out of range (i.e.
+    /// outside of the range [100, 599]).
     OutOfRange,
 
-    /// This error indicates that the status code was valid and referred to an existing status code,
-    /// but the status code is not allowed to be used in RTSP 2.0. Currently, this only applies to
-    /// status codes 303 (See Other) and 452 (Illegal Conference Identifier). Due to their reserved
-    /// nature, extensions are also not allowed to use these status codes.
+    /// The status code was valid and referred to an existing status code, but the status code is
+    /// not allowed to be used in RTSP 2.0. Currently, this only applies to status codes 303 (See
+    /// Other) and 452 (Illegal Conference Identifier). Due to their reserved nature, extensions are
+    /// also not allowed to use these status codes.
     Removed,
 }
 
-impl fmt::Display for InvalidStatusCode {
-    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        use self::InvalidStatusCode::*;
+impl Display for StatusCodeError {
+    fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
+        use self::StatusCodeError::*;
 
         match self {
             Invalid => write!(formatter, "invalid status code"),
@@ -583,11 +580,11 @@ impl fmt::Display for InvalidStatusCode {
     }
 }
 
-impl Error for InvalidStatusCode {}
+impl Error for StatusCodeError {}
 
-impl From<!> for InvalidStatusCode {
-    fn from(value: !) -> Self {
-        value
+impl From<Infallible> for StatusCodeError {
+    fn from(_: Infallible) -> Self {
+        StatusCodeError::Invalid
     }
 }
 

@@ -3,10 +3,11 @@ extern crate criterion;
 extern crate rtsp;
 
 use criterion::Criterion;
-use rtsp::protocol::{RequestDecoder, ResponseDecoder};
+use rtsp::protocol::codec::decoder::request::Decoder as RequestDecoder;
+use rtsp::protocol::codec::decoder::response::Decoder as ResponseDecoder;
 
 fn decode_benchmark(criterion: &mut Criterion) {
-    criterion.bench_function("decode request", move |bencher| {
+    criterion.bench_function("decode request", |bencher| {
         let mut decoder = RequestDecoder::new();
         let buffer = "SETUP rtsp://example.com/foo/bar/baz.rm RTSP/2.0\r
 CSeq: 302\r
@@ -25,7 +26,7 @@ User-Agent: PhonyClient/1.2\r
         });
     });
 
-    criterion.bench_function("decode response", move |bencher| {
+    criterion.bench_function("decode response", |bencher| {
         let mut decoder = ResponseDecoder::new();
         let buffer = "RTSP/2.0 200 OK\r
 CSeq: 302\r

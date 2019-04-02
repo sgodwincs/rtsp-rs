@@ -8,12 +8,12 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::header::types::Public;
-use crate::header::HeaderMap;
 use crate::method::Method;
-use crate::protocol::{ConnectionHandle, Service};
+use crate::protocol::connection::ConnectionHandle;
+use crate::protocol::service::Service;
 use crate::request::Request;
 use crate::response::{Response, NOT_IMPLEMENTED_RESPONSE};
-use crate::session::{InvalidSessionID, Session, SessionID, DEFAULT_SESSION_TIMEOUT};
+use crate::session::{Session, SessionID, SessionIDError, DEFAULT_SESSION_TIMEOUT};
 
 pub const SUPPORTED_METHODS: [Method; 1] = [Method::Options];
 
@@ -31,12 +31,13 @@ impl ClientHandler {
         &mut self,
         request: Request<BytesMut>,
     ) -> impl Future<Item = Response<BytesMut>, Error = io::Error> {
-        let response = Response::builder()
+        let mut builder = Response::builder();
+        builder
             .typed_header(SUPPORTED_METHODS.iter().cloned().collect::<Public>())
-            .build(BytesMut::new())
-            .unwrap();
+            .body(BytesMut::new());
+        let response = builder.build().unwrap();
 
-        future::ok(response.into())
+        future::ok(response)
     }
 }
 
@@ -65,7 +66,7 @@ pub struct ServerSession {
 impl ServerSession {
     pub fn new<T>(active_client: ConnectionHandle) -> Self
     where
-        SessionID: TryFrom<T, Error = InvalidSessionID>,
+        SessionID: TryFrom<T, Error = SessionIDError>,
     {
         let expire_time = offset::Utc::now()
             .checked_add_signed(chrono::Duration::from_std(DEFAULT_SESSION_TIMEOUT).unwrap())
@@ -76,17 +77,17 @@ impl ServerSession {
 
     pub fn with_timeout<T>(expire_time: DateTime<Utc>, active_client: ConnectionHandle) -> Self
     where
-        SessionID: TryFrom<T, Error = InvalidSessionID>,
+        SessionID: TryFrom<T, Error = SessionIDError>,
     {
         ServerSession {
-            active_client: active_client,
-            expire_time: expire_time,
+            active_client,
+            expire_time,
             id: SessionID::random(),
         }
     }
 
     fn touch(&mut self) {
-        self.set_timeout(DEFAULT_SESSION_TIMEOUT);
+        self.set_timeout(DEFAULT_SESSION_TIMEOUT).unwrap();
     }
 }
 

@@ -1,38 +1,32 @@
+#[macro_use]
 pub mod decoder;
 pub mod encoder;
 
-pub use self::decoder::{
-    InvalidRequest, InvalidResponse, ParseResult, ParseState, RequestDecoder, RequestParseResult,
-    ResponseDecoder, ResponseParseResult,
-};
-pub use self::encoder::{encode_request, encode_response};
-
 use bytes::BytesMut;
 use futures::sync::mpsc::UnboundedSender;
-use std::convert::TryFrom;
+use std::convert::Infallible;
 use std::error::Error;
+use std::fmt::{self, Display, Formatter};
+use std::io;
 use std::sync::Arc;
-use std::{fmt, io};
-use tokio_io::codec::{Decoder, Encoder};
+use tokio_codec::{Decoder, Encoder};
 
+use crate::protocol::codec::decoder::request::{
+    DecodeError as RequestDecodeError, DecodeState as RequestDecodeState, Decoder as RequestDecoder,
+};
+use crate::protocol::codec::decoder::response::{
+    DecodeError as ResponseDecodeError, DecodeState as ResponseDecodeState,
+    Decoder as ResponseDecoder,
+};
+use crate::protocol::codec::decoder::DecodeResult;
+use crate::protocol::codec::encoder::request;
+use crate::protocol::codec::encoder::response;
 use crate::request::Request;
 use crate::response::Response;
 
 /// The minimum amount of bytes needed in the information line in order to differentiate between
-/// responses and requests.
+/// requests and responses.
 const MINIMUM_INFO_LINE_SIZE: usize = 5;
-
-/// An abstract message result that is produced by message decoding. The error variant only includes
-/// errors that are recoverable.
-pub type MessageResult = Result<Message, InvalidMessage>;
-
-/// A request result that is produced by request decoding. The error variant only includes errors
-/// that are recoverable.
-pub type RequestResult = Result<Request<BytesMut>, RecoverableInvalidRequest>;
-
-/// A response result that is produced by response decoding. The error variant only includes errors
-/// that are recoverable.
-pub type ResponseResult = Result<Response<BytesMut>, RecoverableInvalidResponse>;
 
 /// The codec that handles encoding requests/responses and decoding requests/responses. Because
 /// servers and clients can both send requests and receive responses, this codec is shared by the
@@ -45,95 +39,43 @@ pub struct Codec {
     /// The response decoder that maintains partial parsing state.
     response_decoder: ResponseDecoder,
 
-    /// An event sink that is sent [CodecEvent]s. For example, whenever decoding starts, an event
+    /// An event sink that is sent [`CodecEvent`]s. For example, whenever decoding starts, an event
     /// will be sent for that.
     tx_event: Option<UnboundedSender<CodecEvent>>,
 }
 
 impl Codec {
-    /// Constructs a new codec without an event sink.
-    pub fn new() -> Self {
-        Codec::default()
-    }
-
-    /// Constructs a new codec with an event sink.
-    ///
-    /// # Arguments
-    ///
-    /// * `tx_event` - The sink that will be sent any [`CodecEvent`] that occur.
-    pub fn with_events(tx_event: UnboundedSender<CodecEvent>) -> Self {
-        Codec {
-            request_decoder: RequestDecoder::new(),
-            response_decoder: ResponseDecoder::new(),
-            tx_event: Some(tx_event),
-        }
-    }
-
-    /// Sends a [`CodecEvent`] through the internal event sink.
-    ///
-    /// If an error is encountered while sending the codec event, then no more events will be sent
-    /// for the duration of this codec's lifetime.
-    ///
-    /// # Arguments
-    ///
-    /// * `event` - The event to send through the sink.
-    fn send_codec_event(&mut self, event: CodecEvent) {
-        self.tx_event = self
-            .tx_event
-            .take()
-            .and_then(|tx_event| tx_event.unbounded_send(event).ok().map(|_| tx_event));
-    }
-
     /// Decodes a request.
     ///
     /// Using the internal request decoder, this function will attempt to make progress on decoding
     /// a request using the buffer. If a request is successfully decoded or an error occurs, this
     /// function will send a [`CodecEvent::DecodingEnded`] event.
     ///
-    /// # Arguments
-    ///
-    /// * `buffer` - The byte buffer containing the request to decode.
-    ///
-    /// # Return Value
-    ///
     /// The return value of this function can be divided into four parts:
     ///
     /// * If there was enough data provided to successfully decode a request, then
-    ///   `Ok(Some(Ok(`[`Message`]`)))` will be returned.
-    /// * If there was not enough data but no error
-    ///   occurred, then `Ok(None)` will be returned indicating that more data is needed.
-    /// * If the decoder encountered an error while decoding that was irrecoverable, then
-    ///   `Err(`[`ProtocolError`]`)` will be returned.
-    /// * If the decoder encountered an error while decoding that was recoverable, then
-    ///   `Ok(Some(Err(`[`InvalidMessage`]`)))` will be returned.
+    ///   `Ok(Some(`[`Message`]`))` will be returned.
+    /// * If there was not enough data but no error occurred, then `Ok(None)` will be returned
+    ///   indicating that more data is needed.
+    /// * If the decoder encountered an error while decoding, then `Err(`[`ProtocolError`]`)` will
+    ///   be returned.
     fn decode_request(
         &mut self,
         buffer: &mut BytesMut,
     ) -> Result<Option<<Self as Decoder>::Item>, <Self as Decoder>::Error> {
-        let (result, bytes_parsed) = self.request_decoder.decode(&buffer);
-        buffer.split_to(bytes_parsed);
+        let (result, bytes_decoded) = self.request_decoder.decode(&buffer);
+        buffer.split_to(bytes_decoded);
 
         match result {
-            ParseResult::Complete(request) => {
+            DecodeResult::Complete(request) => {
                 self.send_codec_event(CodecEvent::DecodingEnded);
-                Ok(Some(Ok(Message::Request(request))))
+                Ok(Some(Message::Request(request)))
             }
-            ParseResult::Error(error) => {
+            DecodeResult::Incomplete => Ok(None),
+            DecodeResult::Error(error) => {
                 self.send_codec_event(CodecEvent::DecodingEnded);
-
-                if error.is_recoverable() {
-                    Ok(Some(Err(InvalidMessage::InvalidRequest(
-                        RecoverableInvalidRequest::try_from(error)
-                            .expect("unexpected irrecoverable request parse error"),
-                    ))))
-                } else {
-                    Err(ProtocolError::DecodeError(DecodeError::InvalidRequest(
-                        IrrecoverableInvalidRequest::try_from(error)
-                            .expect("unexpected recoverable request parse error"),
-                    )))
-                }
+                Err(ProtocolError::DecodeError(error.into()))
             }
-            ParseResult::Incomplete => Ok(None),
         }
     }
 
@@ -143,94 +85,95 @@ impl Codec {
     /// a response using the buffer. If a response is successfully decoded or an error occurs, this
     /// function will send a [`CodecEvent::DecodingEnded`] event.
     ///
-    /// # Arguments
-    ///
-    /// * `buffer` - The byte buffer containing the response to decode.
-    ///
-    /// # Return Value
-    ///
     /// The return value of this function can be divided into four parts:
     ///
     /// * If there was enough data provided to successfully decode a response, then
-    ///   `Ok(Some(Ok(`[`Message`]`)))` will be returned.
-    /// * If there was not enough data but no error
-    ///   occurred, then `Ok(None)` will be returned indicating that more data is needed.
-    /// * If the decoder encountered an error while decoding that was irrecoverable, then
-    ///   `Err(`[`ProtocolError`]`)` will be returned.
-    /// * If the decoder encountered an error while decoding that was recoverable, then
-    ///   `Ok(Some(Err(`[`InvalidMessage`]`)))` will be returned.
+    ///   `Ok(Some(`[`Message`]`))` will be returned.
+    /// * If there was not enough data but no error occurred, then `Ok(None)` will be returned
+    ///   indicating that more data is needed.
+    /// * If the decoder encountered an error while decoding, then `Err(`[`ProtocolError`]`)` will
+    ///   be returned.
     fn decode_response(
         &mut self,
         buffer: &mut BytesMut,
     ) -> Result<Option<<Self as Decoder>::Item>, <Self as Decoder>::Error> {
-        let (result, bytes_parsed) = self.response_decoder.decode(&buffer);
-        buffer.split_to(bytes_parsed);
+        let (result, bytes_decoded) = self.response_decoder.decode(&buffer);
+        buffer.split_to(bytes_decoded);
 
         match result {
-            ParseResult::Complete(response) => {
+            DecodeResult::Complete(response) => {
                 self.send_codec_event(CodecEvent::DecodingEnded);
-                Ok(Some(Ok(Message::Response(response))))
+                Ok(Some(Message::Response(response)))
             }
-            ParseResult::Error(error) => {
+            DecodeResult::Incomplete => Ok(None),
+            DecodeResult::Error(error) => {
                 self.send_codec_event(CodecEvent::DecodingEnded);
+                Err(ProtocolError::DecodeError(error.into()))
+            }
+        }
+    }
 
-                if error.is_recoverable() {
-                    Ok(Some(Err(InvalidMessage::InvalidResponse(
-                        RecoverableInvalidResponse::try_from(error)
-                            .expect("unexpected irrecoverable response parse error"),
-                    ))))
-                } else {
-                    Err(ProtocolError::DecodeError(DecodeError::InvalidResponse(
-                        IrrecoverableInvalidResponse::try_from(error)
-                            .expect("unexpected recoverable response parse error"),
-                    )))
-                }
+    /// Constructs a new codec without an event sink.
+    pub fn new() -> Self {
+        Codec {
+            request_decoder: RequestDecoder::new(),
+            response_decoder: ResponseDecoder::new(),
+            tx_event: None,
+        }
+    }
+
+    /// Sends a [`CodecEvent`] through the internal event sink.
+    ///
+    /// If an error is encountered while sending the codec event, then no more events will be sent
+    /// for the duration of this codec's lifetime.
+    fn send_codec_event(&mut self, event: CodecEvent) {
+        if let Some(tx_event) = self.tx_event.as_ref() {
+            if tx_event.unbounded_send(event).is_err() {
+                self.tx_event = None;
             }
-            ParseResult::Incomplete => Ok(None),
+        }
+    }
+
+    /// Constructs a new codec with an event sink.
+    pub fn with_events(tx_event: UnboundedSender<CodecEvent>) -> Self {
+        Codec {
+            request_decoder: RequestDecoder::new(),
+            response_decoder: ResponseDecoder::new(),
+            tx_event: Some(tx_event),
         }
     }
 }
 
 impl Decoder for Codec {
-    type Item = MessageResult;
+    type Item = Message;
     type Error = ProtocolError;
 
     /// Decodes a message.
     ///
     /// Using the internal decoders, this function will attempt to make progress on decoding either
-    /// a request or response using the buffer. If neither of the decoders were active, this
+    /// a request or response using the buffer. If neither of the decoders are active, this
     /// function will send a [`CodecEvent::DecodingStarted`] event if the buffer is non-empty after
     /// removing all preceding newlines.
-    ///
-    /// # Arguments
-    ///
-    /// * `buffer` - The byte buffer containing the message to decode.
-    ///
-    /// # Return Value
     ///
     /// The return value of this function can be divided into four parts:
     ///
     /// * If there was enough data provided to successfully decode a message, then
-    ///   `Ok(Some(Ok(`[`Message`]`)))` will be returned.
-    /// * If there was not enough data but no error
-    ///   occurred, then `Ok(None)` will be returned indicating that more data is needed.
-    /// * If the decoder encountered an error that was irrecoverable, then
-    ///   `Err(`[`ProtocolError`]`)` will be returned.
-    /// * If the decoder encountered an error that was recoverable, then
-    ///   `Ok(Some(Err(`[`InvalidMessage`]`)))` will be returned.
+    ///   `Ok(Some(`[`Message`]`))` will be returned.
+    /// * If there was not enough data but no error occurred, then `Ok(None)` will be returned
+    ///   indicating that more data is needed.
+    /// * If the decoder encountered an error, then `Err(`[`ProtocolError`]`)` will be returned.
     fn decode(&mut self, buffer: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         // Need to determine whether we are trying to decode a request or response. If either of the
         // internal decoder states are past their starting states, then we continue off of that.
         // Otherwise, we check if the message starts with `"RTSP/"` which indicates that it is a
         // response. If not, it is a request.
 
-        if self.request_decoder.parse_state() != ParseState::InfoLine {
+        if self.request_decoder.state() != RequestDecodeState::Method {
             self.decode_request(buffer)
-        } else if self.response_decoder.parse_state() != ParseState::InfoLine {
+        } else if self.response_decoder.state() != ResponseDecodeState::Version {
             self.decode_response(buffer)
         } else {
             // Ignore any preceding newlines.
-
             while buffer.starts_with(b"\r\n") {
                 buffer.split_to(2);
             }
@@ -251,13 +194,7 @@ impl Decoder for Codec {
 
     /// Called when there are no more bytes available to be read from the underlying I/O.
     ///
-    /// # Arguments
-    ///
-    /// * `buffer` - The byte buffer containing the message to decode.
-    ///
-    /// # Return Value
-    ///
-    /// This function will attempt to decode a message as described in `Codec::decode()`. If there
+    /// This function will attempt to decode a message as described in [`Codec::decode`]. If there
     /// is not enough data to do so, then `Err(`[`ProtocolError::UnexpectedEOF`]`)` will be
     /// returned.
     fn decode_eof(&mut self, buffer: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
@@ -276,11 +213,7 @@ impl Decoder for Codec {
 
 impl Default for Codec {
     fn default() -> Self {
-        Codec {
-            request_decoder: RequestDecoder::new(),
-            response_decoder: ResponseDecoder::new(),
-            tx_event: None,
-        }
+        Codec::new()
     }
 }
 
@@ -294,21 +227,14 @@ impl Encoder for Codec {
     /// message, a [`CodecEvent::EncodingStarted`] event will be sent. And after encoding has
     /// finished, an [`CodecEvent::EncodingEnded`] event will be sent.
     ///
-    /// # Arguments
-    ///
-    /// * `message` - The message to be encoded.
-    /// * `buffer` - The buffer to encode the message into.
-    ///
-    /// # Return Value
-    ///
-    /// Although a `Result` is returned, this function will never return an error as the actual
+    /// Although a [`Result`] is returned, this function will never return an error as the actual
     /// message encoding cannot fail. As a result, `Ok(())` will always be returned.
     fn encode(&mut self, message: Self::Item, buffer: &mut BytesMut) -> Result<(), Self::Error> {
         self.send_codec_event(CodecEvent::EncodingStarted);
 
         match message {
-            Message::Request(request) => encode_request(&request, buffer),
-            Message::Response(response) => encode_response(&response, buffer),
+            Message::Request(request) => request::encode(&request, buffer),
+            Message::Response(response) => response::encode(&response, buffer),
         }
 
         self.send_codec_event(CodecEvent::EncodingEnded);
@@ -321,84 +247,36 @@ impl Encoder for Codec {
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub enum CodecEvent {
-    /// The decoding of a message has started.
-    DecodingStarted,
-
     /// The decoding of a message has ended. This will be sent when either a message is successfully
     /// decoded or decoding fails.
     DecodingEnded,
 
-    /// The encoding of a message has started.
-    EncodingStarted,
+    /// The decoding of a message has started.
+    DecodingStarted,
 
     /// The encoding of a message has ended.
     EncodingEnded,
+
+    /// The encoding of a message has started.
+    EncodingStarted,
 }
 
 /// An abstract message type that is either a request or response.
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[allow(clippy::large_enum_variant)]
 pub enum Message {
+    /// This message is a request.
     Request(Request<BytesMut>),
+
+    /// This message is a response.
     Response(Response<BytesMut>),
-}
-
-/// An error type related to a specific operation being performed by a caller.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
-pub enum OperationError {
-    /// An attempt was made to send a request when the write state no longer allows sending
-    /// requests. This situation can occur if, for example, a soft shutdown is happening or an error
-    /// occurred while trying to send a message to the receiving agent.
-    Closed,
-
-    /// A pending request that neither timed out nor received a corresponding response was
-    /// cancelled. This will only occur when the read state has been changed such that responses are
-    /// no longer able to be read, thus any requests currently pending will be cancelled.
-    RequestCancelled,
-
-    /// A pending request timed out while waiting for its corresponding response. For any given
-    /// request, there are two timeouts to be considered. The first is a timeout for a duration of
-    /// time for which no response is heard. However, if a `100 Continue` response is received for
-    /// this request, the timer will be reset. The second timer is one for the entire duration for
-    /// which we are waiting for the final response regardless of any received `100 Continue`
-    /// responses.
-    RequestTimedOut(RequestTimeoutType),
-}
-
-impl fmt::Display for OperationError {
-    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str(self.description())
-    }
-}
-
-impl Error for OperationError {
-    fn description(&self) -> &str {
-        use self::OperationError::*;
-
-        match self {
-            Closed => "closed",
-            RequestCancelled => "request cancelled",
-            RequestTimedOut(RequestTimeoutType::Long) => "request timed out (long)",
-            RequestTimedOut(RequestTimeoutType::Short) => "request timed out (short)",
-        }
-    }
-}
-
-/// Specifies what kind of request timeout occurred.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum RequestTimeoutType {
-    /// The timeout was for the entire duration of waiting for the final response. Specifically,
-    /// `100 Continue` responses are *not* final responses.
-    Long,
-
-    /// The timeout was for a duration for which no response was heard.
-    Short,
 }
 
 /// A generic error type for any protocol errors that occur.
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub enum ProtocolError {
-    /// An irrecoverable error was encountered while decoding a request or response.
+    /// An error was encountered while decoding a request or response.
     DecodeError(DecodeError),
 
     /// An error that occurs when too much time has passed from the start of message decoding. The
@@ -414,22 +292,24 @@ pub enum ProtocolError {
     UnexpectedEOF,
 }
 
-impl fmt::Display for ProtocolError {
-    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str(self.description())
-    }
-}
-
-impl Error for ProtocolError {
-    fn description(&self) -> &str {
+impl Display for ProtocolError {
+    fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
         use self::ProtocolError::*;
 
         match self {
-            DecodeError(ref decode_error) => decode_error.description(),
-            DecodingTimedOut => "decoding timed out",
-            IO(ref io) => io.description(),
-            UnexpectedEOF => "unexpected EOF",
+            DecodeError(error) => error.fmt(formatter),
+            DecodingTimedOut => write!(formatter, "decoding timed out"),
+            IO(error) => error.fmt(formatter),
+            UnexpectedEOF => write!(formatter, "unexpected EOF"),
         }
+    }
+}
+
+impl Error for ProtocolError {}
+
+impl From<Infallible> for ProtocolError {
+    fn from(_: Infallible) -> Self {
+        ProtocolError::DecodingTimedOut
     }
 }
 
@@ -439,252 +319,65 @@ impl From<io::Error> for ProtocolError {
     }
 }
 
-/// An irrecoverable error was encountered while decoding a request or response.
+/// An error was encountered while decoding a request or response.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub enum DecodeError {
-    /// An irrecoverable error was encountered while decoding a request.
-    InvalidRequest(IrrecoverableInvalidRequest),
+    /// An error was encountered while decoding a request.
+    Request(RequestDecodeError),
 
-    /// An irrecoverable error was encountered while decoding a response.
-    InvalidResponse(IrrecoverableInvalidResponse),
+    /// An error was encountered while decoding a response.
+    Response(ResponseDecodeError),
 }
 
-impl fmt::Display for DecodeError {
-    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str(self.description())
-    }
-}
-
-impl Error for DecodeError {
-    fn description(&self) -> &str {
+impl Display for DecodeError {
+    fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
         use self::DecodeError::*;
 
         match self {
-            InvalidRequest(ref invalid_request) => invalid_request.description(),
-            InvalidResponse(ref invalid_response) => invalid_response.description(),
+            Request(error) => error.fmt(formatter),
+            Response(error) => error.fmt(formatter),
         }
     }
 }
 
-/// An error representing an irrecoverable decoding error of a request.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
-pub enum IrrecoverableInvalidRequest {
-    InvalidContentLength,
-    InvalidHeaderLine,
-    InvalidRequestLine,
-    InvalidVersion,
-    UnsupportedVersion,
-}
+impl Error for DecodeError {}
 
-impl fmt::Display for IrrecoverableInvalidRequest {
-    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str(self.description())
+impl From<Infallible> for DecodeError {
+    fn from(_: Infallible) -> Self {
+        DecodeError::Request(RequestDecodeError::InvalidContentLength)
     }
 }
 
-impl Error for IrrecoverableInvalidRequest {
-    fn description(&self) -> &str {
-        use self::IrrecoverableInvalidRequest::*;
-
-        match self {
-            InvalidContentLength => "invalid RTSP request - invalid content length",
-            InvalidHeaderLine => "invalid RTSP request - invalid header line",
-            InvalidRequestLine => "invalid RTSP request - invalid request line",
-            InvalidVersion => "invalid RTSP request - invalid version",
-            UnsupportedVersion => "invalid RTSP request - unsupported version",
-        }
+impl From<RequestDecodeError> for DecodeError {
+    fn from(value: RequestDecodeError) -> Self {
+        DecodeError::Request(value)
     }
 }
 
-impl TryFrom<InvalidRequest> for IrrecoverableInvalidRequest {
-    type Error = ();
-
-    fn try_from(value: InvalidRequest) -> Result<Self, Self::Error> {
-        use self::IrrecoverableInvalidRequest::*;
-
-        match value {
-            InvalidRequest::InvalidContentLength => Ok(InvalidContentLength),
-            InvalidRequest::InvalidHeaderLine => Ok(InvalidHeaderLine),
-            InvalidRequest::InvalidRequestLine => Ok(InvalidRequestLine),
-            InvalidRequest::InvalidVersion => Ok(InvalidVersion),
-            InvalidRequest::UnsupportedVersion => Ok(UnsupportedVersion),
-            _ => Err(()),
-        }
-    }
-}
-
-/// An error representing an irrecoverable decoding error of a response.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
-pub enum IrrecoverableInvalidResponse {
-    InvalidContentLength,
-    InvalidHeaderLine,
-    InvalidResponseLine,
-    InvalidVersion,
-    UnsupportedVersion,
-}
-
-impl fmt::Display for IrrecoverableInvalidResponse {
-    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str(self.description())
-    }
-}
-
-impl Error for IrrecoverableInvalidResponse {
-    fn description(&self) -> &str {
-        use self::IrrecoverableInvalidResponse::*;
-
-        match self {
-            InvalidContentLength => "invalid RTSP response - invalid content length",
-            InvalidHeaderLine => "invalid RTSP response - invalid header line",
-            InvalidResponseLine => "invalid RTSP response - invalid response line",
-            InvalidVersion => "invalid RTSP response - invalid version",
-            UnsupportedVersion => "invalid RTSP response - unsupported version",
-        }
-    }
-}
-
-impl TryFrom<InvalidResponse> for IrrecoverableInvalidResponse {
-    type Error = ();
-
-    fn try_from(value: InvalidResponse) -> Result<Self, Self::Error> {
-        use self::IrrecoverableInvalidResponse::*;
-
-        match value {
-            InvalidResponse::InvalidContentLength => Ok(InvalidContentLength),
-            InvalidResponse::InvalidHeaderLine => Ok(InvalidHeaderLine),
-            InvalidResponse::InvalidResponseLine => Ok(InvalidResponseLine),
-            InvalidResponse::InvalidVersion => Ok(InvalidVersion),
-            InvalidResponse::UnsupportedVersion => Ok(UnsupportedVersion),
-            _ => Err(()),
-        }
-    }
-}
-
-// An abstract message error type that is either a request or response decoding error. The error is
-// always recoverable.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum InvalidMessage {
-    InvalidRequest(RecoverableInvalidRequest),
-    InvalidResponse(RecoverableInvalidResponse),
-}
-
-impl fmt::Display for InvalidMessage {
-    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str(self.description())
-    }
-}
-
-impl Error for InvalidMessage {
-    fn description(&self) -> &str {
-        use self::InvalidMessage::*;
-
-        match self {
-            InvalidRequest(ref request) => request.description(),
-            InvalidResponse(ref response) => response.description(),
-        }
-    }
-}
-
-/// An error representing an recoverable decoding error of a request.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
-pub enum RecoverableInvalidRequest {
-    InvalidHeaderName,
-    InvalidHeaderValue,
-    InvalidMethod,
-    InvalidRequestURI,
-}
-
-impl fmt::Display for RecoverableInvalidRequest {
-    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str(self.description())
-    }
-}
-
-impl Error for RecoverableInvalidRequest {
-    fn description(&self) -> &str {
-        use self::RecoverableInvalidRequest::*;
-
-        match self {
-            InvalidHeaderName => "invalid RTSP request - invalid header name",
-            InvalidHeaderValue => "invalid RTSP request - invalid header value",
-            InvalidMethod => "invalid RTSP request - invalid method",
-            InvalidRequestURI => "invalid RTSP request - invalid request URI",
-        }
-    }
-}
-
-impl TryFrom<InvalidRequest> for RecoverableInvalidRequest {
-    type Error = ();
-
-    fn try_from(value: InvalidRequest) -> Result<Self, Self::Error> {
-        use self::RecoverableInvalidRequest::*;
-
-        match value {
-            InvalidRequest::InvalidHeaderName => Ok(InvalidHeaderName),
-            InvalidRequest::InvalidHeaderValue => Ok(InvalidHeaderValue),
-            InvalidRequest::InvalidMethod => Ok(InvalidMethod),
-            InvalidRequest::InvalidRequestURI => Ok(InvalidRequestURI),
-            _ => Err(()),
-        }
-    }
-}
-
-/// An error representing an recoverable decoding error of a response.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
-pub enum RecoverableInvalidResponse {
-    InvalidHeaderName,
-    InvalidHeaderValue,
-    InvalidReasonPhrase,
-    InvalidStatusCode,
-}
-
-impl fmt::Display for RecoverableInvalidResponse {
-    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str(self.description())
-    }
-}
-
-impl Error for RecoverableInvalidResponse {
-    fn description(&self) -> &str {
-        use self::RecoverableInvalidResponse::*;
-
-        match self {
-            InvalidHeaderName => "invalid RTSP response - invalid header name",
-            InvalidHeaderValue => "invalid RTSP response - invalid header value",
-            InvalidReasonPhrase => "invalid RTSP response - invalid reason phrase",
-            InvalidStatusCode => "invalid RTSP response - invalid status code",
-        }
-    }
-}
-
-impl TryFrom<InvalidResponse> for RecoverableInvalidResponse {
-    type Error = ();
-
-    fn try_from(value: InvalidResponse) -> Result<Self, Self::Error> {
-        use self::RecoverableInvalidResponse::*;
-
-        match value {
-            InvalidResponse::InvalidHeaderName => Ok(InvalidHeaderName),
-            InvalidResponse::InvalidHeaderValue => Ok(InvalidHeaderValue),
-            InvalidResponse::InvalidReasonPhrase => Ok(InvalidReasonPhrase),
-            InvalidResponse::InvalidStatusCode => Ok(InvalidStatusCode),
-            _ => Err(()),
-        }
+impl From<ResponseDecodeError> for DecodeError {
+    fn from(value: ResponseDecodeError) -> Self {
+        DecodeError::Response(value)
     }
 }
 
 #[cfg(test)]
 mod test {
+    use bytes::BytesMut;
+    use futures::stream::Stream;
     use futures::sync::mpsc::unbounded;
-    use futures::Stream;
+    use std::convert::TryFrom;
     use tokio::runtime::current_thread::Runtime;
+    use tokio_codec::{Decoder, Encoder};
 
-    use super::*;
-    use crate::header::HeaderName;
+    use crate::header::name::HeaderName;
+    use crate::header::types::ContentLength;
+    use crate::header::value::HeaderValue;
+    use crate::method::Method;
+    use crate::protocol::codec::{Codec, CodecEvent, Message};
+    use crate::request::Request;
+    use crate::response::Response;
+    use crate::uri::request::URI;
 
     #[test]
     fn test_codec_decoding() {
@@ -695,15 +388,18 @@ mod test {
              \r\n\
              Body",
         );
-        let expected_request = Request::builder()
-            .method("SETUP")
-            .uri("*")
-            .header(HeaderName::ContentLength, " 4")
-            .build(BytesMut::from("Body".as_bytes()))
-            .unwrap();
-
+        let mut builder = Request::builder();
+        builder
+            .method(Method::Setup)
+            .uri(URI::asterisk())
+            .header(
+                HeaderName::ContentLength,
+                HeaderValue::try_from("4").unwrap(),
+            )
+            .body(BytesMut::from("Body"));
+        let expected_request = builder.build().unwrap();
         assert_eq!(
-            codec.decode(&mut buffer).unwrap().unwrap().unwrap(),
+            codec.decode(&mut buffer).unwrap().unwrap(),
             Message::Request(expected_request)
         );
 
@@ -711,9 +407,12 @@ mod test {
         assert_eq!(codec.decode(&mut buffer).unwrap(), None);
 
         let mut buffer = BytesMut::from("\r\n\r\n");
+        let mut builder = Response::builder();
+        builder.body(BytesMut::new());
+        let response = builder.build().unwrap();
         assert_eq!(
-            codec.decode(&mut buffer).unwrap().unwrap().unwrap(),
-            Message::Response(Response::builder().build("".into()).unwrap())
+            codec.decode(&mut buffer).unwrap().unwrap(),
+            Message::Response(response)
         );
     }
 
@@ -721,12 +420,13 @@ mod test {
     fn test_codec_encoding() {
         let mut codec = Codec::new();
         let mut buffer = BytesMut::new();
-        let request = Request::builder()
-            .method("SETUP")
-            .uri("*")
-            .header(HeaderName::ContentLength, " 4")
-            .build(BytesMut::from("Body".as_bytes()))
-            .unwrap();
+        let mut builder = Request::builder();
+        builder
+            .method(Method::Setup)
+            .uri(URI::asterisk())
+            .typed_header(ContentLength::try_from(4).unwrap())
+            .body(BytesMut::from("Body"));
+        let request = builder.build().unwrap();
         let expected_buffer = BytesMut::from(
             "SETUP * RTSP/2.0\r\n\
              Content-Length: 4\r\n\
@@ -747,7 +447,9 @@ mod test {
         {
             let mut codec = Codec::with_events(tx_event);
             let mut buffer = BytesMut::new();
-            let response = Response::builder().build("".into()).unwrap();
+            let mut builder = Response::builder();
+            builder.body(BytesMut::new());
+            let response = builder.build().unwrap();
             codec
                 .encode(Message::Response(response), &mut buffer)
                 .unwrap();
@@ -756,7 +458,9 @@ mod test {
             assert!(codec.decode(&mut buffer).is_ok());
 
             let mut buffer = BytesMut::new();
-            let response = Response::builder().build("".into()).unwrap();
+            let mut builder = Response::builder();
+            builder.body(BytesMut::new());
+            let response = builder.build().unwrap();
             codec
                 .encode(Message::Response(response), &mut buffer)
                 .unwrap();

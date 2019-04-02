@@ -1,19 +1,20 @@
 //! Connection Shutdown Handler
 //!
 //! This module contains the logic for dealing with connection shutdown events. Specifically, this
-//! module only handles the shutdown of the the [`super::Connection`] task and is not involved with
-//! the shutdown of the [`super::RequestHandler`] task.
+//! module only handles the shutdown of the the [`Connection`] task and is not involved with the
+//! shutdown of the [`RequestHandler`] task.
 
 use futures::sync::oneshot;
-use futures::{Async, Future, Poll};
+use futures::{try_ready, Async, Future, Poll};
 use std::time::{Duration, Instant};
 use tokio_timer::Delay;
 
-/// The object responsible for managing deliberate shutdown of connections.
+/// The type responsible for managing deliberate shutdown of connections.
 #[derive(Debug)]
-pub struct Shutdown {
+#[must_use = "futures do nothing unless polled"]
+pub struct ShutdownHandler {
     /// A receiver that will perform a shutdown on receiving a shutdown type. This can only occur
-    /// once, and at present, can only occur from a [`super::ConnectionHandle`].
+    /// once, and at present, can only occur from a [`ConnectionHandle`].
     rx_initiate_shutdown: Option<oneshot::Receiver<ShutdownType>>,
 
     /// When a graceful shutdown has been started, a timer is set for which the connection must end
@@ -23,34 +24,27 @@ pub struct Shutdown {
     timer: Option<Delay>,
 
     /// It is possible that a shutdown can occur without an explicit call from a
-    /// [`super::ConnectionHandle`], but it may be necessary for users to know when it happens.
-    /// The corresponding receiver is kept within the handles and will receive a message once an
+    /// [`ConnectionHandle`], but it may be necessary for users to know when it happens. The
+    /// corresponding receiver is kept within the handles and will receive a message once an
     /// immediate shutdown has occurred.
     tx_shutdown_event: Option<oneshot::Sender<()>>,
 }
 
-impl Shutdown {
+impl ShutdownHandler {
     /// Constructs a new shutdown handler.
-    ///
-    /// # Arguments
-    ///
-    /// * `rx_initiate_shutdown` - A receiver for when the caller wants to start a shutdown
-    ///   indirectly.
-    /// * `tx_shutdown_event` - A sender for which this object will notify the caller when the
-    ///   shutdown has completed.
     pub fn new(
         rx_initiate_shutdown: oneshot::Receiver<ShutdownType>,
         tx_shutdown_event: oneshot::Sender<()>,
     ) -> Self {
-        Shutdown {
+        ShutdownHandler {
             rx_initiate_shutdown: Some(rx_initiate_shutdown),
             timer: None,
             tx_shutdown_event: Some(tx_shutdown_event),
         }
     }
 
-    /// Simply ensures that a full (i.e. immediate) shutdown has occurred.
-    pub fn ensure_shutdown(&mut self) {
+    /// Forces an immediate shutdown to occur.
+    pub fn force_shutdown(&mut self) {
         self.handle_shutdown(ShutdownType::Immediate);
     }
 
@@ -59,11 +53,7 @@ impl Shutdown {
     /// If [`ShutdownType::Graceful`] is provided, a timer will be set with the provided duration.
     ///
     /// If [`ShutdownType::Immediate`] is provided, a message will be sent to the receiver of the
-    /// provided shutdown event sender in `Shutdown::new`.
-    ///
-    /// # Arguments
-    ///
-    /// * `shutdown_type` - The type of shutdown to occur.
+    /// provided shutdown event sender in [`ShutdownHandler::new`].
     fn handle_shutdown(&mut self, shutdown_type: ShutdownType) {
         match shutdown_type {
             ShutdownType::Graceful(duration) => {
@@ -72,51 +62,23 @@ impl Shutdown {
                 let expire_time = Instant::now() + duration;
                 self.rx_initiate_shutdown = None;
                 self.timer = Some(Delay::new(expire_time));
-
-                // We need to do a poll here even though it will most certainly not be ready. This
-                // will register the current task to wake up when it is ready. If it fails for
-                // whatever reason, then the current state will just switch to
-                // [`ShutdownState::Shutdown`].
-
-                self.poll_shutting_down().ok();
             }
             ShutdownType::Immediate => {
                 self.rx_initiate_shutdown = None;
                 self.timer = None;
 
                 if let Some(tx_shutdown_event) = self.tx_shutdown_event.take() {
-                    tx_shutdown_event.send(()).ok();
+                    let _ = tx_shutdown_event.send(());
                 }
             }
-        }
-    }
-
-    /// Polls for shutdown based on the current state.
-    ///
-    /// # Return Value
-    ///
-    /// If `Ok(Async::Ready(()))` is returned, this implies that the shutdown state needs to be
-    /// dealt with by the caller by inspecting the result of a call to [`Shutdown::state`].
-    ///
-    /// If `Ok(Async::NotReady)` is returned, then the current task will be notified when another
-    /// poll needs to occur.
-    ///
-    /// The error `Err(())` will never be returned.
-    pub fn poll(&mut self) -> Poll<(), ()> {
-        match self.state() {
-            ShutdownState::Running => self.poll_running(),
-            ShutdownState::ShuttingDown => self.poll_shutting_down(),
-            ShutdownState::Shutdown => Ok(Async::Ready(())),
         }
     }
 
     /// Polls the shutdown with the assumption that the current state is [`ShutdownState::Running`].
     ///
     /// Specifically, this function will check if a shutdown was initiated by an outside caller via
-    /// the sender provided in [`Shutdown::new`]. If the sender is dropped, this will cause an
-    /// immediate shutdown to occur.
-    ///
-    /// # Return Value
+    /// the sender provided in [`ShutdownHandler::new`]. If the sender is dropped, this will cause
+    /// an immediate shutdown to occur.
     ///
     /// If `Ok(Async::Ready(()))` is returned, this implies that a shutdown was initiated as
     /// described above.
@@ -129,14 +91,18 @@ impl Shutdown {
         match self
             .rx_initiate_shutdown
             .as_mut()
-            .expect("`poll_running` should not be called if `rx_initiate_shutdown` is `None`")
+            .expect(
+                "`ShutdownHandler::poll_running` should not be called if `ShutdownHandler.rx_initiate_shutdown` is `None`",
+            )
             .poll()
         {
             Ok(Async::Ready(shutdown_type)) => {
+                // A shutdown event has been sent by the sender, initiate a shutdown.
                 self.handle_shutdown(shutdown_type);
                 Ok(Async::Ready(()))
             }
             Err(_) => {
+                // The sender has been dropped, initiate an immediate shutdown.
                 self.handle_shutdown(ShutdownType::Immediate);
                 Ok(Async::Ready(()))
             }
@@ -151,8 +117,6 @@ impl Shutdown {
     /// an immediate shutdown will occur. Any timer error that happens will also cause an immediate
     /// shutdown.
     ///
-    /// # Return Value
-    ///
     /// If `Ok(Async::Ready(()))` is returned, this implies that the timer has expired which will
     /// cause an immediate shutdown.
     ///
@@ -164,18 +128,25 @@ impl Shutdown {
         match self
             .timer
             .as_mut()
-            .expect("`poll_shutting_down` should not be called if `timer` is `None`")
+            .expect(
+                "`ShutdownHandler::poll_shutting_down` should not be called if `ShutdownHandler.timer` is `None`",
+            )
             .poll()
         {
-            Ok(Async::Ready(_)) | Err(_) => {
+            Ok(Async::Ready(_)) => {
                 self.handle_shutdown(ShutdownType::Immediate);
                 Ok(Async::Ready(()))
             }
             Ok(Async::NotReady) => Ok(Async::NotReady),
+            Err(ref error) if error.is_at_capacity() => {
+                self.handle_shutdown(ShutdownType::Immediate);
+                Ok(Async::Ready(()))
+            }
+            _ => panic!("shutdown timer should not be shutdown"),
         }
     }
 
-    /// Returns the current state of the shutdown object (i.e. the shutdown status of the
+    /// Returns the current state of the shutdown handler (i.e. the shutdown status of the
     /// connection).
     pub fn state(&self) -> ShutdownState {
         if self.rx_initiate_shutdown.is_some() {
@@ -186,6 +157,37 @@ impl Shutdown {
         } else {
             debug_assert!(self.tx_shutdown_event.is_none());
             ShutdownState::Shutdown
+        }
+    }
+}
+
+impl Drop for ShutdownHandler {
+    fn drop(&mut self) {
+        self.force_shutdown();
+    }
+}
+
+impl Future for ShutdownHandler {
+    type Item = ();
+    type Error = ();
+
+    /// Polls for shutdown based on the current state.
+    ///
+    /// If `Ok(Async::Ready(ShutdownState))` is returned, this implies that the shutdown state needs
+    /// to be dealt with by the caller by inspecting the result of a call to
+    /// [`ShutdownHandler::state`].
+    ///
+    /// If `Ok(Async::NotReady)` is returned, then the current task will be notified when another
+    /// poll needs to occur.
+    ///
+    /// The error `Err(())` will never be returned.
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        loop {
+            match self.state() {
+                ShutdownState::Running => try_ready!(self.poll_running()),
+                ShutdownState::ShuttingDown => try_ready!(self.poll_shutting_down()),
+                ShutdownState::Shutdown => return Ok(Async::Ready(())),
+            }
         }
     }
 }
@@ -227,4 +229,84 @@ pub enum ShutdownType {
     /// be processed before the request handler is shutdown, but the connection itself will shutdown
     /// immediately.
     Immediate,
+}
+
+#[cfg(test)]
+mod test {
+    use futures::future::{self, Either};
+    use futures::sync::oneshot;
+    use futures::Future;
+    use std::mem;
+    use std::time::{Duration, Instant};
+    use tokio::runtime::current_thread;
+    use tokio_timer::Delay;
+
+    use crate::protocol::connection::shutdown::{ShutdownHandler, ShutdownState, ShutdownType};
+
+    #[test]
+    fn test_shutdown_drop() {
+        let (_tx_initiate_shutdown, rx_initiate_shutdown) = oneshot::channel();
+        let (tx_shutdown_event, rx_shutdown_event) = oneshot::channel();
+        let shutdown = ShutdownHandler::new(rx_initiate_shutdown, tx_shutdown_event);
+        assert_eq!(shutdown.state(), ShutdownState::Running);
+
+        mem::drop(shutdown);
+        assert!(current_thread::block_on_all(rx_shutdown_event).is_ok());
+    }
+
+    #[test]
+    fn test_shutdown_force_shutdown() {
+        let (_tx_initiate_shutdown, rx_initiate_shutdown) = oneshot::channel();
+        let (tx_shutdown_event, rx_shutdown_event) = oneshot::channel();
+        let mut shutdown = ShutdownHandler::new(rx_initiate_shutdown, tx_shutdown_event);
+        assert_eq!(shutdown.state(), ShutdownState::Running);
+
+        shutdown.force_shutdown();
+        assert_eq!(shutdown.state(), ShutdownState::Shutdown);
+
+        assert!(current_thread::block_on_all(&mut shutdown).is_ok());
+        assert!(current_thread::block_on_all(rx_shutdown_event).is_ok());
+        assert_eq!(shutdown.state(), ShutdownState::Shutdown);
+    }
+
+    #[test]
+    fn test_shutdown_initiate_graceful_shutdown() {
+        let (tx_initiate_shutdown, rx_initiate_shutdown) = oneshot::channel();
+        let (tx_shutdown_event, rx_shutdown_event) = oneshot::channel();
+        let shutdown = ShutdownHandler::new(rx_initiate_shutdown, tx_shutdown_event);
+        assert_eq!(shutdown.state(), ShutdownState::Running);
+
+        current_thread::block_on_all(future::lazy(|| {
+            current_thread::spawn(shutdown);
+            current_thread::spawn(
+                Delay::new(Instant::now() + Duration::from_millis(150))
+                    .map_err(|_| panic!())
+                    .select2(rx_shutdown_event.map_err(|_| panic!()))
+                    .then(|result| match result {
+                        Ok(Either::A((_, rx_shutdown_event))) => rx_shutdown_event,
+                        _ => panic!(),
+                    }),
+            );
+            tx_initiate_shutdown
+                .send(ShutdownType::Graceful(Duration::from_millis(200)))
+                .unwrap();
+
+            Ok::<_, ()>(())
+        }))
+        .unwrap();
+    }
+
+    #[test]
+    fn test_shutdown_initiate_immediate_shutdown() {
+        let (tx_initiate_shutdown, rx_initiate_shutdown) = oneshot::channel();
+        let (tx_shutdown_event, rx_shutdown_event) = oneshot::channel();
+        let mut shutdown = ShutdownHandler::new(rx_initiate_shutdown, tx_shutdown_event);
+        assert_eq!(shutdown.state(), ShutdownState::Running);
+
+        tx_initiate_shutdown.send(ShutdownType::Immediate).unwrap();
+
+        assert!(current_thread::block_on_all(&mut shutdown).is_ok());
+        assert!(current_thread::block_on_all(rx_shutdown_event).is_ok());
+        assert_eq!(shutdown.state(), ShutdownState::Shutdown);
+    }
 }
