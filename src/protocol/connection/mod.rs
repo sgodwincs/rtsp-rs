@@ -26,6 +26,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio_codec::{Decoder, Framed};
 use tokio_io::{AsyncRead, AsyncWrite};
+use tower_service::Service;
 
 use crate::header::map::HeaderMapExtension;
 use crate::header::types::CSeq;
@@ -34,7 +35,6 @@ use crate::protocol::connection::pending::PendingRequestUpdate;
 use crate::protocol::connection::receiver::Receiver;
 use crate::protocol::connection::sender::Sender;
 use crate::protocol::connection::shutdown::{ShutdownHandler, ShutdownState};
-use crate::protocol::service::Service;
 use crate::request::Request;
 use crate::response::Response;
 
@@ -96,7 +96,7 @@ where
         service: Option<TService>,
     ) -> (Self, Option<RequestHandler<TService>>, ConnectionHandle)
     where
-        TService: Service<Request = Request<BytesMut>> + Send + 'static,
+        TService: Service<Request<BytesMut>> + Send + 'static,
         TService::Future: Send + 'static,
         TService::Response: Into<Response<BytesMut>>,
     {
@@ -191,7 +191,7 @@ where
         config: Config,
     ) -> (Self, Option<RequestHandler<TService>>, ConnectionHandle)
     where
-        TService: Service<Request = Request<BytesMut>> + Send + 'static,
+        TService: Service<Request<BytesMut>> + Send + 'static,
         TService::Future: Send + 'static,
         TService::Response: Into<Response<BytesMut>>,
     {

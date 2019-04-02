@@ -9,13 +9,13 @@ use futures::sync::oneshot;
 use futures::{try_ready, Async, Future, Poll, Stream};
 use std::time::{Duration, Instant};
 use tokio_timer::Delay;
+use tower_service::Service;
 
 use crate::header::map::HeaderMapExtension;
 use crate::header::name::HeaderName;
 use crate::header::types::{CSeq, ContentLength};
 use crate::protocol::codec::Message;
 use crate::protocol::connection::sender::SenderHandle;
-use crate::protocol::service::Service;
 use crate::request::Request;
 use crate::response::{
     Response, BAD_REQUEST_RESPONSE, CONTINUE_RESPONSE, INTERNAL_SERVER_ERROR_RESPONSE,
@@ -28,7 +28,7 @@ use crate::uri::Scheme;
 #[must_use = "futures do nothing unless polled"]
 pub struct RequestHandler<TService>
 where
-    TService: Service<Request = Request<BytesMut>>,
+    TService: Service<Request<BytesMut>>,
     TService::Future: Send + 'static,
     TService::Response: Into<Response<BytesMut>>,
 {
@@ -60,7 +60,7 @@ where
 
 impl<TService> RequestHandler<TService>
 where
-    TService: Service<Request = Request<BytesMut>>,
+    TService: Service<Request<BytesMut>>,
     TService::Future: Send + 'static,
     TService::Response: Into<Response<BytesMut>>,
 {
@@ -231,7 +231,7 @@ where
 
 impl<TService> Drop for RequestHandler<TService>
 where
-    TService: Service<Request = Request<BytesMut>>,
+    TService: Service<Request<BytesMut>>,
     TService::Future: Send + 'static,
     TService::Response: Into<Response<BytesMut>>,
 {
@@ -242,7 +242,7 @@ where
 
 impl<TService> Future for RequestHandler<TService>
 where
-    TService: Service<Request = Request<BytesMut>>,
+    TService: Service<Request<BytesMut>>,
     TService::Future: Send + 'static,
     TService::Response: Into<Response<BytesMut>>,
 {
@@ -294,13 +294,13 @@ mod test {
     use std::{io, mem};
     use tokio::runtime::current_thread;
     use tokio_timer::Delay;
+    use tower_service::Service;
 
     use crate::header::types::{CSeq, ContentLength};
     use crate::method::Method;
     use crate::protocol::codec::Message;
     use crate::protocol::connection::handler::RequestHandler;
     use crate::protocol::connection::sender::SenderHandle;
-    use crate::protocol::service::Service;
     use crate::request::Request;
     use crate::response::{
         Response, BAD_REQUEST_RESPONSE, CONTINUE_RESPONSE, NOT_IMPLEMENTED_RESPONSE,
@@ -309,13 +309,12 @@ mod test {
 
     struct DelayedTestService;
 
-    impl Service for DelayedTestService {
-        type Request = Request<BytesMut>;
+    impl Service<Request<BytesMut>> for DelayedTestService {
         type Response = Response<BytesMut>;
         type Error = io::Error;
         type Future = Box<Future<Item = Self::Response, Error = Self::Error> + Send + 'static>;
 
-        fn call(&mut self, _: Self::Request) -> Self::Future {
+        fn call(&mut self, _: Request<BytesMut>) -> Self::Future {
             Box::new(
                 Delay::new(Instant::now() + Duration::from_millis(250)).then(|_| {
                     Ok(Response::<()>::builder()
@@ -329,13 +328,12 @@ mod test {
 
     struct TestService;
 
-    impl Service for TestService {
-        type Request = Request<BytesMut>;
+    impl Service<Request<BytesMut>> for TestService {
         type Response = Response<BytesMut>;
         type Error = io::Error;
         type Future = Box<Future<Item = Self::Response, Error = Self::Error> + Send + 'static>;
 
-        fn call(&mut self, _: Self::Request) -> Self::Future {
+        fn call(&mut self, _: Request<BytesMut>) -> Self::Future {
             Box::new(future::ok(
                 Response::<()>::builder()
                     .with_body(BytesMut::new())

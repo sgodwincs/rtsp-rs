@@ -6,12 +6,12 @@ extern crate tokio;
 use bytes::BytesMut;
 use futures::{future, Future, Stream};
 use rtsp::protocol::connection::Connection;
-use rtsp::protocol::service::Service;
 use rtsp::request::Request;
 use rtsp::response::Response;
 use std::io;
 use std::net::SocketAddr;
 use tokio::net::TcpListener;
+use tower_service::Service;
 
 fn main() {
     let address = "0.0.0.0:10500".parse::<SocketAddr>().unwrap();

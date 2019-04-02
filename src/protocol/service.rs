@@ -1,29 +1,19 @@
 use bytes::BytesMut;
 use futures::{future, Future};
-use std::error::Error;
 use std::io;
+use tower_service::Service;
 
 use crate::request::Request;
 use crate::response::Response;
 
-pub trait Service {
-    type Request;
-    type Response;
-    type Error: Into<Box<Error + Send + Sync + 'static>>;
-    type Future: Future<Item = Self::Response, Error = Self::Error>;
-
-    fn call(&mut self, request: Self::Request) -> Self::Future;
-}
-
 pub struct EmptyService;
 
-impl Service for EmptyService {
-    type Request = Request<BytesMut>;
+impl Service<Request<BytesMut>> for EmptyService {
     type Response = Response<BytesMut>;
     type Error = io::Error;
     type Future = Box<Future<Item = Self::Response, Error = Self::Error> + Send + 'static>;
 
-    fn call(&mut self, _: Self::Request) -> Self::Future {
+    fn call(&mut self, _: Request<BytesMut>) -> Self::Future {
         Box::new(future::empty())
     }
 }
