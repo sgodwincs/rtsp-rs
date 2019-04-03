@@ -4,7 +4,7 @@ extern crate rtsp;
 extern crate tokio;
 
 use bytes::BytesMut;
-use futures::{future, Future, Stream};
+use futures::{future, Async, Future, Poll, Stream};
 use rtsp::protocol::connection::Connection;
 use rtsp::request::Request;
 use rtsp::response::Response;
@@ -45,16 +45,19 @@ fn main() {
 
 struct Application;
 
-impl Service for Application {
-    type Request = Request<BytesMut>;
+impl Service<Request<BytesMut>> for Application {
     type Response = Response<BytesMut>;
     type Error = io::Error;
     type Future = Box<Future<Item = Self::Response, Error = Self::Error> + Send + 'static>;
 
-    fn call(&mut self, _request: Self::Request) -> Self::Future {
+    fn call(&mut self, _request: Request<BytesMut>) -> Self::Future {
         let mut builder = Response::builder();
         builder.body("".into());
         let response = builder.build().unwrap();
         Box::new(future::ok(response))
+    }
+
+    fn poll_ready(&mut self) -> Poll<(), Self::Error> {
+        Ok(Async::Ready(()))
     }
 }

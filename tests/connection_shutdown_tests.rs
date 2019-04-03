@@ -6,14 +6,13 @@ extern crate tokio_tcp;
 extern crate tokio_timer;
 
 use bytes::BytesMut;
-use futures::{future, lazy, Future};
+use futures::{future, lazy, Async, Future, Poll};
 use rtsp::header::map::HeaderMapExtension;
 use rtsp::header::name::HeaderName;
 use rtsp::header::types::CSeq;
 use rtsp::method::Method;
 use rtsp::protocol::codec::decoder::request::Decoder as RequestDecoder;
 use rtsp::protocol::connection::{Connection, ConnectionHandle, OperationError, ShutdownType};
-use rtsp::protocol::service::Service;
 use rtsp::request::Request;
 use rtsp::response::Response;
 use rtsp::uri::request::URI;
@@ -24,16 +23,16 @@ use std::{mem, thread};
 use tokio::runtime::Runtime;
 use tokio_tcp::TcpStream;
 use tokio_timer::Delay;
+use tower_service::Service;
 
 struct DummyService;
 
-impl Service for DummyService {
-    type Request = Request<BytesMut>;
+impl Service<Request<BytesMut>> for DummyService {
     type Response = Response<BytesMut>;
     type Error = io::Error;
     type Future = Box<Future<Item = Self::Response, Error = Self::Error> + Send + 'static>;
 
-    fn call(&mut self, request: Self::Request) -> Self::Future {
+    fn call(&mut self, request: Request<BytesMut>) -> Self::Future {
         let mut builder = Response::builder();
         builder
             .header(
@@ -45,6 +44,10 @@ impl Service for DummyService {
 
         Box::new(future::ok(response))
     }
+
+    fn poll_ready(&mut self) -> Poll<(), Self::Error> {
+        Ok(Async::Ready(()))
+    }
 }
 
 fn create_test_base<ServerHandler, RequestService>(
@@ -53,7 +56,7 @@ fn create_test_base<ServerHandler, RequestService>(
 ) -> impl Future<Item = ConnectionHandle, Error = ()>
 where
     ServerHandler: FnOnce(TcpListener) -> () + Send + 'static,
-    RequestService: Service<Request = Request<BytesMut>> + Send + 'static,
+    RequestService: Service<Request<BytesMut>> + Send + 'static,
     RequestService::Future: Send + 'static,
     RequestService::Response: Into<Response<BytesMut>>,
 {
