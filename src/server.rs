@@ -1,25 +1,47 @@
 use bytes::BytesMut;
 use chrono::{self, offset, DateTime, Utc};
-use futures::{future, Future};
+use futures::Stream;
+use futures::{future, Async, Future, Poll};
 use std::collections::HashMap;
-use std::convert::TryFrom;
-use std::io;
+use std::convert::{Infallible, TryFrom};
+use std::error::Error;
+use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use tokio_tcp::TcpListener;
+use tower_service::Service;
+use tower_util::MakeService;
 
 use crate::header::types::Public;
 use crate::method::Method;
+use crate::protocol::connection::Connection;
 use crate::protocol::connection::ConnectionHandle;
-use crate::protocol::service::Service;
 use crate::request::Request;
 use crate::response::{Response, NOT_IMPLEMENTED_RESPONSE};
 use crate::session::{Session, SessionID, SessionIDError, DEFAULT_SESSION_TIMEOUT};
 
 pub const SUPPORTED_METHODS: [Method; 1] = [Method::Options];
 
-pub struct Server {
+pub struct Server<TMakeService>
+where
+    TMakeService: MakeService<(), Request<BytesMut>>,
+{
+    make_service: TMakeService,
     // connections:
-    sessions: Arc<Mutex<HashMap<SessionID, ServerSession>>>,
+    // sessions: Arc<Mutex<HashMap<SessionID, ServerSession>>>
+}
+
+impl<TMakeService> Server<TMakeService>
+where
+    TMakeService: MakeService<(), Request<BytesMut>>,
+{
+    pub fn run(address: SocketAddr) {
+        let listener = TcpListener::bind(&address).unwrap();
+
+        let server = listener.incoming().for_each(move |socket| Ok(()));
+
+        tokio::run(server.map_err(|_| ()));
+    }
 }
 
 struct ClientHandler {
@@ -30,7 +52,7 @@ impl ClientHandler {
     fn handle_method_options(
         &mut self,
         request: Request<BytesMut>,
-    ) -> impl Future<Item = Response<BytesMut>, Error = io::Error> {
+    ) -> impl Future<Item = Response<BytesMut>, Error = Infallible> {
         let request = request.map(|_| BytesMut::new());
 
         let mut builder = Response::builder();
@@ -43,19 +65,22 @@ impl ClientHandler {
     }
 }
 
-impl Service for ClientHandler {
-    type Request = Request<BytesMut>;
+impl Service<Request<BytesMut>> for ClientHandler {
     type Response = Response<BytesMut>;
-    type Error = io::Error;
+    type Error = Box<Error + Send + 'static>;
     type Future = Box<Future<Item = Self::Response, Error = Self::Error> + Send + 'static>;
 
-    fn call(&mut self, mut request: Self::Request) -> Self::Future {
+    fn call(&mut self, mut request: Request<BytesMut>) -> Self::Future {
         request.uri_mut().normalize();
 
         match request.method() {
-            Method::Options => Box::new(self.handle_method_options(request)),
+            Method::Options => Box::new(self.handle_method_options(request)?),
             _ => Box::new(future::ok(NOT_IMPLEMENTED_RESPONSE.clone())),
         }
+    }
+
+    fn poll_ready(&mut self) -> Poll<(), Self::Error> {
+        Ok(Async::Ready(()))
     }
 }
 
