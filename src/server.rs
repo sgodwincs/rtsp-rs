@@ -52,7 +52,7 @@ impl ClientHandler {
     fn handle_method_options(
         &mut self,
         request: Request<BytesMut>,
-    ) -> impl Future<Item = Response<BytesMut>, Error = Infallible> {
+    ) -> impl Future<Item = Response<BytesMut>, Error = Box<Error + Send + 'static>> {
         let request = request.map(|_| BytesMut::new());
 
         let mut builder = Response::builder();
@@ -74,7 +74,7 @@ impl Service<Request<BytesMut>> for ClientHandler {
         request.uri_mut().normalize();
 
         match request.method() {
-            Method::Options => Box::new(self.handle_method_options(request)?),
+            Method::Options => Box::new(self.handle_method_options(request)),
             _ => Box::new(future::ok(NOT_IMPLEMENTED_RESPONSE.clone())),
         }
     }
