@@ -288,7 +288,7 @@ mod test {
     use bytes::BytesMut;
     use futures::future;
     use futures::sync::{mpsc, oneshot};
-    use futures::{Future, Stream};
+    use futures::{Async, Future, Poll, Stream};
     use std::convert::TryFrom;
     use std::time::{Duration, Instant};
     use std::{io, mem};
@@ -324,6 +324,10 @@ mod test {
                 }),
             )
         }
+
+        fn poll_ready(&mut self) -> Poll<(), Self::Error> {
+            Ok(Async::Ready(()))
+        }
     }
 
     struct TestService;
@@ -340,6 +344,10 @@ mod test {
                     .build()
                     .unwrap(),
             ))
+        }
+
+        fn poll_ready(&mut self) -> Poll<(), Self::Error> {
+            Ok(Async::Ready(()))
         }
     }
 
