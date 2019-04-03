@@ -34,6 +34,7 @@ uriparse = "0.6.0"
 fnv = "1.0.6"
 linked_hash_set = "0.1.3"
 tower-service = "0.2.0"
+tower-util = { git = "https://github.com/tower-rs/tower.git", rev = "83be955" }
 
 [dev-dependencies]
 criterion = "0.2.5"
