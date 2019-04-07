@@ -3,7 +3,7 @@ use chrono::{self, offset, DateTime, Utc};
 use futures::Stream;
 use futures::{future, Async, Future, Poll};
 use std::collections::HashMap;
-use std::convert::{Infallible, TryFrom};
+use std::convert::TryFrom;
 use std::error::Error;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
@@ -68,6 +68,10 @@ impl ConnectionService {
         &mut self,
         request: Request<BytesMut>,
     ) -> impl Future<Item = Response<BytesMut>, Error = Box<Error + Send + 'static>> {
+        if let Some(session) = self.session.as_mut() {
+            session.lock().unwrap().touch();
+        }
+
         let request = request.map(|_| BytesMut::new());
 
         let mut builder = Response::builder();
@@ -121,7 +125,6 @@ impl ServerSession {
         SessionID: TryFrom<T, Error = SessionIDError>,
     {
         ServerSession {
-            active_client,
             expire_time,
             id: SessionID::random(),
         }
