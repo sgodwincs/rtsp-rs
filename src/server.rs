@@ -20,7 +20,7 @@ use crate::response::{Response, NOT_IMPLEMENTED_RESPONSE};
 use crate::session::{Session, SessionID, SessionIDError, DEFAULT_SESSION_TIMEOUT};
 use crate::status::StatusCode;
 
-pub const SUPPORTED_METHODS: [Method; 1] = [Method::Options];
+pub const SUPPORTED_METHODS: [Method; 2] = [Method::Options, Method::Setup];
 
 /// Experimental high-level server implementation
 pub struct Server {
@@ -94,6 +94,18 @@ impl ConnectionService {
 
         Box::new(future::ok(response))
     }
+
+    fn handle_method_setup(
+        &mut self,
+        request: Request<BytesMut>,
+    ) -> <Self as Service<Request<BytesMut>>>::Future {
+        Box::new(future::ok(
+            Response::<()>::builder()
+                .with_body(BytesMut::new())
+                .build()
+                .unwrap(),
+        ))
+    }
 }
 
 impl Service<Request<BytesMut>> for ConnectionService {
@@ -106,6 +118,7 @@ impl Service<Request<BytesMut>> for ConnectionService {
 
         match request.method() {
             Method::Options => self.handle_method_options(request),
+            Method::Setup => self.handle_method_setup(request),
             _ => Box::new(future::ok(NOT_IMPLEMENTED_RESPONSE.clone())),
         }
     }
