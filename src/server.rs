@@ -10,7 +10,6 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio_tcp::TcpListener;
 use tower_service::Service;
-use tower_util::MakeService;
 
 use crate::header::types::Public;
 use crate::method::Method;
@@ -22,13 +21,9 @@ use crate::session::{Session, SessionID, SessionIDError, DEFAULT_SESSION_TIMEOUT
 
 pub const SUPPORTED_METHODS: [Method; 1] = [Method::Options];
 
-pub struct Server<TMakeService>
-where
-    TMakeService: MakeService<(), Request<BytesMut>>,
-{
-    make_service: TMakeService,
+pub struct Server {
     // connections:
-    // sessions: Arc<Mutex<HashMap<SessionID, ServerSession>>>
+// sessions: Arc<Mutex<HashMap<SessionID, ServerSession>>>
 }
 
 impl<TMakeService> Server<TMakeService>
