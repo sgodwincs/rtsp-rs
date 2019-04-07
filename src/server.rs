@@ -22,28 +22,40 @@ use crate::session::{Session, SessionID, SessionIDError, DEFAULT_SESSION_TIMEOUT
 pub const SUPPORTED_METHODS: [Method; 1] = [Method::Options];
 
 pub struct Server {
-    // connections:
-// sessions: Arc<Mutex<HashMap<SessionID, ServerSession>>>
+    connections: Vec<ConnectionHandle>,
+    // sessions: HashMap<SessionID, ServerSession>,
 }
 
-impl<TMakeService> Server<TMakeService>
-where
-    TMakeService: MakeService<(), Request<BytesMut>>,
-{
+impl Server {
+    fn new() -> Self {
+        Server {
+            connections: Vec::new(),
+        }
+    }
+
     pub fn run(address: SocketAddr) {
+        let server = Arc::new(Mutex::new(Server::new()));
         let listener = TcpListener::bind(&address).unwrap();
 
-        let server = listener.incoming().for_each(move |socket| Ok(()));
+        let serve = listener.incoming().for_each(move |socket| {
+            let (connection, handler, handle) = Connection::new(socket, Some(ConnectionService));
 
-        tokio::run(server.map_err(|_| ()));
+            let server = server.clone();
+            server.lock().unwrap().connections.push(handle);
+
+            tokio::spawn(connection);
+            tokio::spawn(handler.unwrap());
+
+            Ok(())
+        });
+
+        tokio::run(serve.map_err(|_| ()));
     }
 }
 
-struct ClientHandler {
-    connection: ConnectionHandle,
-}
+struct ConnectionService;
 
-impl ClientHandler {
+impl ConnectionService {
     fn handle_method_options(
         &mut self,
         request: Request<BytesMut>,
@@ -60,7 +72,7 @@ impl ClientHandler {
     }
 }
 
-impl Service<Request<BytesMut>> for ClientHandler {
+impl Service<Request<BytesMut>> for ConnectionService {
     type Response = Response<BytesMut>;
     type Error = Box<Error + Send + 'static>;
     type Future = Box<Future<Item = Self::Response, Error = Self::Error> + Send + 'static>;
