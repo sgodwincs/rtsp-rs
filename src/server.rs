@@ -18,9 +18,11 @@ use crate::protocol::connection::ConnectionHandle;
 use crate::request::Request;
 use crate::response::{Response, NOT_IMPLEMENTED_RESPONSE};
 use crate::session::{Session, SessionID, SessionIDError, DEFAULT_SESSION_TIMEOUT};
+use crate::status::StatusCode;
 
 pub const SUPPORTED_METHODS: [Method; 1] = [Method::Options];
 
+/// Experimental high-level server implementation
 pub struct Server {
     connections: Vec<ConnectionHandle>,
     sessions: HashMap<SessionID, Arc<Mutex<ServerSession>>>,
@@ -67,20 +69,30 @@ impl ConnectionService {
     fn handle_method_options(
         &mut self,
         request: Request<BytesMut>,
-    ) -> impl Future<Item = Response<BytesMut>, Error = Box<Error + Send + 'static>> {
+    ) -> <Self as Service<Request<BytesMut>>>::Future {
         if let Some(session) = self.session.as_mut() {
             session.lock().unwrap().touch();
         }
 
+        // Drop the body.
         let request = request.map(|_| BytesMut::new());
 
-        let mut builder = Response::builder();
-        builder
-            .typed_header(SUPPORTED_METHODS.iter().cloned().collect::<Public>())
-            .body(BytesMut::new());
-        let response = builder.build().unwrap();
+        // We do not support any media streams right now, so just always 404 on non-asterisk URI.
+        let response = if request.uri().is_asterisk() {
+            Response::<()>::builder()
+                .with_typed_header(SUPPORTED_METHODS.iter().cloned().collect::<Public>())
+                .with_body(BytesMut::new())
+                .build()
+                .unwrap()
+        } else {
+            Response::<()>::builder()
+                .with_status_code(StatusCode::NotFound)
+                .with_body(BytesMut::new())
+                .build()
+                .unwrap()
+        };
 
-        future::ok(response)
+        Box::new(future::ok(response))
     }
 }
 
@@ -93,7 +105,7 @@ impl Service<Request<BytesMut>> for ConnectionService {
         request.uri_mut().normalize();
 
         match request.method() {
-            Method::Options => Box::new(self.handle_method_options(request)),
+            Method::Options => self.handle_method_options(request),
             _ => Box::new(future::ok(NOT_IMPLEMENTED_RESPONSE.clone())),
         }
     }
