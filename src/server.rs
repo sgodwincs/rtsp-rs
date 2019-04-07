@@ -23,13 +23,14 @@ pub const SUPPORTED_METHODS: [Method; 1] = [Method::Options];
 
 pub struct Server {
     connections: Vec<ConnectionHandle>,
-    // sessions: HashMap<SessionID, ServerSession>,
+    sessions: HashMap<SessionID, Arc<Mutex<ServerSession>>>,
 }
 
 impl Server {
     fn new() -> Self {
         Server {
             connections: Vec::new(),
+            sessions: HashMap::new(),
         }
     }
 
@@ -38,9 +39,13 @@ impl Server {
         let listener = TcpListener::bind(&address).unwrap();
 
         let serve = listener.incoming().for_each(move |socket| {
-            let (connection, handler, handle) = Connection::new(socket, Some(ConnectionService));
-
             let server = server.clone();
+            let service = ConnectionService {
+                session: None,
+                server: server.clone(),
+            };
+            let (connection, handler, handle) = Connection::new(socket, Some(service));
+
             server.lock().unwrap().connections.push(handle);
 
             tokio::spawn(connection);
@@ -53,7 +58,10 @@ impl Server {
     }
 }
 
-struct ConnectionService;
+struct ConnectionService {
+    session: Option<Arc<Mutex<ServerSession>>>,
+    server: Arc<Mutex<Server>>,
+}
 
 impl ConnectionService {
     fn handle_method_options(
@@ -92,7 +100,6 @@ impl Service<Request<BytesMut>> for ConnectionService {
 }
 
 pub struct ServerSession {
-    active_client: ConnectionHandle,
     expire_time: DateTime<Utc>,
     id: SessionID,
 }
