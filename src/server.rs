@@ -122,6 +122,8 @@ impl Service<Request<BytesMut>> for ConnectionService {
         match request.method() {
             Method::Options => self.handle_method_options(request),
             Method::Setup => self.handle_method_setup(request),
+
+            // REDIRECT is handled here as servers do not respond to such requests.
             _ => Box::new(future::ok(NOT_IMPLEMENTED_RESPONSE.clone())),
         }
     }
