@@ -37,9 +37,9 @@ impl DerefMut for Public {
 }
 
 impl FromIterator<Method> for Public {
-    fn from_iter<I>(iterator: I) -> Self
+    fn from_iter<TIterator>(iterator: TIterator) -> Self
     where
-        I: IntoIterator<Item = Method>,
+        TIterator: IntoIterator<Item = Method>,
     {
         Public(LinkedHashSet::from_iter(iterator))
     }
@@ -79,10 +79,7 @@ impl TypedHeader for Public {
     /// Public = "Public" HCOLON Method *(COMMA Method)
     /// ```
     ///
-    /// This conversion will never fail. All values separated with commas will be converted to the
-    /// [`Method`] type. If this fails, then it will be ignored.
-    ///
-    /// The absence of a header value defaults the header to an empty list of methods.
+    /// All values separated with commas will be converted to the [`Method`] type.
     ///
     /// # Examples
     ///
