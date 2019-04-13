@@ -21,7 +21,8 @@ use crate::protocol::connection::pending::{PendingRequestResponse, PendingReques
 use crate::protocol::connection::sender::SenderHandle;
 use crate::request::Request;
 use crate::response::{
-    Response, BAD_REQUEST_RESPONSE, NOT_ENOUGH_BANDWIDTH_RESPONSE, VERSION_NOT_SUPPORTED_RESPONSE,
+    Response, BAD_REQUEST_RESPONSE, NOT_ENOUGH_BANDWIDTH_RESPONSE, REQUEST_URI_TOO_LONG_RESPONSE,
+    VERSION_NOT_SUPPORTED_RESPONSE,
 };
 use crate::status::StatusCode;
 
@@ -117,6 +118,10 @@ where
     fn handle_protocol_error(&self, error: &ProtocolError) {
         if let Some(sender_handle) = self.sender_handle.as_ref() {
             match error {
+                ProtocolError::DecodeError(_) => {
+                    let message = Message::Response(BAD_REQUEST_RESPONSE.clone());
+                    send_message(message, sender_handle);
+                }
                 ProtocolError::DecodeError(DecodeError::Request(
                     RequestDecodeError::UnsupportedVersion,
                 ))
@@ -126,8 +131,10 @@ where
                     let message = Message::Response(VERSION_NOT_SUPPORTED_RESPONSE.clone());
                     send_message(message, sender_handle);
                 }
-                ProtocolError::DecodeError(_) => {
-                    let message = Message::Response(BAD_REQUEST_RESPONSE.clone());
+                ProtocolError::DecodeError(DecodeError::Request(
+                    RequestDecodeError::URITooLong,
+                )) => {
+                    let message = Message::Response(REQUEST_URI_TOO_LONG_RESPONSE.clone());
                     send_message(message, sender_handle);
                 }
                 _ => {}

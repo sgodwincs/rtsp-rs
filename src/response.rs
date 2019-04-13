@@ -47,6 +47,12 @@ lazy_static! {
             .with_body(BytesMut::new())
             .build()
             .expect("not implemented response should not be invalid");
+    pub(crate) static ref REQUEST_URI_TOO_LONG_RESPONSE: Response<BytesMut> =
+        Response::<()>::builder()
+            .with_status_code(StatusCode::RequestURITooLong)
+            .with_body(BytesMut::new())
+            .build()
+            .expect("request URI too long response should not be invalid");
 
     // TODO: As per specification, the "response SHOULD contain a message body describing why
     // that version is not supported and what other protocols are supported by that agent".
