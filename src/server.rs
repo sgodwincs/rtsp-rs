@@ -99,6 +99,9 @@ impl ConnectionService {
         &mut self,
         request: Request<BytesMut>,
     ) -> <Self as Service<Request<BytesMut>>>::Future {
+        // Drop the body.
+        let request = request.map(|_| BytesMut::new());
+
         Box::new(future::ok(
             Response::<()>::builder()
                 .with_body(BytesMut::new())
