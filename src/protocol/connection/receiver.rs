@@ -118,10 +118,6 @@ where
     fn handle_protocol_error(&self, error: &ProtocolError) {
         if let Some(sender_handle) = self.sender_handle.as_ref() {
             match error {
-                ProtocolError::DecodeError(_) => {
-                    let message = Message::Response(BAD_REQUEST_RESPONSE.clone());
-                    send_message(message, sender_handle);
-                }
                 ProtocolError::DecodeError(DecodeError::Request(
                     RequestDecodeError::UnsupportedVersion,
                 ))
@@ -135,6 +131,10 @@ where
                     RequestDecodeError::URITooLong,
                 )) => {
                     let message = Message::Response(REQUEST_URI_TOO_LONG_RESPONSE.clone());
+                    send_message(message, sender_handle);
+                }
+                ProtocolError::DecodeError(_) => {
+                    let message = Message::Response(BAD_REQUEST_RESPONSE.clone());
                     send_message(message, sender_handle);
                 }
                 _ => {}
