@@ -47,6 +47,12 @@ lazy_static! {
             .with_body(BytesMut::new())
             .build()
             .expect("not implemented response should not be invalid");
+    pub(crate) static ref REQUEST_MESSAGE_BODY_TOO_LARGE_RESPONSE: Response<BytesMut> =
+        Response::<()>::builder()
+            .with_status_code(StatusCode::RequestMessageBodyTooLarge)
+            .with_body(BytesMut::new())
+            .build()
+            .expect("request message body too large response should not be invalid");
     pub(crate) static ref REQUEST_URI_TOO_LONG_RESPONSE: Response<BytesMut> =
         Response::<()>::builder()
             .with_status_code(StatusCode::RequestURITooLong)

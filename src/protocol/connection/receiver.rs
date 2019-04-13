@@ -21,8 +21,8 @@ use crate::protocol::connection::pending::{PendingRequestResponse, PendingReques
 use crate::protocol::connection::sender::SenderHandle;
 use crate::request::Request;
 use crate::response::{
-    Response, BAD_REQUEST_RESPONSE, NOT_ENOUGH_BANDWIDTH_RESPONSE, REQUEST_URI_TOO_LONG_RESPONSE,
-    VERSION_NOT_SUPPORTED_RESPONSE,
+    Response, BAD_REQUEST_RESPONSE, NOT_ENOUGH_BANDWIDTH_RESPONSE, REQUEST_MESSAGE_BODY_TOO_LARGE,
+    REQUEST_URI_TOO_LONG_RESPONSE, VERSION_NOT_SUPPORTED_RESPONSE,
 };
 use crate::status::StatusCode;
 
@@ -125,6 +125,12 @@ where
                     ResponseDecodeError::UnsupportedVersion,
                 )) => {
                     let message = Message::Response(VERSION_NOT_SUPPORTED_RESPONSE.clone());
+                    send_message(message, sender_handle);
+                }
+                ProtocolError::DecodeError(DecodeError::Request(
+                    RequestDecodeError::BodyTooLong,
+                )) => {
+                    let message = Message::Response(REQUEST_MESSAGE_BODY_TOO_LARGE.clone());
                     send_message(message, sender_handle);
                 }
                 ProtocolError::DecodeError(DecodeError::Request(
