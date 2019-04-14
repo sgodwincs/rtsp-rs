@@ -22,18 +22,13 @@ pub const TOKEN_CHAR_MAP: [u8; 256] = [
 /// A helper function used to determine whether a given byte slice is a valid token. Tokens as used
 /// in [[RFC7826](https://tools.ietf.org/html/rfc782)] are encoded using ASCII-US with a limited
 /// subset allowed for use.
-pub fn is_token<T>(token: T) -> bool
-where
-    T: AsRef<[u8]>,
-{
-    let bytes = token.as_ref();
-
-    if bytes.is_empty() {
+pub fn is_token(token: &[u8]) -> bool {
+    if token.is_empty() {
         return false;
     }
 
-    for &b in bytes {
-        if TOKEN_CHAR_MAP[b as usize] == 0 {
+    for &byte in token {
+        if TOKEN_CHAR_MAP[byte as usize] == 0 {
             return false;
         }
     }
