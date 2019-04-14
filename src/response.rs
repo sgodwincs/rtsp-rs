@@ -35,12 +35,6 @@ lazy_static! {
             .with_body(BytesMut::new())
             .build()
             .expect("internal server error response should not be invalid");
-    pub(crate) static ref NOT_ENOUGH_BANDWIDTH_RESPONSE: Response<BytesMut> =
-        Response::<()>::builder()
-            .with_status_code(StatusCode::NotEnoughBandwidth)
-            .with_body(BytesMut::new())
-            .build()
-            .expect("not enough bandwidth response should not be invalid");
     pub(crate) static ref NOT_IMPLEMENTED_RESPONSE: Response<BytesMut> =
         Response::<()>::builder()
             .with_status_code(StatusCode::NotImplemented)
@@ -60,6 +54,14 @@ lazy_static! {
             .build()
             .expect("request URI too long response should not be invalid");
 
+    // TODO: As per specification, the response "SHOULD describe the reason for the refusal in the
+    // message body".
+    pub(crate) static ref FORBIDDEN_RESPONSE: Response<BytesMut> =
+        Response::<()>::builder()
+            .with_status_code(StatusCode::Forbidden)
+            .with_body(BytesMut::new())
+            .build()
+            .expect("forbidden response should not be invalid");
     // TODO: As per specification, the "response SHOULD contain a message body describing why
     // that version is not supported and what other protocols are supported by that agent".
     pub(crate) static ref VERSION_NOT_SUPPORTED_RESPONSE: Response<BytesMut> =

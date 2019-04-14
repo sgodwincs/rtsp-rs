@@ -21,9 +21,8 @@ use crate::protocol::connection::pending::{PendingRequestResponse, PendingReques
 use crate::protocol::connection::sender::SenderHandle;
 use crate::request::Request;
 use crate::response::{
-    Response, BAD_REQUEST_RESPONSE, NOT_ENOUGH_BANDWIDTH_RESPONSE,
-    REQUEST_MESSAGE_BODY_TOO_LARGE_RESPONSE, REQUEST_URI_TOO_LONG_RESPONSE,
-    VERSION_NOT_SUPPORTED_RESPONSE,
+    Response, BAD_REQUEST_RESPONSE, FORBIDDEN_RESPONSE, REQUEST_MESSAGE_BODY_TOO_LARGE_RESPONSE,
+    REQUEST_URI_TOO_LONG_RESPONSE, VERSION_NOT_SUPPORTED_RESPONSE,
 };
 use crate::status::StatusCode;
 
@@ -164,8 +163,8 @@ where
                 let message = Message::Response(BAD_REQUEST_RESPONSE.clone());
                 send_message(message, sender_handle);
             }
-            RequestReceiverError::NotEnoughBandwidth => {
-                let message = Message::Response(NOT_ENOUGH_BANDWIDTH_RESPONSE.clone());
+            RequestReceiverError::CSeqDifferenceTooLarge => {
+                let message = Message::Response(FORBIDDEN_RESPONSE.clone());
                 send_message(message, sender_handle);
             }
         }
@@ -508,7 +507,7 @@ impl ForwardingReceiver {
                 let incoming_sequence_number = self.incoming_sequence_number_or_default(cseq);
 
                 if *(cseq - incoming_sequence_number) > self.request_buffer_size as u32 {
-                    Err(RequestReceiverError::NotEnoughBandwidth)
+                    Err(RequestReceiverError::CSeqDifferenceTooLarge)
                 } else {
                     debug_assert!(self.buffered_requests.len() < self.request_buffer_size);
 
@@ -769,7 +768,7 @@ enum RequestReceiverError {
 
     /// The difference in the next expected `"CSeq"` and the request's `"CSeq"` was too large to
     /// internally buffer.
-    NotEnoughBandwidth,
+    CSeqDifferenceTooLarge,
 }
 
 impl Display for RequestReceiverError {
@@ -778,7 +777,7 @@ impl Display for RequestReceiverError {
 
         match self {
             BadRequest => write!(formatter, "bad request"),
-            NotEnoughBandwidth => write!(formatter, "not enough bandwidth"),
+            CSeqDifferenceTooLarge => write!(formatter, "CSeq difference too large"),
         }
     }
 }
