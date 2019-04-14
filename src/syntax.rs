@@ -74,9 +74,9 @@ mod test {
 
     #[test]
     fn test_is_token() {
-        assert_eq!(true, syntax::is_token("this-is_a_~token~"));
-        assert_eq!(true, syntax::is_token("token"));
-        assert_eq!(false, syntax::is_token("not a token"));
+        assert_eq!(true, syntax::is_token(b"this-is_a_~token~"));
+        assert_eq!(true, syntax::is_token(b"token"));
+        assert_eq!(false, syntax::is_token(b"not a token"));
     }
 
     #[test]
