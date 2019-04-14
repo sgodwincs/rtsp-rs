@@ -11,12 +11,13 @@ use std::time::Duration;
 use tokio_tcp::TcpListener;
 use tower_service::Service;
 
-use crate::header::types::Public;
+use crate::header::map::HeaderMapExtension;
+use crate::header::types::{AcceptRanges, Public};
 use crate::method::Method;
 use crate::protocol::connection::Connection;
 use crate::protocol::connection::ConnectionHandle;
 use crate::request::Request;
-use crate::response::{Response, NOT_IMPLEMENTED_RESPONSE};
+use crate::response::{Response, BAD_REQUEST_RESPONSE, NOT_IMPLEMENTED_RESPONSE};
 use crate::session::{Session, SessionID, SessionIDError, DEFAULT_SESSION_TIMEOUT};
 use crate::status::StatusCode;
 
@@ -101,6 +102,25 @@ impl ConnectionService {
     ) -> <Self as Service<Request<BytesMut>>>::Future {
         // Drop the body.
         let request = request.map(|_| BytesMut::new());
+
+        // Client must set `"Accept-Ranges"` header with acceptable range formats.
+        match request.headers().typed_try_get::<AcceptRanges>() {
+            Ok(range_formats) => {
+                // TODO: Check that this resource supports one of these ranges.
+                let _ = range_formats.unwrap_or(AcceptRanges::new());
+
+                // For now, just say none are supported.
+                // TODO: Fill out `"Accept-Ranges"` header based on requested resource.
+                let response = Response::<()>::builder()
+                    .with_status_code(StatusCode::HeaderFieldNotValidForResource)
+                    .with_typed_header(AcceptRanges::new())
+                    .with_body(BytesMut::new())
+                    .build()
+                    .unwrap();
+                return Box::new(future::ok(response));
+            }
+            Err(_) => return Box::new(future::ok(BAD_REQUEST_RESPONSE.clone())),
+        }
 
         Box::new(future::ok(
             Response::<()>::builder()
