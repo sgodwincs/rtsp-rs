@@ -103,7 +103,7 @@ impl ConnectionService {
         // Drop the body.
         let request = request.map(|_| BytesMut::new());
 
-        // Client must set `"Accept-Ranges"` header with acceptable range formats.
+        // Client must set `"Accept-Ranges"` header with acceptable time range formats.
         match request.headers().typed_try_get::<AcceptRanges>() {
             Ok(range_formats) => {
                 // TODO: Check that this resource supports one of these ranges.
