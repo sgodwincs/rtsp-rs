@@ -1,3 +1,4 @@
+use linked_hash_set::LinkedHashSet;
 use std::convert::{Infallible, TryFrom};
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
@@ -12,6 +13,7 @@ use crate::syntax;
 /// `"RECORD"` value was defined in [[RFC2326](https://tools.ietf.org/html/rfc2326)]; in this
 /// specification, it is unspecified but reserved. `"RECORD"` and other values may be specified in
 /// the future.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum Mode {
     /// An extension mode that is not one of the standardized modes. This is encoded using ASCII-US
     /// and is always uppercase.
@@ -294,6 +296,9 @@ pub enum ModeError {
     /// The mode contained an invalid character.
     InvalidCharacter,
 
+    /// When parsing a list of modes, they were not surrounded by quotation marks.
+    MissingQuotes,
+
     /// The mode was reserved.
     Reserved,
 }
@@ -305,6 +310,7 @@ impl Display for ModeError {
         match self {
             Empty => write!(formatter, "empty mode"),
             InvalidCharacter => write!(formatter, "invalid mode character"),
+            MissingQuotes => write!(formatter, "missing quotes for modes"),
             Reserved => write!(formatter, "reserved mode"),
         }
     }
@@ -315,5 +321,43 @@ impl Error for ModeError {}
 impl From<Infallible> for ModeError {
     fn from(_: Infallible) -> Self {
         ModeError::Empty
+    }
+}
+
+/// Parses a list of modes following the given syntax:
+///
+/// ```text
+/// mode-spec = ( DQUOTE mode *(COMMA mode) DQUOTE )
+/// ```
+pub(crate) fn parse_modes(value: &[u8]) -> Result<LinkedHashSet<Mode>, ModeError> {
+    let value = syntax::trim_bytes_whitespace(value);
+
+    if !value.starts_with(b"\"") || !value.ends_with(b"\"") {
+        return Err(ModeError::MissingQuotes);
+    }
+
+    let value = &value[1..value.len() - 1];
+    let parts = value.split(|&byte| byte == b',');
+    let mut modes = LinkedHashSet::new();
+
+    for part in parts {
+        modes.insert(Mode::try_from(syntax::trim_bytes_whitespace(part))?);
+    }
+
+    Ok(modes)
+}
+
+#[cfg(test)]
+mod test {
+    use std::convert::TryFrom;
+
+    use crate::header::types::transport::mode::{self, Mode};
+
+    #[test]
+    fn test_parse_modes() {
+        let modes = mode::parse_modes(b"\"PLAY, OTHER\"").unwrap();
+        assert!(&[Mode::Play, Mode::try_from("OTHER").unwrap()]
+            .iter()
+            .eq(modes.iter()));
     }
 }
