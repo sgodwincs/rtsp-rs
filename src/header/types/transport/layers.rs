@@ -23,7 +23,7 @@ impl Default for Layers {
 impl Deref for Layers {
     type Target = u8;
 
-    fn deref(&self) -> &u8 {
+    fn deref(&self) -> &Self::Target {
         &self.0
     }
 }

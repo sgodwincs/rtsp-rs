@@ -18,7 +18,7 @@ pub struct MIKEY(Vec<u8>);
 impl Deref for MIKEY {
     type Target = [u8];
 
-    fn deref(&self) -> &[u8] {
+    fn deref(&self) -> &Self::Target {
         &self.0
     }
 }

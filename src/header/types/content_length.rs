@@ -26,7 +26,7 @@ pub struct ContentLength(usize);
 impl Deref for ContentLength {
     type Target = usize;
 
-    fn deref(&self) -> &usize {
+    fn deref(&self) -> &Self::Target {
         &self.0
     }
 }

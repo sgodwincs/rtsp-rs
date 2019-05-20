@@ -25,7 +25,7 @@ impl Public {
 impl Deref for Public {
     type Target = LinkedHashSet<Method>;
 
-    fn deref(&self) -> &LinkedHashSet<Method> {
+    fn deref(&self) -> &Self::Target {
         &self.0
     }
 }

@@ -31,7 +31,7 @@ impl Default for Date {
 impl Deref for Date {
     type Target = DateTime<Utc>;
 
-    fn deref(&self) -> &DateTime<Utc> {
+    fn deref(&self) -> &Self::Target {
         &self.0
     }
 }

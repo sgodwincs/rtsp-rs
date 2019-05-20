@@ -18,7 +18,7 @@ pub struct Expires(DateTime<Utc>);
 impl Deref for Expires {
     type Target = DateTime<Utc>;
 
-    fn deref(&self) -> &DateTime<Utc> {
+    fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
