@@ -26,7 +26,7 @@ impl AcceptRanges {
 impl Deref for AcceptRanges {
     type Target = LinkedHashSet<RangeFormat>;
 
-    fn deref(&self) -> &LinkedHashSet<RangeFormat> {
+    fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
