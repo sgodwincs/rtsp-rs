@@ -139,5 +139,9 @@ fn parse_channel(value: &[u8]) -> Result<(u8, &[u8]), InterleavedError> {
         digits_found += 1;
     }
 
-    Ok((channel, &value[digits_found..]))
+    if digits_found == 0 {
+        Err(InterleavedError::Empty)
+    } else {
+        Ok((channel, &value[digits_found..]))
+    }
 }
