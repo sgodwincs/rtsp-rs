@@ -1,11 +1,15 @@
+use std::hash::Hasher;
+use std::hash::Hash;
 use crate::header::map::TypedHeader;
 use linked_hash_set::LinkedHashSet;
 use crate::header::value::HeaderValue;
 use crate::header::name::HeaderName;
 use std::str::FromStr;
-extern crate Regex;
 extern crate lazy_static;
+use lazy_static::*;
 use regex::Regex;
+use crate::syntax;
+
 
 
 /*
@@ -40,7 +44,6 @@ use regex::Regex;
     token           =  1*(%x21 / %x23-27 / %x2A-2B / %x2D-2E / %x30-39
                         /  %x41-5A / %x5E-7A / %x7C / %x7E) //any CHAR except CTLs or tspecials
 */
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Accept(LinkedHashSet<MediaType>);
 
 pub struct AcceptError;
@@ -52,25 +55,6 @@ impl TypedHeader for Accept {
     where
         Iter: Iterator<Item = &'header HeaderValue>,
     {
-        // for vals in values {
-        //     let parts = vals.as_str().split(',');
-        //     let media_types = LinkedHashSet::new();
-        //     for part in parts {
-        //         let type_quality = part.split(';');
-        //         if let Some(type_info) = type_quality.next(){
-        //             if let Some(quality_info) = type_quality.next() {
-        //                 let media_type = 
-        //                 media_types.insert(media_type);
-        //             }else{
-                        
-        //             }
-        //         }else{
-        //             Err(Self::DecodeError)
-        //         }
-
-        //     }
-        // }
-
         unimplemented!()
     }
 
@@ -104,17 +88,32 @@ impl TypedHeader for Accept {
 //     Typed_Quality((String, i8)) //dumb refactor this
 
 // }
-
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct MediaType{
     m_type: MType,
     m_sub_type: MSubType,
-    generic_value: (Token, Token) //
+    generic_value: AcceptParams
 
 } //mtype and msubtype followed by what may be a quality. Then the quality may be followed by a generic param....
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct AcceptParams{
+    q_value: f32,
+    generic_param: (Token, Token)
+}
+
+impl Eq for AcceptParams{}
+
+impl Hash for AcceptParams {
+    
+    fn hash<H: Hasher>(&self, state: &mut H){
+        unimplemented!();
+    }
+}
+
 pub struct MediaTypeParseError(String); 
 
-impl MediaType {
+impl MediaType{
 
     pub fn to_str(&self) -> &str {
         unimplemented!()
@@ -134,32 +133,28 @@ impl FromStr for MediaType {
 
 }
 
-trait MType{}; //union of enums, maybe use nested enums here to keep it more consistent with code base? Private to file.
 
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum MSubType{
     IetfToken(String),
     Xtoken(String),
     IanaToken(String)
-};
+}
 
-pub enum DiscreteType{
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub enum MType{
     Video,
     Text,
     Image,
     Application,
-    IetfToken(String),
-    Xtoken(String)
-}
-
-impl MType for DiscreteType {}
-
-pub enum CompositeType{
     Message,
     Multipart,
     IetfToken(String),
     Xtoken(String)
 }
 
-impl MType for CompositeType {}
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct Token(String);
+
 
 
