@@ -9,6 +9,7 @@ extern crate lazy_static;
 use lazy_static::*;
 use regex::Regex;
 use crate::syntax;
+use syntax::is_token;
 
 
 
@@ -99,15 +100,31 @@ pub struct MediaType{
 #[derive(Clone, Debug, PartialEq)]
 pub struct AcceptParams{
     q_value: f32,
-    generic_param: (Token, Token)
+    generic_param: Option<(Token, Token)>
 }
 
-impl Eq for AcceptParams{}
+impl Eq for AcceptParams {}
 
 impl Hash for AcceptParams {
-    
-    fn hash<H: Hasher>(&self, state: &mut H){
+    fn hash<H: Hasher>(&self, state: &mut H) {
         unimplemented!();
+    }
+}
+
+impl AcceptParams {
+    // pub fn new() -> Self {
+    //     AcceptParams{
+    //         q_value: 1.0_f32,
+    //         generic_param: None
+    //     }
+    // }
+
+    pub fn new(q_value: f32, generic_param: Option<(Token, Token)>) -> Self {
+        let q_value = q_value.clamp(0.0_f32, 1.0_f32);
+        AcceptParams{
+            q_value,
+            generic_param
+        }
     }
 }
 
@@ -156,5 +173,14 @@ pub enum MType{
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct Token(String);
 
+impl Token {
+    pub fn new(token: String) -> Result<Self, String> {
+        if is_token(token.as_bytes()) {
+            Ok(Token(token))
+        }else{
+            Err(String::from_str("invalid syntax").unwrap())
+        }
+    }
+}
 
 

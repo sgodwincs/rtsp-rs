@@ -1,6 +1,7 @@
 #![feature(int_error_matching)]
 #![feature(non_exhaustive)]
 #![feature(type_alias_enum_variants)]
+#![feature(clamp)]
 
 mod syntax;
 
