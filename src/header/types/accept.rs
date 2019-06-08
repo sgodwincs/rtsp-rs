@@ -91,11 +91,19 @@ impl TypedHeader for Accept {
 // }
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct MediaType{
-    m_type: MType,
+    m_type: MType, //put here an enum of all, all subtypes of a type and any specific combination
     m_sub_type: MSubType,
     generic_value: AcceptParams
 
 } //mtype and msubtype followed by what may be a quality. Then the quality may be followed by a generic param....
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub enum MType {
+    All,
+    Major(MSubType),
+    Any((MMajorType, MSubType))
+
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct AcceptParams{
@@ -153,34 +161,37 @@ impl FromStr for MediaType {
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum MSubType{
-    IetfToken(String),
-    Xtoken(String),
-    IanaToken(String)
+    Token(String),
+    Xtoken(String)
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub enum MType{
+pub enum MMajorType{
     Video,
     Text,
     Image,
     Application,
     Message,
-    Multipart,
-    IetfToken(String),
-    Xtoken(String)
+    Multipart
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub struct Token(String);
-
-impl Token {
-    pub fn new(token: String) -> Result<Self, String> {
-        if is_token(token.as_bytes()) {
-            Ok(Token(token))
-        }else{
-            Err(String::from_str("invalid syntax").unwrap())
-        }
-    }
+pub enum Token {
+    Token(String),
+    XToken(String)
 }
+
+// #[derive(Clone, Debug, Eq, Hash, PartialEq)]
+// pub struct Token(String);
+
+// impl Token {
+//     pub fn new(token: String) -> Result<Self, String> {
+//         if is_token(token.as_bytes()) {
+//             Ok(Token(token))
+//         }else{
+//             Err(String::from_str("invalid syntax").unwrap())
+//         }
+//     }
+// }
 
 
