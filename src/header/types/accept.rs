@@ -22,6 +22,8 @@ use syntax::is_token;
                         [ accept-range *(COMMA accept-range) ]
     accept-range      =  media-type-range [SEMI accept-params]
     accept-params     =  "q" EQUAL qvalue *(SEMI generic-param )
+    qvalue            =  ( "0" [ "." *3DIGIT ] )
+                      /  ( "1" [ "." *3("0") ] )
     generic-param   =  token [ EQUAL gen-value ]
     gen-value       =  token / host / quoted-string
     host              = < As defined in RFC 3986>
@@ -120,12 +122,6 @@ impl Hash for AcceptParams {
 }
 
 impl AcceptParams {
-    // pub fn new() -> Self {
-    //     AcceptParams{
-    //         q_value: 1.0_f32,
-    //         generic_param: None
-    //     }
-    // }
 
     pub fn new(q_value: f32, generic_param: Option<(Token, Token)>) -> Self {
         let q_value = q_value.clamp(0.0_f32, 1.0_f32);
@@ -158,11 +154,22 @@ impl FromStr for MediaType {
 
 }
 
-
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum MSubType{
     Token(String),
     Xtoken(String)
+} //maybe remove this in favour of simple token type, maybe even make this a type alias???
+
+impl MSubType {
+
+    pub fn as_str(&self) -> &str {
+        use self::MSubType::*;
+
+        match self {
+            Token(token) => &token,
+            Xtoken(token) => &token //do we make it such that the xtoken cannot store a value without x- or prepend it ourselves?
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -175,23 +182,27 @@ pub enum MMajorType{
     Multipart
 }
 
+impl MMajorType {
+
+    pub fn as_str(&self) -> &str {
+        use self::MMajorType::*;
+
+        match self {
+            Video => "Video",
+            Text => "Text",
+            Image => "Image",
+            Application => "Application",
+            Message => "Message",
+            Multipart => "Multipart",
+        }
+    }
+
+}
+
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum Token {
     Token(String),
     XToken(String)
 }
-
-// #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-// pub struct Token(String);
-
-// impl Token {
-//     pub fn new(token: String) -> Result<Self, String> {
-//         if is_token(token.as_bytes()) {
-//             Ok(Token(token))
-//         }else{
-//             Err(String::from_str("invalid syntax").unwrap())
-//         }
-//     }
-// }
 
 
