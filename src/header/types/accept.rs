@@ -10,6 +10,8 @@ use lazy_static::*;
 use regex::Regex;
 use crate::syntax;
 use syntax::is_token;
+use std::fmt::{self, Display, Formatter};
+use std::string::ToString;
 
 
 
@@ -93,25 +95,54 @@ impl TypedHeader for Accept {
 // }
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct MediaType{
-    m_type: MType, //put here an enum of all, all subtypes of a type and any specific combination
-    m_sub_type: MSubType,
-    generic_value: AcceptParams
+    m_type: MType,
+    quality: Option<AcceptParams>
 
 } //mtype and msubtype followed by what may be a quality. Then the quality may be followed by a generic param....
 
+impl MediaType{
+
+    pub fn as_str(&self) -> &str {
+        let m_type = self.m_type.as_str();
+        unimplemented!()
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum MType {
-    All,
-    Major(MSubType),
-    Any((MMajorType, MSubType))
-
+    Any,
+    MajorAny(MMajorType),
+    MajorMinor((MMajorType, MSubType)) //
 }
+
+impl MType {
+    pub fn as_str(&self) -> &str {
+        use self::MType::*;
+
+        match self {
+            All => "*/*",
+            MajorAny(majortype) => majortype.as_str(),
+            MajorMinor((majortype, subtype)) => unimplemented!()
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct TypeSpeciciation(MMajorType, MSubType);
+
+impl TypeSpeciciation {
+    pub fn as_str(&self) -> String {
+        let major = self.0.as_str();
+        let minor = self.1.as_str();
+        let formatted = format!("{}/{}", major, minor);
+        formatted
+    }
+}
+
+
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct AcceptParams{
-    q_value: f32,
-    generic_param: Option<(Token, Token)>
-}
+pub struct AcceptParams(f32);
 
 impl Eq for AcceptParams {}
 
@@ -125,50 +156,37 @@ impl AcceptParams {
 
     pub fn new(q_value: f32, generic_param: Option<(Token, Token)>) -> Self {
         let q_value = q_value.clamp(0.0_f32, 1.0_f32);
-        AcceptParams{
-            q_value,
-            generic_param
-        }
+        AcceptParams(q_value)
+    }
+
+    pub fn as_str(&self) -> &str {
+        let q_val = self.0.to_string().as_str();
+        unimplemented!()
     }
 }
 
 pub struct MediaTypeParseError(String); 
 
-impl MediaType{
-
-    pub fn to_str(&self) -> &str {
-        unimplemented!()
-    }
-}
-
-impl FromStr for MediaType {
-    type Err = MediaTypeParseError;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        lazy_static!{
-            static ref RE: Regex = Regex::new(r"(?P<mediatype>\{})").unwrap();
-        }
-        unimplemented!()
-    }
-
-
-}
-
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub enum MSubType{
-    Token(String),
-    Xtoken(String)
-} //maybe remove this in favour of simple token type, maybe even make this a type alias???
+pub enum MSubType {
+    All,    
+    SubType(Token)
+}
 
 impl MSubType {
-
     pub fn as_str(&self) -> &str {
         use self::MSubType::*;
 
         match self {
-            Token(token) => &token,
-            Xtoken(token) => &token //do we make it such that the xtoken cannot store a value without x- or prepend it ourselves?
+            All => "*",
+            SubType(token) => token.as_str()
         }
+    }
+}
+
+impl Display for MSubType {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "{}", self.as_str())
     }
 }
 
@@ -199,10 +217,35 @@ impl MMajorType {
 
 }
 
+impl Display for MMajorType {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+
+}
+
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum Token {
-    Token(String),
+    Token(String) ,
     XToken(String)
+}
+
+impl Token {
+
+    pub fn as_str(&self) -> &str {
+        use self::Token::*;
+
+        match self {
+            Token(token) => &token,
+            XToken(token) => &token
+        }
+    }
+}
+
+impl Display for Token {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result{
+        write!(f, "{}", self.as_str())
+    }
 }
 
 
