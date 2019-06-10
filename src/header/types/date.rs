@@ -36,12 +36,6 @@ impl Deref for Date {
     }
 }
 
-impl DerefMut for Date {
-    fn deref_mut(&mut self) -> &mut DateTime<Utc> {
-        &mut self.0
-    }
-}
-
 impl<TTimeZone> From<DateTime<TTimeZone>> for Date
 where
     TTimeZone: TimeZone,

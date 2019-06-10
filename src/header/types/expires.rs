@@ -23,12 +23,6 @@ impl Deref for Expires {
     }
 }
 
-impl DerefMut for Expires {
-    fn deref_mut(&mut self) -> &mut DateTime<Utc> {
-        &mut self.0
-    }
-}
-
 impl<TTimeZone> From<DateTime<TTimeZone>> for Expires
 where
     TTimeZone: TimeZone,
