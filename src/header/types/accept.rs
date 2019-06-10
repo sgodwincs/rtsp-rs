@@ -1,3 +1,4 @@
+use std::convert::TryFrom;
 use std::hash::Hasher;
 use std::hash::Hash;
 use crate::header::map::TypedHeader;
@@ -26,7 +27,7 @@ use std::string::ToString;
     accept-params     =  "q" EQUAL qvalue *(SEMI generic-param )
     qvalue            =  ( "0" [ "." *3DIGIT ] )
                       /  ( "1" [ "." *3("0") ] )
-    generic-param   =  token [ EQUAL gen-value ]
+    generic-param   =  token [ EQUAL gen-value ] //no example usage so not included
     gen-value       =  token / host / quoted-string
     host              = < As defined in RFC 3986>
 
@@ -51,6 +52,7 @@ use std::string::ToString;
 */
 pub struct Accept(LinkedHashSet<MediaType>);
 
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct AcceptError;
 
 impl TypedHeader for Accept {
@@ -100,7 +102,21 @@ pub struct MediaType{
 
 } //mtype and msubtype followed by what may be a quality. Then the quality may be followed by a generic param....
 
+impl Default for MediaType {
+
+    fn default() -> Self {
+        MediaType{
+            m_type: MType::All,
+            quality: None
+        }
+    }
+}
+
 impl MediaType{
+
+    pub fn new() -> Self {
+        MediaType::default()
+    }
 
     pub fn as_str(&self) -> String {
         let m_type = self.m_type.as_str();
@@ -111,11 +127,47 @@ impl MediaType{
     }
 }
 
+impl<'accept> TryFrom<&'accept [u8]> for MediaType {
+    type Error = AcceptError;
+
+    fn try_from(value: &'accept [u8]) -> Result<Self, Self::Error> {
+        let mut split = value.split(|element| element.clone() == ';' as u8);
+        let mut decoded = MediaType::new();
+        if let Some(mediatype) = split.next() {
+            let mtype = MType::try_from(mediatype).unwrap();
+            decoded.m_type = mtype;
+            if let Some(quality) = split.next() { 
+                let q = AcceptParams::try_from(quality).unwrap();
+                decoded.quality = Some(q);
+            }
+        }
+        Ok(decoded)
+    }
+}
+
+impl FromStr for MediaType {
+    type Err = AcceptError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        unimplemented!()
+    }
+
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum MType {
     All,
     MajorAny(MMajorType),
     MajorMinor((MMajorType, MSubType))
+}
+
+impl<'mediatype> TryFrom<&'mediatype [u8]> for MType {
+    type Error = AcceptError;
+
+    fn try_from(value: &'mediatype [u8]) -> Result<Self, Self::Error> {
+        unimplemented!()
+    }
+    
 }
 
 impl MType {
@@ -152,6 +204,14 @@ impl Eq for AcceptParams {}
 impl Hash for AcceptParams {
     fn hash<H: Hasher>(&self, state: &mut H) {
         unimplemented!();
+    }
+}
+
+impl<'acceptparams> TryFrom<&'acceptparams [u8]> for AcceptParams {
+    type Error = AcceptError;
+
+    fn try_from(value: &'acceptparams [u8]) -> Result<Self, Self::Error> {
+        unimplemented!()
     }
 }
 
