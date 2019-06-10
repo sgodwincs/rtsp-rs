@@ -102,27 +102,30 @@ pub struct MediaType{
 
 impl MediaType{
 
-    pub fn as_str(&self) -> &str {
+    pub fn as_str(&self) -> String {
         let m_type = self.m_type.as_str();
-        unimplemented!()
+        match &self.quality {
+            Some(q) => format!("{} ;{}", m_type, q.as_str()),
+            None => format!("{}", m_type)
+        }
     }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum MType {
-    Any,
+    All,
     MajorAny(MMajorType),
-    MajorMinor((MMajorType, MSubType)) //
+    MajorMinor((MMajorType, MSubType))
 }
 
 impl MType {
-    pub fn as_str(&self) -> &str {
+    pub fn as_str(&self) -> String {
         use self::MType::*;
 
         match self {
-            All => "*/*",
-            MajorAny(majortype) => majortype.as_str(),
-            MajorMinor((majortype, subtype)) => unimplemented!()
+            All => String::from("*/*"),
+            MajorAny(majortype) => format!("{}/*", majortype.as_str()),
+            MajorMinor((majortype, subtype)) => format!("{}/{}", majortype.as_str(), subtype.as_str())
         }
     }
 }
@@ -159,9 +162,9 @@ impl AcceptParams {
         AcceptParams(q_value)
     }
 
-    pub fn as_str(&self) -> &str {
-        let q_val = self.0.to_string().as_str();
-        unimplemented!()
+    pub fn as_str(&self) -> String {
+        let q_val = self.0.to_string();
+        format!("q={}", q_val)
     }
 }
 
