@@ -165,7 +165,27 @@ impl<'mediatype> TryFrom<&'mediatype [u8]> for MType {
     type Error = AcceptError;
 
     fn try_from(value: &'mediatype [u8]) -> Result<Self, Self::Error> {
-        unimplemented!()
+        let splitchar = '/' as u8;
+        let all = '*' as u8;
+        let major_sub = value.split(|element| element.clone() == splitchar).flat_map(|element| element).collect::<Vec<&u8>>();
+        match major_sub.len() {
+            2 => {
+                if major_sub[0] == &all {
+                    if major_sub[1] == &all {
+                        return Ok(MType::All)
+                    } else {
+                        return Err(AcceptError)
+                    }
+                } else {
+                    if major_sub[1] == &all {
+                        Ok(MType::MajorAny(MMajorType::try_from(major_sub[0]).unwrap()))
+                    } else {
+                        Ok(MType::MajorMinor((MMajorType::try_from(major_sub[0]).unwrap(), MSubType::try_from(major_sub[1]).unwrap())))
+                    }
+                }
+            },
+            _ => Err(AcceptError)
+        } 
     }
     
 }
@@ -183,9 +203,9 @@ impl MType {
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub struct TypeSpeciciation(MMajorType, MSubType);
+pub struct TypeSpecification(MMajorType, MSubType);
 
-impl TypeSpeciciation {
+impl TypeSpecification {
     pub fn as_str(&self) -> String {
         let major = self.0.as_str();
         let minor = self.1.as_str();
@@ -232,7 +252,6 @@ pub struct MediaTypeParseError(String);
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum MSubType {
-    All,    
     SubType(Token)
 }
 
@@ -244,6 +263,14 @@ impl MSubType {
             All => "*",
             SubType(token) => token.as_str()
         }
+    }
+}
+
+impl<'subtype> TryFrom<&'subtype u8> for MSubType {
+    type Error = AcceptError;
+
+    fn try_from(value: &'subtype u8) -> Result<Self, Self::Error> {
+        unimplemented!()
     }
 }
 
@@ -261,6 +288,15 @@ pub enum MMajorType{
     Application,
     Message,
     Multipart
+}
+
+impl<'majortype> TryFrom<&'majortype u8> for MMajorType{
+    type Error = AcceptError;
+    
+    fn try_from(value: &'majortype u8) -> Result<Self, Self::Error> {
+        unimplemented!()
+    }
+
 }
 
 impl MMajorType {
