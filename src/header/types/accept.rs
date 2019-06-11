@@ -167,17 +167,17 @@ impl<'mediatype> TryFrom<&'mediatype [u8]> for MType {
     fn try_from(value: &'mediatype [u8]) -> Result<Self, Self::Error> {
         let splitchar = '/' as u8;
         let all = '*' as u8;
-        let major_sub = value.split(|element| element.clone() == splitchar).flat_map(|element| element).collect::<Vec<&u8>>();
+        let major_sub = value.split(|element| element.clone() == splitchar).collect::<Vec<&[u8]>>();
         match major_sub.len() {
             2 => {
-                if major_sub[0] == &all {
-                    if major_sub[1] == &all {
+                if major_sub[0][0] == all {
+                    if major_sub[1][0] == all {
                         return Ok(MType::All)
                     } else {
                         return Err(AcceptError)
                     }
                 } else {
-                    if major_sub[1] == &all {
+                    if major_sub[1][0] == all {
                         Ok(MType::MajorAny(MMajorType::try_from(major_sub[0]).unwrap()))
                     } else {
                         Ok(MType::MajorMinor((MMajorType::try_from(major_sub[0]).unwrap(), MSubType::try_from(major_sub[1]).unwrap())))
@@ -201,20 +201,6 @@ impl MType {
         }
     }
 }
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub struct TypeSpecification(MMajorType, MSubType);
-
-impl TypeSpecification {
-    pub fn as_str(&self) -> String {
-        let major = self.0.as_str();
-        let minor = self.1.as_str();
-        let formatted = format!("{}/{}", major, minor);
-        formatted
-    }
-}
-
-
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct AcceptParams(f32);
@@ -266,11 +252,15 @@ impl MSubType {
     }
 }
 
-impl<'subtype> TryFrom<&'subtype u8> for MSubType {
+impl<'subtype> TryFrom<&'subtype [u8]> for MSubType {
     type Error = AcceptError;
 
-    fn try_from(value: &'subtype u8) -> Result<Self, Self::Error> {
-        unimplemented!()
+    fn try_from(value: &'subtype [u8]) -> Result<Self, Self::Error> {
+        let all_char = '*' as u8;
+        if value[0] == all_char {
+            return Err(AcceptError)
+        }
+        Ok(MSubType::SubType(Token::try_from(value).unwrap()))
     }
 }
 
@@ -290,10 +280,10 @@ pub enum MMajorType{
     Multipart
 }
 
-impl<'majortype> TryFrom<&'majortype u8> for MMajorType{
+impl<'majortype> TryFrom<&'majortype [u8]> for MMajorType{
     type Error = AcceptError;
     
-    fn try_from(value: &'majortype u8) -> Result<Self, Self::Error> {
+    fn try_from(value: &'majortype [u8]) -> Result<Self, Self::Error> {
         unimplemented!()
     }
 
@@ -338,6 +328,23 @@ impl Token {
             Token(token) => &token,
             XToken(token) => &token
         }
+    }
+}
+
+impl<'token> TryFrom<&'token [u8]> for Token {
+    type Error = AcceptError;
+
+    fn try_from(value: &'token [u8]) -> Result<Self, Self::Error> {
+        let x = 'x' as u8;
+        if is_token(value) && value[0] == x {
+            let decoded = unsafe { std::str::from_utf8_unchecked(value) }.to_ascii_lowercase();
+            Ok(Token::XToken(decoded))
+        } else if is_token(value) {
+            let decoded = unsafe { std::str::from_utf8_unchecked(value) }.to_ascii_lowercase();
+            Ok(Token::Token(decoded))            
+        } else{
+            Err(AcceptError)
+        } 
     }
 }
 
