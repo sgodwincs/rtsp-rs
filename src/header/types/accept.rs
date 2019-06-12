@@ -145,13 +145,13 @@ impl<'accept> TryFrom<&'accept [u8]> for MediaType {
     }
 }
 
-impl FromStr for MediaType {
-    type Err = AcceptError;
+impl<'accept> TryFrom<&'accept str> for MediaType {
+    type Error = AcceptError;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        unimplemented!()
-    }
-
+    fn try_from(value: &'accept str) -> Result<Self, Self::Error> {
+        let bytes = value.as_bytes();
+        Self::try_from(bytes)
+    } 
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -190,6 +190,15 @@ impl<'mediatype> TryFrom<&'mediatype [u8]> for MType {
     
 }
 
+impl<'mediatype> TryFrom<&'mediatype str> for MType {
+    type Error = AcceptError;
+
+    fn try_from(value: &'mediatype str) -> Result<Self, Self::Error> {
+        let bytes = value.as_bytes();
+        Self::try_from(bytes)
+    }
+}
+
 impl MType {
     pub fn as_str(&self) -> String {
         use self::MType::*;
@@ -218,6 +227,15 @@ impl<'acceptparams> TryFrom<&'acceptparams [u8]> for AcceptParams {
 
     fn try_from(value: &'acceptparams [u8]) -> Result<Self, Self::Error> {
         unimplemented!()
+    }
+}
+
+impl<'acceptparams> TryFrom<&'acceptparams str> for AcceptParams {
+    type Error = AcceptError;
+
+    fn try_from(value: &'acceptparams str) -> Result<Self, Self::Error> {
+        let bytes = value.as_bytes();
+        Self::try_from(bytes)
     }
 }
 
@@ -264,6 +282,15 @@ impl<'subtype> TryFrom<&'subtype [u8]> for MSubType {
     }
 }
 
+impl<'subtype> TryFrom<&'subtype str> for MSubType {
+    type Error = AcceptError;
+
+    fn try_from(value: &'subtype str) -> Result<Self, Self::Error> {
+        let bytes = value.as_bytes();
+        Self::try_from(bytes)
+    }
+}
+
 impl Display for MSubType {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "{}", self.as_str())
@@ -277,16 +304,30 @@ pub enum MMajorType{
     Image,
     Application,
     Message,
-    Multipart
+    Multipart,
+    Extension(Token)
 }
 
 impl<'majortype> TryFrom<&'majortype [u8]> for MMajorType{
     type Error = AcceptError;
     
     fn try_from(value: &'majortype [u8]) -> Result<Self, Self::Error> {
-        unimplemented!()
+        if is_token(value) {
+            let mtype = unsafe {std::str::from_utf8_unchecked(value)}.to_ascii_lowercase();
+            let mtype_str = mtype.as_str();
+            match mtype_str {
+                "video" => Ok(Self::Video),
+                "text" => Ok(Self::Text),
+                "image" => Ok(Self::Image),
+                "application" => Ok(Self::Application),
+                "message" => Ok(Self::Message),
+                "multipart" => Ok(Self::Multipart),
+                _ => Ok(Self::Extension(Token::try_from(mtype_str).unwrap()))
+            }
+        } else {
+            Err(AcceptError)
+        }
     }
-
 }
 
 impl MMajorType {
@@ -301,6 +342,7 @@ impl MMajorType {
             Application => "Application",
             Message => "Message",
             Multipart => "Multipart",
+            Extension(token) => token.as_str()
         }
     }
 
@@ -345,6 +387,15 @@ impl<'token> TryFrom<&'token [u8]> for Token {
         } else{
             Err(AcceptError)
         } 
+    }
+}
+
+impl<'token> TryFrom<&'token str> for Token {
+    type Error = AcceptError;
+
+    fn try_from(value: &'token str) -> Result<Self, Self::Error> {
+        let bytes = value.as_bytes();
+        Self::try_from(bytes)
     }
 }
 
