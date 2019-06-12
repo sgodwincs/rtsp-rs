@@ -1,3 +1,5 @@
+use std::ops::{Deref, DerefMut};
+use std::iter::{once, FromIterator};
 use std::convert::TryFrom;
 use std::hash::Hasher;
 use std::hash::Hash;
@@ -13,6 +15,7 @@ use crate::syntax;
 use syntax::is_token;
 use std::fmt::{self, Display, Formatter};
 use std::string::ToString;
+use itertools::Itertools;
 
 
 
@@ -55,6 +58,29 @@ pub struct Accept(LinkedHashSet<MediaType>);
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct AcceptError;
 
+impl Deref for Accept {
+    type Target = LinkedHashSet<MediaType>;
+
+    fn deref(&self) -> &LinkedHashSet<MediaType> {
+        &self.0
+    }
+}
+
+impl DerefMut for Accept {
+    fn deref_mut(&mut self) -> &mut LinkedHashSet<MediaType> {
+        &mut self.0
+    }
+}
+
+impl FromIterator<MediaType> for Accept {
+    fn from_iter<TIterator>(iterator: TIterator) -> Self
+    where
+        TIterator: IntoIterator<Item = MediaType>,
+    {
+        Accept(LinkedHashSet::from_iter(iterator))
+    }
+}
+
 impl TypedHeader for Accept {
     type DecodeError = AcceptError;
 
@@ -62,15 +88,33 @@ impl TypedHeader for Accept {
     where
         Iter: Iterator<Item = &'header HeaderValue>,
     {
-        unimplemented!()
+        let mut accept = LinkedHashSet::new();
+        let mut present = false;
+        for value in values {
+            let media = value.as_str().split(',');
+            for mtype in media {
+                let t = MediaType::try_from(mtype)?;
+                accept.insert(t);
+            }
+            present = true;
+        }
+        if present {
+            Ok(Some(Accept(accept)))
+        } else {
+            Ok(None)
+        }
     }
 
     fn encode<Target>(&self, values: &mut Target)
     where
         Target: Extend<HeaderValue>
     {
-        unimplemented!()
-    }
+        // Unsafe Justification
+        //
+        // Header values must be valid UTF-8, and since we know that the [`RangeFormat`] type
+        // guarantees valid ASCII-US (with no newlines), it satisfies the constraints.
+        let value = self.iter().map(MediaType::as_str).join(", ");
+        values.extend(once(unsafe { HeaderValue::from_string_unchecked(value) }));    }
 
     fn header_name() -> &'static HeaderName
     where   
