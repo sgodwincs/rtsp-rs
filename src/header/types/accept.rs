@@ -19,40 +19,68 @@ use itertools::Itertools;
 
 
 
-/*
-   The Accept request-header field can be used to specify certain
-   presentation description and parameter media types [RFC6838] that are
-   acceptable for the response to the DESCRIBE request.
 
-     Accept            =  "Accept" HCOLON
-                        [ accept-range *(COMMA accept-range) ]
-    accept-range      =  media-type-range [SEMI accept-params]
-    accept-params     =  "q" EQUAL qvalue *(SEMI generic-param )
-    qvalue            =  ( "0" [ "." *3DIGIT ] )
-                      /  ( "1" [ "." *3("0") ] )
-    generic-param   =  token [ EQUAL gen-value ] //no example usage so not included
-    gen-value       =  token / host / quoted-string
-    host              = < As defined in RFC 3986>
-
-    media-type-range  =  ( "*//*"
-                            / ( m-type SLASH "*" )
-                            / ( m-type SLASH m-subtype )
-                                ) *( SEMI m-parameter )
-    m-type             =  discrete-type / composite-type
-    discrete-type      =  "text" / "image" / "audio" / "video"
-                      /  "application" / extension-token
-    composite-type   =  "message" / "multipart" / extension-token
-    extension-token  =  ietf-token / x-token
-    ietf-token       =  token
-    x-token          =  "x-" token
-    m-subtype        =  extension-token / iana-token
-    iana-token       =  token
-    m-parameter      =  m-attribute EQUAL m-value
-    m-attribute      =  token
-    m-value          =  token / quoted-string
-    token           =  1*(%x21 / %x23-27 / %x2A-2B / %x2D-2E / %x30-39
-                        /  %x41-5A / %x5E-7A / %x7C / %x7E) //any CHAR except CTLs or tspecials
-*/
+/// The Accept request-header field can be used to specify certain
+/// presentation description and parameter media types [RFC6838] that are
+/// acceptable for the response to the DESCRIBE request.
+/// 
+/// ```text
+/// Accept            =  "Accept" HCOLON
+///                        [ accept-range *(COMMA accept-range) ]
+///    accept-range      =  media-type-range [SEMI accept-params]
+///    accept-params     =  "q" EQUAL qvalue *(SEMI generic-param )
+///    qvalue            =  ( "0" [ "." *3DIGIT ] )
+///                      /  ( "1" [ "." *3("0") ] )
+///    generic-param   =  token [ EQUAL gen-value ] //no example usage so not included
+///    gen-value       =  token / host / quoted-string
+///    host              = < As defined in RFC 3986>
+///
+///    media-type-range  =  ( "*//*"
+///                            / ( m-type SLASH "*" )
+///                            / ( m-type SLASH m-subtype )
+///                                ) *( SEMI m-parameter )
+///    m-type             =  discrete-type / composite-type
+///    discrete-type      =  "text" / "image" / "audio" / "video"
+///                      /  "application" / extension-token
+///    composite-type   =  "message" / "multipart" / extension-token
+///    extension-token  =  ietf-token / x-token
+///    ietf-token       =  token
+///    x-token          =  "x-" token
+///    m-subtype        =  extension-token / iana-token
+///    iana-token       =  token
+///    m-parameter      =  m-attribute EQUAL m-value
+///    m-attribute      =  token
+///    m-value          =  token / quoted-string
+///    token           =  1*(%x21 / %x23-27 / %x2A-2B / %x2D-2E / %x30-39
+///                        /  %x41-5A / %x5E-7A / %x7C / %x7E) //any CHAR except CTLs or tspecials
+/// ```
+/// 
+/// All values seperated with commas will be converted into [`MediaType`] type.
+/// 
+/// # Examples
+/// 
+/// ```
+/// use std::convert::TryFrom;
+///
+/// use rtsp::header::map::TypedHeader;
+/// use rtsp::header::types::accept_ranges::RangeFormat;
+/// use rtsp::header::types::Accept;
+/// use rtsp::header::types::accept::*;
+/// use rtsp::header::value::HeaderValue;
+///
+/// let raw_header: Vec<HeaderValue> = vec![];
+/// assert_eq!(Accept::decode(&mut raw_header.iter()).unwrap(), None);
+///
+/// let typed_header = vec![MediaType::new(MType::All, None), MediaType::new(MType::MajorAny(MMajorType::Video), Some(AcceptParams::new(0.5)))]
+///     .into_iter()
+///     .collect::<Accept>();
+/// let raw_header = vec![HeaderValue::try_from("*/*, Video/* ;q=0.5").unwrap()];
+/// assert_eq!(
+///     Accept::decode(&mut raw_header.iter()).unwrap(),
+///     Some(typed_header)
+/// ); 
+/// ```
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct Accept(LinkedHashSet<MediaType>);
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -104,7 +132,33 @@ impl TypedHeader for Accept {
             Ok(None)
         }
     }
-
+    
+    /// Converts the [`Accept`] type to raw header values.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::convert::TryFrom;
+    ///
+    /// use rtsp::header::map::TypedHeader;
+    /// use rtsp::header::types::accept::MediaType;
+    /// use rtsp::header::types::accept::MType;
+    /// use rtsp::header::types::accept::MMajorType; 
+    /// use rtsp::header::types::Accept;
+    /// use rtsp::header::value::HeaderValue;
+    ///
+    /// let typed_header = vec![MediaType{m_type: MType::All, quality: None}, MediaType{m_type: MType::MajorAny(MMajorType::Video), quality: Some(AcceptParams(0.5))}]
+    ///     .into_iter()
+    ///     .collect::<Accept>();
+    /// let expected_raw_headers = vec![
+    ///     vec![HeaderValue::try_from("*/*").unwrap()],
+    ///     vec![HeaderValue::try_from("Video/* ;q=0.5").unwrap()],
+    /// ];
+    /// let mut raw_header = vec![];
+    /// typed_header.encode(&mut raw_header);
+    /// assert!(raw_header == expected_raw_headers[0] ||
+    ///         raw_header == expected_raw_headers[1]);
+    /// ```
     fn encode<Target>(&self, values: &mut Target)
     where
         Target: Extend<HeaderValue>
@@ -120,7 +174,7 @@ impl TypedHeader for Accept {
     where   
         Self: Sized
     {
-        unimplemented!()
+        &HeaderName::Accept
     }
 }
 
@@ -137,9 +191,8 @@ impl TypedHeader for Accept {
 // pub enum MediaType{
 //     Typed(String),
 //     Typed_Quality((String, i8)) //dumb refactor this
-
 // }
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct MediaType{
     m_type: MType,
     quality: Option<AcceptParams>
@@ -156,10 +209,22 @@ impl Default for MediaType {
     }
 }
 
+impl Eq for MediaType {}
+
+impl Hash for MediaType {
+
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.m_type.hash(state);
+    }
+}
+
 impl MediaType{
 
-    pub fn new() -> Self {
-        MediaType::default()
+    pub fn new(m_type: MType, quality: Option<AcceptParams>) -> Self {
+        MediaType{
+            m_type,
+            quality
+        }
     }
 
     pub fn as_str(&self) -> String {
@@ -176,7 +241,7 @@ impl<'accept> TryFrom<&'accept [u8]> for MediaType {
 
     fn try_from(value: &'accept [u8]) -> Result<Self, Self::Error> {
         let mut split = value.split(|element| element.clone() == ';' as u8);
-        let mut decoded = MediaType::new();
+        let mut decoded = MediaType::default();
         if let Some(mediatype) = split.next() {
             let mtype = MType::try_from(mediatype).unwrap();
             decoded.m_type = mtype;
@@ -258,14 +323,6 @@ impl MType {
 #[derive(Clone, Debug, PartialEq)]
 pub struct AcceptParams(f32);
 
-impl Eq for AcceptParams {}
-
-impl Hash for AcceptParams {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        unimplemented!();
-    }
-}
-
 impl<'acceptparams> TryFrom<&'acceptparams [u8]> for AcceptParams {
     type Error = AcceptError;
 
@@ -285,7 +342,7 @@ impl<'acceptparams> TryFrom<&'acceptparams str> for AcceptParams {
 
 impl AcceptParams {
 
-    pub fn new(q_value: f32, generic_param: Option<(Token, Token)>) -> Self {
+    pub fn new(q_value: f32) -> Self {
         let q_value = q_value.clamp(0.0_f32, 1.0_f32);
         AcceptParams(q_value)
     }
