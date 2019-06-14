@@ -157,7 +157,6 @@ impl TypedHeader for Accept {
     /// ];
     /// let mut raw_header = vec![];
     /// typed_header.encode(&mut raw_header);
-    /// println!("{}", raw_header[0].as_str());
     /// assert!(raw_header == expected_raw_headers[0] ||
     ///         raw_header == expected_raw_headers[1]);
     /// ```
