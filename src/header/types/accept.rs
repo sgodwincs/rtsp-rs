@@ -84,7 +84,7 @@ use itertools::Itertools;
 pub struct Accept(LinkedHashSet<MediaType>);
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub struct AcceptError;
+pub struct AcceptError(pub &'static str);
 
 impl Deref for Accept {
     type Target = LinkedHashSet<MediaType>;
@@ -157,6 +157,7 @@ impl TypedHeader for Accept {
     /// ];
     /// let mut raw_header = vec![];
     /// typed_header.encode(&mut raw_header);
+    /// println!("{}", expected_raw_headers[0].as_str());
     /// assert!(raw_header == expected_raw_headers[0] ||
     ///         raw_header == expected_raw_headers[1]);
     /// ```
@@ -294,7 +295,7 @@ impl<'mediatype> TryFrom<&'mediatype [u8]> for MType {
                     if major_sub[1][0] == all {
                         return Ok(MType::All)
                     } else {
-                        return Err(AcceptError)
+                        return Err(AcceptError("media type encoding error: second element is not *"))
                     }
                 } else {
                     if major_sub[1][0] == all {
@@ -304,7 +305,7 @@ impl<'mediatype> TryFrom<&'mediatype [u8]> for MType {
                     }
                 }
             },
-            _ => Err(AcceptError)
+            _ => Err(AcceptError("media type encoding error"))
         } 
     }
     
@@ -388,7 +389,7 @@ impl<'subtype> TryFrom<&'subtype [u8]> for MSubType {
     fn try_from(value: &'subtype [u8]) -> Result<Self, Self::Error> {
         let all_char = '*' as u8;
         if value[0] == all_char {
-            return Err(AcceptError)
+            return Err(AcceptError("MSubType encoding error"))
         }
         Ok(MSubType::SubType(Token::try_from(value).unwrap()))
     }
@@ -437,7 +438,7 @@ impl<'majortype> TryFrom<&'majortype [u8]> for MMajorType{
                 _ => Ok(Self::Extension(Token::try_from(mtype_str).unwrap()))
             }
         } else {
-            Err(AcceptError)
+            Err(AcceptError("MMajorType encoding error"))
         }
     }
 }
@@ -497,7 +498,7 @@ impl<'token> TryFrom<&'token [u8]> for Token {
             let decoded = unsafe { std::str::from_utf8_unchecked(value) }.to_ascii_lowercase();
             Ok(Token::Token(decoded))            
         } else{
-            Err(AcceptError)
+            Err(AcceptError("Token encoding error"))
         } 
     }
 }
