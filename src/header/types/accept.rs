@@ -152,12 +152,12 @@ impl TypedHeader for Accept {
     ///     .into_iter()
     ///     .collect::<Accept>();
     /// let expected_raw_headers = vec![
-    ///     vec![HeaderValue::try_from("*/*").unwrap()],
-    ///     vec![HeaderValue::try_from("Video/* ;q=0.5").unwrap()],
+    ///     vec![HeaderValue::try_from("*/*, Video/* ;q=0.5").unwrap()],
+    ///     vec![HeaderValue::try_from("Video/* ;q=0.5, */*").unwrap()],
     /// ];
     /// let mut raw_header = vec![];
     /// typed_header.encode(&mut raw_header);
-    /// println!("{}", expected_raw_headers[0].as_str());
+    /// println!("{}", raw_header[0].as_str());
     /// assert!(raw_header == expected_raw_headers[0] ||
     ///         raw_header == expected_raw_headers[1]);
     /// ```
