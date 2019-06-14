@@ -146,8 +146,9 @@ impl TypedHeader for Accept {
     /// use rtsp::header::types::accept::MMajorType; 
     /// use rtsp::header::types::Accept;
     /// use rtsp::header::value::HeaderValue;
+    /// use rtsp::header::types::accept::AcceptParams;
     ///
-    /// let typed_header = vec![MediaType{m_type: MType::All, quality: None}, MediaType{m_type: MType::MajorAny(MMajorType::Video), quality: Some(AcceptParams(0.5))}]
+    /// let typed_header = vec![MediaType::new(MType::All, None), MediaType::new(MType::MajorAny(MMajorType::Video), Some(AcceptParams::new(0.5)))]
     ///     .into_iter()
     ///     .collect::<Accept>();
     /// let expected_raw_headers = vec![
@@ -187,11 +188,6 @@ impl TypedHeader for Accept {
     preference for that media type, using the qvalue scale from 0 to 1
     (Section 5.3.1 of [RFC7231]).  The default value is q=1.
 */
-// #[derive(Clone, Hash, Debug, Eq, PartialEq)]
-// pub enum MediaType{
-//     Typed(String),
-//     Typed_Quality((String, i8)) //dumb refactor this
-// }
 #[derive(Clone, Debug, PartialEq)]
 pub struct MediaType{
     m_type: MType,
@@ -227,6 +223,21 @@ impl MediaType{
         }
     }
 
+    /// Returns a `&str` representation of the media type.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::convert::TryFrom;
+    ///
+    /// use rtsp::header::types::accept::MediaType;
+    /// use rtsp::header::types::accept::MType;
+    /// use rtsp::header::types::accept::MMajorType;
+    /// use rtsp::header::types::accept::AcceptParams;
+    ///
+    /// assert_eq!(MediaType::new(MType::All, None).as_str(), "*/*");
+    /// assert_eq!(MediaType::new(MType::MajorAny(MMajorType::Video), Some(AcceptParams::new(0.5))).as_str(), "Video/* ;q=0.5");
+    /// ```
     pub fn as_str(&self) -> String {
         let m_type = self.m_type.as_str();
         match &self.quality {
