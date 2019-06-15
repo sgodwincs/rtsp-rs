@@ -121,7 +121,7 @@ impl TypedHeader for Accept {
         for value in values {
             let media = value.as_str().split(',');
             for mtype in media {
-                let t = MediaType::try_from(mtype)?;
+                let t = MediaType::try_from(syntax::trim_whitespace(mtype))?;
                 accept.insert(t);
             }
             present = true;
@@ -256,7 +256,7 @@ impl<'accept> TryFrom<&'accept [u8]> for MediaType {
         if let Some(mediatype) = split.next() {
             let mtype = MType::try_from(mediatype).unwrap();
             decoded.m_type = mtype;
-            if let Some(quality) = split.next() { 
+            if let Some(quality) = split.next() {
                 let q = AcceptParams::try_from(quality).unwrap();
                 decoded.quality = Some(q);
             }
@@ -338,7 +338,16 @@ impl<'acceptparams> TryFrom<&'acceptparams [u8]> for AcceptParams {
     type Error = AcceptError;
 
     fn try_from(value: &'acceptparams [u8]) -> Result<Self, Self::Error> {
-        unimplemented!()
+        let stringify = String::from_utf8(value.to_vec()).unwrap();
+        let mut val = stringify.split("=").collect::<Vec<&str>>();
+        if val.len() < 2 || val.len() > 2 {
+            return Err(AcceptError("incorrect quality format"))
+        }        
+        let quality = val[1].parse::<f32>();
+        match quality {
+            Ok(q) =>  return Ok(AcceptParams::new(q)),
+            Err(_) => return Err(AcceptError("unable to parse f32 from string"))
+        }
     }
 }
 
