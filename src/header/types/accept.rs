@@ -71,7 +71,7 @@ use itertools::Itertools;
 /// let raw_header: Vec<HeaderValue> = vec![];
 /// assert_eq!(Accept::decode(&mut raw_header.iter()).unwrap(), None);
 ///
-/// let typed_header = vec![MediaType::new(MType::All, None), MediaType::new(MType::MajorAny(MMajorType::Video), Some(AcceptParams::new(0.5)))]
+/// let typed_header = vec![MediaType::new(MType::All, None), MediaType::new(MType::MajorAny(MMajorType::Video), Some(QualityParam::new(0.5)))]
 ///     .into_iter()
 ///     .collect::<Accept>();
 /// let raw_header = vec![HeaderValue::try_from("*/*, Video/* ;q=0.5").unwrap()];
@@ -146,9 +146,9 @@ impl TypedHeader for Accept {
     /// use rtsp::header::types::accept::MMajorType; 
     /// use rtsp::header::types::Accept;
     /// use rtsp::header::value::HeaderValue;
-    /// use rtsp::header::types::accept::AcceptParams;
+    /// use rtsp::header::types::accept::QualityParam;
     ///
-    /// let typed_header = vec![MediaType::new(MType::All, None), MediaType::new(MType::MajorAny(MMajorType::Video), Some(AcceptParams::new(0.5)))]
+    /// let typed_header = vec![MediaType::new(MType::All, None), MediaType::new(MType::MajorAny(MMajorType::Video), Some(QualityParam::new(0.5)))]
     ///     .into_iter()
     ///     .collect::<Accept>();
     /// let expected_raw_headers = vec![
@@ -191,7 +191,7 @@ impl TypedHeader for Accept {
 #[derive(Clone, Debug, PartialEq)]
 pub struct MediaType{
     m_type: MType,
-    quality: Option<AcceptParams>
+    quality: Option<QualityParam>
 
 } //mtype and msubtype followed by what may be a quality. Then the quality may be followed by a generic param....
 
@@ -216,7 +216,7 @@ impl Hash for MediaType {
 
 impl MediaType{
 
-    pub fn new(m_type: MType, quality: Option<AcceptParams>) -> Self {
+    pub fn new(m_type: MType, quality: Option<QualityParam>) -> Self {
         MediaType{
             m_type,
             quality
@@ -233,10 +233,10 @@ impl MediaType{
     /// use rtsp::header::types::accept::MediaType;
     /// use rtsp::header::types::accept::MType;
     /// use rtsp::header::types::accept::MMajorType;
-    /// use rtsp::header::types::accept::AcceptParams;
+    /// use rtsp::header::types::accept::QualityParam;
     ///
     /// assert_eq!(MediaType::new(MType::All, None).as_str(), "*/*");
-    /// assert_eq!(MediaType::new(MType::MajorAny(MMajorType::Video), Some(AcceptParams::new(0.5))).as_str(), "Video/* ;q=0.5");
+    /// assert_eq!(MediaType::new(MType::MajorAny(MMajorType::Video), Some(QualityParam::new(0.5))).as_str(), "Video/* ;q=0.5");
     /// ```
     pub fn as_str(&self) -> String {
         let m_type = self.m_type.as_str();
@@ -257,7 +257,7 @@ impl<'accept> TryFrom<&'accept [u8]> for MediaType {
             let mtype = MType::try_from(mediatype).unwrap();
             decoded.m_type = mtype;
             if let Some(quality) = split.next() {
-                let q = AcceptParams::try_from(quality).unwrap();
+                let q = QualityParam::try_from(quality).unwrap();
                 decoded.quality = Some(q);
             }
         }
@@ -320,6 +320,20 @@ impl<'mediatype> TryFrom<&'mediatype str> for MType {
 }
 
 impl MType {
+
+    /// Returns a `String` representation of the MType.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::convert::TryFrom;
+    ///
+    /// use rtsp::header::types::accept::MType;
+    /// use rtsp::header::types::accept::MMajorType;
+    ///
+    /// assert_eq!((MType::All).as_str(), "*/*");
+    /// assert_eq!((MType::MajorAny(MMajorType::Video)).as_str(), "Video/*");
+    /// ```
     pub fn as_str(&self) -> String {
         use self::MType::*;
 
@@ -332,41 +346,53 @@ impl MType {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct AcceptParams(f32);
+pub struct QualityParam(f32);
 
-impl<'acceptparams> TryFrom<&'acceptparams [u8]> for AcceptParams {
+impl<'quality> TryFrom<&'quality [u8]> for QualityParam {
     type Error = AcceptError;
 
-    fn try_from(value: &'acceptparams [u8]) -> Result<Self, Self::Error> {
+    fn try_from(value: &'quality [u8]) -> Result<Self, Self::Error> {
         let stringify = String::from_utf8(value.to_vec()).unwrap();
-        let mut val = stringify.split("=").collect::<Vec<&str>>();
+        let val = stringify.split("=").collect::<Vec<&str>>();
         if val.len() < 2 || val.len() > 2 {
             return Err(AcceptError("incorrect quality format"))
         }        
         let quality = val[1].parse::<f32>();
         match quality {
-            Ok(q) =>  return Ok(AcceptParams::new(q)),
+            Ok(q) =>  return Ok(QualityParam::new(q)),
             Err(_) => return Err(AcceptError("unable to parse f32 from string"))
         }
     }
 }
 
-impl<'acceptparams> TryFrom<&'acceptparams str> for AcceptParams {
+impl<'quality> TryFrom<&'quality str> for QualityParam {
     type Error = AcceptError;
 
-    fn try_from(value: &'acceptparams str) -> Result<Self, Self::Error> {
+    fn try_from(value: &'quality str) -> Result<Self, Self::Error> {
         let bytes = value.as_bytes();
         Self::try_from(bytes)
     }
 }
 
-impl AcceptParams {
+impl QualityParam {
 
     pub fn new(q_value: f32) -> Self {
         let q_value = q_value.clamp(0.0_f32, 1.0_f32);
-        AcceptParams(q_value)
+        QualityParam(q_value)
     }
 
+
+    /// Returns a `String` representation of the quality parameter.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::convert::TryFrom;
+    ///
+    /// use rtsp::header::types::accept::QualityParam;
+    ///
+    /// assert_eq!(QualityParam::new(0.5).as_str(), "q=0.5");
+    /// ```
     pub fn as_str(&self) -> String {
         let q_val = self.0.to_string();
         format!("q={}", q_val)
@@ -381,11 +407,21 @@ pub enum MSubType {
 }
 
 impl MSubType {
+    
+    /// Returns a `&str` representation of the sub type.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rtsp::header::types::accept::MSubType;
+    /// use rtsp::header::types::accept::Token;
+    ///
+    /// assert_eq!(MSubType::SubType(Token::Token("token".to_string())).as_str(), "token");
+    /// ```
     pub fn as_str(&self) -> &str {
         use self::MSubType::*;
 
         match self {
-            All => "*",
             SubType(token) => token.as_str()
         }
     }
@@ -453,6 +489,15 @@ impl<'majortype> TryFrom<&'majortype [u8]> for MMajorType{
 
 impl MMajorType {
 
+    /// Returns a `&str` representation of the major type.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rtsp::header::types::accept::MMajorType;
+    ///
+    /// assert_eq!((MMajorType::Video).as_str(), "Video");
+    /// ```
     pub fn as_str(&self) -> &str {
         use self::MMajorType::*;
 
@@ -484,6 +529,15 @@ pub enum Token {
 
 impl Token {
 
+    /// Returns a `&str` representation of the sub type.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rtsp::header::types::accept::Token;
+    ///
+    /// assert_eq!((Token::XToken("x-token".to_string())).as_str(), "x-token");
+    /// ```
     pub fn as_str(&self) -> &str {
         use self::Token::*;
 
