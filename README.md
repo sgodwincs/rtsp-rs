@@ -42,6 +42,7 @@ Received connection
 
 and then the client prints:
 ```
+Connected to server: 127.0.0.1:10500
 response: Response { body: b"", reason_phrase: ReasonPhrase("OK"), headers: {CSeq: HeaderValue("292131050"), Date: HeaderValue("Sat, 29 Jun 2019 14:25:13 +0000")}, status_code: 200, version: RTSP/2.0 }
 ```
 
