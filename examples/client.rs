@@ -24,7 +24,8 @@ fn main() {
             Err(())
         })
         .and_then(|mut client| {
-            println!("Connected to server: {}", client.server_address);
+            let addr = client.server_address();
+            println!("Connected to server: {}", addr);
 
             let mut builder = Request::builder();
             builder
