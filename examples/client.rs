@@ -12,8 +12,15 @@ use rtsp::uri::request::URI;
 use std::convert::TryFrom;
 use std::net::SocketAddr;
 
+
 fn main() {
-    let address = "127.0.0.1:10500".parse::<SocketAddr>().unwrap();
+    let input: Option<String> = std::env::args().nth(1);
+    let  address_str: &str = match input {
+        None => "127.0.0.1:10500",
+        Some(ref addr) => addr.as_str(),
+    };
+    let address = address_str.parse::<SocketAddr>().unwrap();
+    println!("Initiating connection to: {}", address);
 
     // Connect to the server. Currently, any requests sent by the server will be ignored by the
     // client. An API to support handling these requests will be added soonish.
