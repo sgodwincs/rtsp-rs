@@ -11,6 +11,7 @@ use crate::request::Request;
 use crate::response::Response;
 
 pub struct Client {
+    pub server_address: SocketAddr,
     handle: ConnectionHandle,
 }
 
@@ -18,6 +19,7 @@ impl Client {
     pub fn connect(address: SocketAddr) -> impl Future<Item = Client, Error = io::Error> {
         TcpStream::connect(&address).and_then(|tcp_stream| {
             let mut executor = DefaultExecutor::current();
+            let server_address = tcp_stream.peer_addr().unwrap();
             let (connection, handler, handle) = Connection::new::<EmptyService>(tcp_stream, None);
 
             executor.spawn(Box::new(connection)).unwrap();
@@ -25,8 +27,7 @@ impl Client {
             if let Some(handler) = handler {
                 executor.spawn(Box::new(handler)).unwrap();
             }
-
-            Ok(Client { handle })
+            Ok(Client { handle, server_address })
         })
     }
 
