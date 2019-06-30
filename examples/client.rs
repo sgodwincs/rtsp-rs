@@ -9,6 +9,7 @@ use rtsp::client::Client;
 use rtsp::method::Method;
 use rtsp::request::Request;
 use rtsp::uri::request::URI;
+use rtsp::uri::{Authority,Path,Scheme};
 use std::convert::TryFrom;
 use std::net::SocketAddr;
 
@@ -34,10 +35,20 @@ fn main() {
             let addr = client.server_address();
             println!("Connected to server: {}", addr);
 
+            let ip_str = client.server_address
+                            .ip().to_string();
+            let authority = Authority::try_from(ip_str.as_str()).unwrap();
+            let uri = URI::builder()
+                .with_scheme(Scheme::RTSP)
+                .with_authority(authority)
+                .with_path(Path::try_from("").unwrap())
+                .build()
+                .unwrap();
+
             let mut builder = Request::builder();
             builder
                 .method(Method::Setup)
-                .uri(URI::try_from("rtsp://127.0.0.1/").unwrap())
+                .uri(uri)
                 .body(BytesMut::new());
             let request = builder.build().unwrap();
 
