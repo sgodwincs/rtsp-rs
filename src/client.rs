@@ -17,7 +17,6 @@ pub struct Client {
 
 impl Client {
     pub fn connect(server_address: SocketAddr) -> impl Future<Item = Client, Error = io::Error> {
-
         TcpStream::connect(&server_address).and_then(move |tcp_stream| {
             let mut executor = DefaultExecutor::current();
             let (connection, handler, handle) = Connection::new::<EmptyService>(tcp_stream, None);
@@ -27,7 +26,10 @@ impl Client {
             if let Some(handler) = handler {
                 executor.spawn(Box::new(handler)).unwrap();
             }
-            Ok(Client { handle,  server_address })
+            Ok(Client {
+                handle,
+                server_address,
+            })
         })
     }
 
