@@ -33,9 +33,8 @@ impl Client {
         })
     }
 
-    pub fn server_address(&self) -> SocketAddr {
-        let addr: SocketAddr = self.server_address.clone();
-        return addr;
+    pub fn server_address(&self) -> &SocketAddr {
+        &self.server_address
     }
 
     pub fn send_request<R, B>(
