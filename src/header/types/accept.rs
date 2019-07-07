@@ -1,3 +1,6 @@
+extern crate lazy_static;
+extern crate mime;
+
 use std::ops::{Deref, DerefMut};
 use std::iter::{once, FromIterator};
 use std::convert::TryFrom;
@@ -8,7 +11,6 @@ use linked_hash_set::LinkedHashSet;
 use crate::header::value::HeaderValue;
 use crate::header::name::HeaderName;
 use std::str::FromStr;
-extern crate lazy_static;
 use lazy_static::*;
 use regex::Regex;
 use crate::syntax;
