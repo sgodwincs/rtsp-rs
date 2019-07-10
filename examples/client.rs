@@ -9,11 +9,34 @@ use rtsp::client::Client;
 use rtsp::method::Method;
 use rtsp::request::Request;
 use rtsp::uri::request::URI;
+use rtsp::uri::{Host, RTSP_DEFAULT_PORT};
 use std::convert::TryFrom;
+use std::net::IpAddr;
 use std::net::SocketAddr;
 
 fn main() {
-    let address = "127.0.0.1:10500".parse::<SocketAddr>().unwrap();
+    let uri_string = std::env::args()
+        .nth(1)
+        .unwrap_or(String::from("rtsp://127.0.0.1:10500"));
+
+    let uri = URI::try_from(uri_string.as_str()).expect("Invalid URI");
+
+    let host = uri.host().unwrap();
+    let addr: IpAddr = match host {
+        Host::IPv4Address(ip) => IpAddr::V4(*ip),
+        Host::IPv6Address(ip) => IpAddr::V6(*ip),
+        _ => {
+            eprintln!(
+                "Please provide ip address. Hostname not supported: {}",
+                host
+            );
+            std::process::exit(1);
+        }
+    };
+
+    let address = SocketAddr::new(addr, uri.port().unwrap_or(RTSP_DEFAULT_PORT));
+
+    println!("Initiating connection to: {}", address);
 
     // Connect to the server. Currently, any requests sent by the server will be ignored by the
     // client. An API to support handling these requests will be added soonish.
@@ -28,10 +51,7 @@ fn main() {
             println!("Connected to server: {}", addr);
 
             let mut builder = Request::builder();
-            builder
-                .method(Method::Setup)
-                .uri(URI::try_from("rtsp://127.0.0.1/").unwrap())
-                .body(BytesMut::new());
+            builder.method(Method::Setup).uri(uri).body(BytesMut::new());
             let request = builder.build().unwrap();
 
             client.send_request(request).then(|result| {
