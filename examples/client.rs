@@ -9,7 +9,7 @@ use rtsp::client::Client;
 use rtsp::method::Method;
 use rtsp::request::Request;
 use rtsp::uri::request::URI;
-use rtsp::uri::{RTSP_DEFAULT_PORT, Host};
+use rtsp::uri::{Host, RTSP_DEFAULT_PORT};
 use std::convert::TryFrom;
 use std::net::IpAddr;
 use std::net::SocketAddr;
@@ -51,10 +51,7 @@ fn main() {
             println!("Connected to server: {}", addr);
 
             let mut builder = Request::builder();
-            builder
-                .method(Method::Setup)
-                .uri(uri)
-                .body(BytesMut::new());
+            builder.method(Method::Setup).uri(uri).body(BytesMut::new());
             let request = builder.build().unwrap();
 
             client.send_request(request).then(|result| {
