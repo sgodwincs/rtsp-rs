@@ -54,7 +54,7 @@ fn main() {
             let mut builder = Request::builder();
             builder
                 .method(Method::Setup)
-                .uri(URI::try_from("rtsp://127.0.0.1/").unwrap())
+                .uri(uri)
                 .body(BytesMut::new());
             let request = builder.build().unwrap();
 
