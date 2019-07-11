@@ -140,6 +140,9 @@ impl TypedHeader for AcceptRanges {
     ///     vec![HeaderValue::try_from("npt, clock").unwrap()],
     /// ];
     /// let mut raw_header = vec![];
+    /// println!("{}", raw_header);
+    /// println!("{}", expected_raw_headers[0]);
+    /// println!("{}", expected_raw_headers[1]);
     /// typed_header.encode(&mut raw_header);
     /// assert!(raw_header == expected_raw_headers[0] ||
     ///         raw_header == expected_raw_headers[1]);

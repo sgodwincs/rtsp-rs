@@ -6,18 +6,17 @@ use std::iter::{once, FromIterator};
 use std::convert::TryFrom;
 use std::hash::Hasher;
 use std::hash::Hash;
+use std::str;
 use crate::header::map::TypedHeader;
 use linked_hash_set::LinkedHashSet;
 use crate::header::value::HeaderValue;
 use crate::header::name::HeaderName;
-use std::str::FromStr;
-use lazy_static::*;
-use regex::Regex;
 use crate::syntax;
 use syntax::is_token;
 use std::fmt::{self, Display, Formatter};
 use std::string::ToString;
 use itertools::Itertools;
+use mime::*;
 
 
 
@@ -69,14 +68,15 @@ use itertools::Itertools;
 /// use rtsp::header::types::Accept;
 /// use rtsp::header::types::accept::*;
 /// use rtsp::header::value::HeaderValue;
-///
+/// use mime::*;
+/// use std::str::FromStr;
 /// let raw_header: Vec<HeaderValue> = vec![];
 /// assert_eq!(Accept::decode(&mut raw_header.iter()).unwrap(), None);
 ///
-/// let typed_header = vec![MediaType::new(MType::All, None), MediaType::new(MType::MajorAny(MMajorType::Video), Some(QualityParam::new(0.5)))]
+/// let typed_header = vec![MediaType::new(mime::STAR_STAR, None), MediaType::new(Mime::from_str("video/mp4").unwrap(), Some(QualityParam::new(0.5)))]
 ///     .into_iter()
 ///     .collect::<Accept>();
-/// let raw_header = vec![HeaderValue::try_from("*/*, Video/* ;q=0.5").unwrap()];
+/// let raw_header = vec![HeaderValue::try_from("*/*, video/mp4;q=0.5").unwrap()];
 /// assert_eq!(
 ///     Accept::decode(&mut raw_header.iter()).unwrap(),
 ///     Some(typed_header)
@@ -149,13 +149,15 @@ impl TypedHeader for Accept {
     /// use rtsp::header::types::Accept;
     /// use rtsp::header::value::HeaderValue;
     /// use rtsp::header::types::accept::QualityParam;
-    ///
-    /// let typed_header = vec![MediaType::new(MType::All, None), MediaType::new(MType::MajorAny(MMajorType::Video), Some(QualityParam::new(0.5)))]
+    /// use mime::*;
+    /// use std::str::FromStr;
+    /// 
+    /// let typed_header = vec![MediaType::new(mime::STAR_STAR, None), MediaType::new(Mime::from_str("video/*").unwrap(), Some(QualityParam::new(0.5)))]
     ///     .into_iter()
     ///     .collect::<Accept>();
     /// let expected_raw_headers = vec![
-    ///     vec![HeaderValue::try_from("*/*, Video/* ;q=0.5").unwrap()],
-    ///     vec![HeaderValue::try_from("Video/* ;q=0.5, */*").unwrap()],
+    ///     vec![HeaderValue::try_from("*/*, video/* ;q=0.5").unwrap()],
+    ///     vec![HeaderValue::try_from("video/* ;q=0.5, */*").unwrap()],
     /// ];
     /// let mut raw_header = vec![];
     /// typed_header.encode(&mut raw_header);
@@ -192,7 +194,7 @@ impl TypedHeader for Accept {
 */
 #[derive(Clone, Debug, PartialEq)]
 pub struct MediaType{
-    m_type: MType,
+    m_type: Mime,
     quality: Option<QualityParam>
 
 } //mtype and msubtype followed by what may be a quality. Then the quality may be followed by a generic param....
@@ -201,7 +203,7 @@ impl Default for MediaType {
 
     fn default() -> Self {
         MediaType{
-            m_type: MType::All,
+            m_type: mime::TEXT_PLAIN,
             quality: None
         }
     }
@@ -218,7 +220,7 @@ impl Hash for MediaType {
 
 impl MediaType{
 
-    pub fn new(m_type: MType, quality: Option<QualityParam>) -> Self {
+    pub fn new(m_type: Mime, quality: Option<QualityParam>) -> Self {
         MediaType{
             m_type,
             quality
@@ -236,12 +238,14 @@ impl MediaType{
     /// use rtsp::header::types::accept::MType;
     /// use rtsp::header::types::accept::MMajorType;
     /// use rtsp::header::types::accept::QualityParam;
+    /// use mime::*;
+    /// use std::str::FromStr;
     ///
-    /// assert_eq!(MediaType::new(MType::All, None).as_str(), "*/*");
-    /// assert_eq!(MediaType::new(MType::MajorAny(MMajorType::Video), Some(QualityParam::new(0.5))).as_str(), "Video/* ;q=0.5");
+    /// assert_eq!(MediaType::new(mime::STAR_STAR, None).as_str(), "*/*");
+    /// assert_eq!(MediaType::new(Mime::from_str("video/*").unwrap(), Some(QualityParam::new(0.5))).as_str(), "video/* ;q=0.5");
     /// ```
     pub fn as_str(&self) -> String {
-        let m_type = self.m_type.as_str();
+        let m_type = self.m_type.to_string();
         match &self.quality {
             Some(q) => format!("{} ;{}", m_type, q.as_str()),
             None => format!("{}", m_type)
@@ -256,7 +260,7 @@ impl<'accept> TryFrom<&'accept [u8]> for MediaType {
         let mut split = value.split(|element| element.clone() == ';' as u8);
         let mut decoded = MediaType::default();
         if let Some(mediatype) = split.next() {
-            let mtype = MType::try_from(mediatype).unwrap();
+            let mtype: Mime = str::from_utf8(mediatype).unwrap().parse().unwrap();
             decoded.m_type = mtype;
             if let Some(quality) = split.next() {
                 let q = QualityParam::try_from(quality).unwrap();
