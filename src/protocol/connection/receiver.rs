@@ -120,9 +120,6 @@ where
             match error {
                 ProtocolError::DecodeError(DecodeError::Request(
                     RequestDecodeError::UnsupportedVersion,
-                ))
-                | ProtocolError::DecodeError(DecodeError::Response(
-                    ResponseDecodeError::UnsupportedVersion,
                 )) => {
                     let message = Message::Response(VERSION_NOT_SUPPORTED_RESPONSE.clone());
                     send_message(message, sender_handle);
@@ -140,11 +137,11 @@ where
                     let message = Message::Response(REQUEST_URI_TOO_LONG_RESPONSE.clone());
                     send_message(message, sender_handle);
                 }
-                ProtocolError::DecodeError(_) => {
+                ProtocolError::DecodeError(DecodeError::Request(_)) => {
                     let message = Message::Response(BAD_REQUEST_RESPONSE.clone());
                     send_message(message, sender_handle);
                 }
-                _ => {}
+                _ => (),
             }
         }
     }
