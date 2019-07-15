@@ -83,7 +83,8 @@ use mime::*;
 /// ); 
 /// ```
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub struct Accept(LinkedHashSet<MediaType>);
+pub struct Accept(LinkedHashSet<MediaType>);/// use rtsp::header::types::accept::*;
+
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct AcceptError(pub &'static str);
@@ -144,8 +145,6 @@ impl TypedHeader for Accept {
     ///
     /// use rtsp::header::map::TypedHeader;
     /// use rtsp::header::types::accept::MediaType;
-    /// use rtsp::header::types::accept::MType;
-    /// use rtsp::header::types::accept::MMajorType; 
     /// use rtsp::header::types::Accept;
     /// use rtsp::header::value::HeaderValue;
     /// use rtsp::header::types::accept::QualityParam;
@@ -235,8 +234,6 @@ impl MediaType{
     /// use std::convert::TryFrom;
     ///
     /// use rtsp::header::types::accept::MediaType;
-    /// use rtsp::header::types::accept::MType;
-    /// use rtsp::header::types::accept::MMajorType;
     /// use rtsp::header::types::accept::QualityParam;
     /// use mime::*;
     /// use std::str::FromStr;
@@ -278,77 +275,6 @@ impl<'accept> TryFrom<&'accept str> for MediaType {
         let bytes = value.as_bytes();
         Self::try_from(bytes)
     } 
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub enum MType {
-    All,
-    MajorAny(MMajorType),
-    MajorMinor((MMajorType, MSubType))
-}
-
-impl<'mediatype> TryFrom<&'mediatype [u8]> for MType {
-    type Error = AcceptError;
-
-    fn try_from(value: &'mediatype [u8]) -> Result<Self, Self::Error> {
-        let splitchar = '/' as u8;
-        let all = '*' as u8;
-        let major_sub = value.split(|element| element.clone() == splitchar).collect::<Vec<&[u8]>>();
-        match major_sub.len() {
-            2 => {
-                if major_sub[0][0] == all {
-                    if major_sub[1][0] == all {
-                        return Ok(MType::All)
-                    } else {
-                        return Err(AcceptError("media type encoding error: second element is not *"))
-                    }
-                } else {
-                    if major_sub[1][0] == all {
-                        Ok(MType::MajorAny(MMajorType::try_from(major_sub[0]).unwrap()))
-                    } else {
-                        Ok(MType::MajorMinor((MMajorType::try_from(major_sub[0]).unwrap(), MSubType::try_from(major_sub[1]).unwrap())))
-                    }
-                }
-            },
-            _ => Err(AcceptError("media type encoding error"))
-        } 
-    }
-    
-}
-
-impl<'mediatype> TryFrom<&'mediatype str> for MType {
-    type Error = AcceptError;
-
-    fn try_from(value: &'mediatype str) -> Result<Self, Self::Error> {
-        let bytes = value.as_bytes();
-        Self::try_from(bytes)
-    }
-}
-
-impl MType {
-
-    /// Returns a `String` representation of the MType.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use std::convert::TryFrom;
-    ///
-    /// use rtsp::header::types::accept::MType;
-    /// use rtsp::header::types::accept::MMajorType;
-    ///
-    /// assert_eq!((MType::All).as_str(), "*/*");
-    /// assert_eq!((MType::MajorAny(MMajorType::Video)).as_str(), "Video/*");
-    /// ```
-    pub fn as_str(&self) -> String {
-        use self::MType::*;
-
-        match self {
-            All => String::from("*/*"),
-            MajorAny(majortype) => format!("{}/*", majortype.as_str()),
-            MajorMinor((majortype, subtype)) => format!("{}/{}", majortype.as_str(), subtype.as_str())
-        }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -405,185 +331,4 @@ impl QualityParam {
     }
 }
 
-pub struct MediaTypeParseError(String); 
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub enum MSubType {
-    SubType(Token)
-}
-
-impl MSubType {
-    
-    /// Returns a `&str` representation of the sub type.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use rtsp::header::types::accept::MSubType;
-    /// use rtsp::header::types::accept::Token;
-    ///
-    /// assert_eq!(MSubType::SubType(Token::Token("token".to_string())).as_str(), "token");
-    /// ```
-    pub fn as_str(&self) -> &str {
-        use self::MSubType::*;
-
-        match self {
-            SubType(token) => token.as_str()
-        }
-    }
-}
-
-impl<'subtype> TryFrom<&'subtype [u8]> for MSubType {
-    type Error = AcceptError;
-
-    fn try_from(value: &'subtype [u8]) -> Result<Self, Self::Error> {
-        let all_char = '*' as u8;
-        if value[0] == all_char {
-            return Err(AcceptError("MSubType encoding error"))
-        }
-        Ok(MSubType::SubType(Token::try_from(value).unwrap()))
-    }
-}
-
-impl<'subtype> TryFrom<&'subtype str> for MSubType {
-    type Error = AcceptError;
-
-    fn try_from(value: &'subtype str) -> Result<Self, Self::Error> {
-        let bytes = value.as_bytes();
-        Self::try_from(bytes)
-    }
-}
-
-impl Display for MSubType {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "{}", self.as_str())
-    }
-}
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub enum MMajorType{
-    Video,
-    Text,
-    Image,
-    Application,
-    Message,
-    Multipart,
-    Extension(Token)
-}
-
-impl<'majortype> TryFrom<&'majortype [u8]> for MMajorType{
-    type Error = AcceptError;
-    
-    fn try_from(value: &'majortype [u8]) -> Result<Self, Self::Error> {
-        if is_token(value) {
-            let mtype = unsafe {std::str::from_utf8_unchecked(value)}.to_ascii_lowercase();
-            let mtype_str = mtype.as_str();
-            match mtype_str {
-                "video" => Ok(Self::Video),
-                "text" => Ok(Self::Text),
-                "image" => Ok(Self::Image),
-                "application" => Ok(Self::Application),
-                "message" => Ok(Self::Message),
-                "multipart" => Ok(Self::Multipart),
-                _ => Ok(Self::Extension(Token::try_from(mtype_str).unwrap()))
-            }
-        } else {
-            Err(AcceptError("MMajorType encoding error"))
-        }
-    }
-}
-
-impl MMajorType {
-
-    /// Returns a `&str` representation of the major type.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use rtsp::header::types::accept::MMajorType;
-    ///
-    /// assert_eq!((MMajorType::Video).as_str(), "Video");
-    /// ```
-    pub fn as_str(&self) -> &str {
-        use self::MMajorType::*;
-
-        match self {
-            Video => "Video",
-            Text => "Text",
-            Image => "Image",
-            Application => "Application",
-            Message => "Message",
-            Multipart => "Multipart",
-            Extension(token) => token.as_str()
-        }
-    }
-
-}
-
-impl Display for MMajorType {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "{}", self.as_str())
-    }
-
-}
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub enum Token {
-    Token(String) ,
-    XToken(String)
-}
-
-impl Token {
-
-    /// Returns a `&str` representation of the sub type.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use rtsp::header::types::accept::Token;
-    ///
-    /// assert_eq!((Token::XToken("x-token".to_string())).as_str(), "x-token");
-    /// ```
-    pub fn as_str(&self) -> &str {
-        use self::Token::*;
-
-        match self {
-            Token(token) => &token,
-            XToken(token) => &token
-        }
-    }
-}
-
-impl<'token> TryFrom<&'token [u8]> for Token {
-    type Error = AcceptError;
-
-    fn try_from(value: &'token [u8]) -> Result<Self, Self::Error> {
-        let x = 'x' as u8;
-        if is_token(value) && value[0] == x {
-            let decoded = unsafe { std::str::from_utf8_unchecked(value) }.to_ascii_lowercase();
-            Ok(Token::XToken(decoded))
-        } else if is_token(value) {
-            let decoded = unsafe { std::str::from_utf8_unchecked(value) }.to_ascii_lowercase();
-            Ok(Token::Token(decoded))            
-        } else{
-            Err(AcceptError("Token encoding error"))
-        } 
-    }
-}
-
-impl<'token> TryFrom<&'token str> for Token {
-    type Error = AcceptError;
-
-    fn try_from(value: &'token str) -> Result<Self, Self::Error> {
-        let bytes = value.as_bytes();
-        Self::try_from(bytes)
-    }
-}
-
-impl Display for Token {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result{
-        write!(f, "{}", self.as_str())
-    }
-}
-
-
+pub struct MediaTypeParseError(String);
