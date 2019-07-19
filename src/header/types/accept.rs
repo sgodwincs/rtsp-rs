@@ -247,11 +247,12 @@ impl<'accept> TryFrom<&'accept [u8]> for MediaType {
             if let Ok(mtype) = str::from_utf8(mediatype).unwrap().parse() {
                 decoded.m_type = mtype;
                 if let Some(quality) = split.next() {
-                    let quality_param = QualityParam::try_from(quality).unwrap();
-                    decoded.quality = Some(quality_param);
-                } else{
-                    return Err(AcceptError("unable to parse quality parameter"))
-                }
+                    if let Ok(quality_param) = QualityParam::try_from(quality) {
+                        decoded.quality = Some(quality_param);
+                    } else {
+                        return Err(AcceptError("unable to parse quality parameter"))
+                    }
+                } 
             } else{
                 return Err(AcceptError("unable to parse mime type"))
             }
