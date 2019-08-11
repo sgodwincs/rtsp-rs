@@ -1,24 +1,24 @@
-extern crate lazy_static;
-extern crate mime;
-
 use std::ops::{Deref, DerefMut};
 use std::iter::{once, FromIterator};
 use std::convert::TryFrom;
 use std::hash::Hasher;
 use std::hash::Hash;
 use std::str;
-use crate::header::map::TypedHeader;
-use linked_hash_set::LinkedHashSet;
+use std::f32;
+
+extern crate mime;
+use mime::{Mime};
 use crate::header::value::HeaderValue;
 use crate::header::name::HeaderName;
+use crate::header::map::TypedHeader;
 use crate::syntax;
 use std::string::ToString;
 use itertools::Itertools;
-use mime::*;
+use linked_hash_set::LinkedHashSet;
 
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub struct Accept(LinkedHashSet<MediaType>);/// use rtsp::header::types::accept::*;
+pub struct Accept(LinkedHashSet<MediaType>);
 
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -27,13 +27,14 @@ pub struct AcceptError(pub &'static str);
 impl Deref for Accept {
     type Target = LinkedHashSet<MediaType>;
 
-    fn deref(&self) -> &LinkedHashSet<MediaType> {
+    fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
 impl DerefMut for Accept {
-    fn deref_mut(&mut self) -> &mut LinkedHashSet<MediaType> {
+
+    fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
 }
@@ -165,43 +166,21 @@ impl TypedHeader for Accept {
     {
         // Unsafe Justification
         //
-        // Header values must be valid UTF-8, and since we know that the [`RangeFormat`] type
-        // guarantees valid ASCII-US (with no newlines), it satisfies the constraints.
+        // Mime types only allow for US-ASCII which is also valid UTF-8
         let value = self.iter().map(MediaType::as_str).join(", ");
         values.extend(once(unsafe { HeaderValue::from_string_unchecked(value) }));    }
 
     fn header_name() -> &'static HeaderName
-    where   
-        Self: Sized
     {
         &HeaderName::Accept
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct MediaType{
     m_type: Mime,
     quality: Option<QualityParam>
 
-}
-
-impl Default for MediaType {
-
-    fn default() -> Self {
-        MediaType{
-            m_type: mime::TEXT_PLAIN,
-            quality: None
-        }
-    }
-}
-
-impl Eq for MediaType {}
-
-impl Hash for MediaType {
-
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.m_type.hash(state);
-    }
 }
 
 impl MediaType{
@@ -242,22 +221,31 @@ impl<'accept> TryFrom<&'accept [u8]> for MediaType {
 
     fn try_from(value: &'accept [u8]) -> Result<Self, Self::Error> {
         let mut split = value.split(|element| element.clone() == ';' as u8);
-        let mut decoded = MediaType::default();
-        if let Some(mediatype) = split.next() {
-            if let Ok(mtype) = str::from_utf8(mediatype).unwrap().parse() {
-                decoded.m_type = mtype;
-                if let Some(quality) = split.next() {
-                    if let Ok(quality_param) = QualityParam::try_from(quality) {
-                        decoded.quality = Some(quality_param);
-                    } else {
-                        return Err(AcceptError("unable to parse quality parameter"))
+        match split.next(){
+            Some(mediatype) => {
+                if let Ok(raw_utf8) = str::from_utf8(mediatype) {
+                    match raw_utf8.parse() {
+                        Ok(mime) => {
+                            let m_type = mime;
+                            if let Some(quality) = split.next() {
+                                if let Ok(quality_param) = QualityParam::try_from(quality) {
+                                    let quality = Some(quality_param);
+                                    return Ok(MediaType{m_type, quality})
+                                } else {
+                                    return Err(AcceptError("unable to parse quality parameter"))
+                                }
+                            }else{
+                                return Ok(MediaType{m_type, quality: None})
+                            }
+                        },
+                        Err(_) => Err(AcceptError("unable to parse mime"))
                     }
-                } 
-            } else{
-                return Err(AcceptError("unable to parse mime type"))
-            }
+                } else{
+                    return Err(AcceptError("invalid utf8 format"))
+                }
+            },
+            _ => Err(AcceptError("no media type"))
         }
-        Ok(decoded)
     }
 }
 
@@ -270,8 +258,8 @@ impl<'accept> TryFrom<&'accept str> for MediaType {
     } 
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct QualityParam(f32);
+#[derive(Clone, Debug, PartialEq, Hash, Eq)]
+pub struct QualityParam(u32);
 
 impl<'quality> TryFrom<&'quality [u8]> for QualityParam {
     type Error = AcceptError;
@@ -303,7 +291,7 @@ impl QualityParam {
 
     pub fn new(q_value: f32) -> Self {
         let q_value = q_value.clamp(0.0_f32, 1.0_f32);
-        QualityParam(q_value)
+        QualityParam(q_value.to_bits())
     }
 
 
@@ -319,7 +307,7 @@ impl QualityParam {
     /// assert_eq!(QualityParam::new(0.5).as_str(), "q=0.5");
     /// ```
     pub fn as_str(&self) -> String {
-        let q_val = self.0.to_string();
-        format!("q={}", q_val)
+        let q_val: f32 = f32::from_bits(self.0);
+        format!("q={}", q_val.to_string())
     }
 }

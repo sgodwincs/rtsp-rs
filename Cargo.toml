@@ -38,12 +38,9 @@ regex = "1.1.6"
 base64 = "0.10.1"
 mime = "0.3.13"
 
-
 [dependencies.rtp]
 git = "https://github.com/sgodwincs/rtp-rs"
 rev = "bc88ec0"
 
 [dev-dependencies]
 criterion = "0.2.5"
-
-

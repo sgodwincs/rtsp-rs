@@ -987,6 +987,7 @@ impl<'uri> TryFrom<URIReference<'uri>> for URI {
         if !value.has_scheme() && value.has_authority() {
             return Err(URIError::MissingScheme);
         }
+
         /*
         seems to be the case that we need to add ; parsing here for path parameters
         ; is a reserved key word
