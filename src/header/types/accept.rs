@@ -15,6 +15,8 @@ use crate::syntax;
 use std::string::ToString;
 use itertools::Itertools;
 use linked_hash_set::LinkedHashSet;
+use core::fmt;
+use std::fmt::{Error, Formatter};
 
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -167,7 +169,7 @@ impl TypedHeader for Accept {
         // Unsafe Justification
         //
         // Mime types only allow for US-ASCII which is also valid UTF-8
-        let value = self.iter().map(MediaType::as_str).join(", ");
+        let value = self.iter().map(MediaType::to_string).join(", ");
         values.extend(once(unsafe { HeaderValue::from_string_unchecked(value) }));    }
 
     fn header_name() -> &'static HeaderName
@@ -191,27 +193,15 @@ impl MediaType{
             quality
         }
     }
+}
 
-    /// Returns a `&str` representation of the media type.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use std::convert::TryFrom;
-    ///
-    /// use rtsp::header::types::accept::MediaType;
-    /// use rtsp::header::types::accept::QualityParam;
-    /// use mime::*;
-    /// use std::str::FromStr;
-    ///
-    /// assert_eq!(MediaType::new(mime::STAR_STAR, None).as_str(), "*/*");
-    /// assert_eq!(MediaType::new(Mime::from_str("video/*").unwrap(), Some(QualityParam::new(0.5))).as_str(), "video/* ;q=0.5");
-    /// ```
-    pub fn as_str(&self) -> String {
+impl fmt::Display for MediaType {
+
+    fn fmt(&self, f: &mut Formatter) -> Result<(), Error> {
         let m_type = self.m_type.to_string();
         match &self.quality {
-            Some(quality) => format!("{} ;{}", m_type, quality.as_str()),
-            None => format!("{}", m_type)
+            Some(quality) => write!(f, "{} ;{}", m_type, quality.as_str()),
+            None => write!(f, "{}", m_type)
         }
     }
 }
