@@ -5,6 +5,8 @@ use std::hash::Hasher;
 use std::hash::Hash;
 use std::str;
 use std::f32;
+use core::fmt;
+use std::fmt::{Error, Formatter};
 
 extern crate mime;
 use mime::{Mime};
@@ -15,8 +17,7 @@ use crate::syntax;
 use std::string::ToString;
 use itertools::Itertools;
 use linked_hash_set::LinkedHashSet;
-use core::fmt;
-use std::fmt::{Error, Formatter};
+
 
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
