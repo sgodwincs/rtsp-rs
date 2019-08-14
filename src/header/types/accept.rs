@@ -201,7 +201,7 @@ impl fmt::Display for MediaType {
     fn fmt(&self, f: &mut Formatter) -> Result<(), Error> {
         let m_type = self.m_type.to_string();
         match &self.quality {
-            Some(quality) => write!(f, "{} ;{}", m_type, quality.as_str()),
+            Some(quality) => write!(f, "{} ;{}", m_type, quality.to_string()),
             None => write!(f, "{}", m_type)
         }
     }
@@ -284,21 +284,12 @@ impl QualityParam {
         let q_value = q_value.clamp(0.0_f32, 1.0_f32);
         QualityParam(q_value.to_bits())
     }
+}
 
+impl fmt::Display for QualityParam{
 
-    /// Returns a `String` representation of the quality parameter.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use std::convert::TryFrom;
-    ///
-    /// use rtsp::header::types::accept::QualityParam;
-    ///
-    /// assert_eq!(QualityParam::new(0.5).as_str(), "q=0.5");
-    /// ```
-    pub fn as_str(&self) -> String {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), Error> {
         let q_val: f32 = f32::from_bits(self.0);
-        format!("q={}", q_val.to_string())
+        write!(f, "q={}", q_val.to_string())
     }
 }

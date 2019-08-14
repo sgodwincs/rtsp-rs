@@ -988,10 +988,6 @@ impl<'uri> TryFrom<URIReference<'uri>> for URI {
             return Err(URIError::MissingScheme);
         }
 
-        /*
-        seems to be the case that we need to add ; parsing here for path parameters
-        ; is a reserved key word
-        */
         if value.is_relative_reference() {
             let segments = value.path().segments();
 
