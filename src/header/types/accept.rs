@@ -256,16 +256,22 @@ impl<'quality> TryFrom<&'quality [u8]> for QualityParam {
     type Error = AcceptError;
 
     fn try_from(value: &'quality [u8]) -> Result<Self, Self::Error> {
-        let stringify = String::from_utf8(value.to_vec()).unwrap();
-        let val = stringify.split("=").collect::<Vec<&str>>();
-        if val.len() < 2 || val.len() > 2 {
-            return Err(AcceptError("incorrect quality format"))
-        }        
-        let quality = val[1].parse::<f32>();
-        match quality {
-            Ok(quality_param) =>  return Ok(QualityParam::new(quality_param)),
-            Err(_) => return Err(AcceptError("unable to parse f32 from string"))
+        if let Ok(stringify) = str::from_utf8(value) {
+            let mut val = stringify.splitn(2,"=");
+            match val.next() {
+                Some(_) => match val.next() {
+                    Some(quality) => match quality.parse::<f32>() {
+                        Ok(quality_param) => Ok(QualityParam::new(quality_param)),
+                        Err(_) => Err(AcceptError("unable to parse f32 from string"))
+                    },
+                    None => Err(AcceptError("incorrect quality format"))
+                },
+                None => Err(AcceptError("incorrect quality format"))
+            }
+        }else{
+            Err(AcceptError("Not valid UTF8"))
         }
+
     }
 }
 
