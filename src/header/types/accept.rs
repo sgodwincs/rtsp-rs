@@ -211,7 +211,7 @@ impl<'accept> TryFrom<&'accept [u8]> for MediaType {
     type Error = AcceptError;
 
     fn try_from(value: &'accept [u8]) -> Result<Self, Self::Error> {
-        let mut split = value.split(|element| element.clone() == ';' as u8);
+        let mut split = value.splitn(2,|&element| element == b';' as u8);
         match split.next(){
             Some(mediatype) => {
                 if let Ok(raw_utf8) = str::from_utf8(mediatype) {
