@@ -1,31 +1,32 @@
-use std::ops::{Deref, DerefMut};
-use std::iter::{once, FromIterator};
-use std::convert::TryFrom;
-use std::hash::Hasher;
-use std::hash::Hash;
-use std::str;
-use std::f32;
 use core::fmt;
+use std::convert::TryFrom;
+use std::f32;
 use std::fmt::{Error, Formatter};
+use std::hash::Hash;
+use std::hash::Hasher;
+use std::iter::{once, FromIterator};
+use std::ops::{Deref, DerefMut};
+use std::str;
 
 extern crate mime;
-use mime::{Mime};
-use crate::header::value::HeaderValue;
-use crate::header::name::HeaderName;
 use crate::header::map::TypedHeader;
+use crate::header::name::HeaderName;
+use crate::header::value::HeaderValue;
 use crate::syntax;
-use std::string::ToString;
 use itertools::Itertools;
 use linked_hash_set::LinkedHashSet;
-
-
+use mime::Mime;
+use std::string::ToString;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct Accept(LinkedHashSet<MediaType>);
 
-
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub struct AcceptError(pub &'static str);
+pub enum AcceptError{
+    InvalidUtf8,
+    InvalidSyntax,
+
+}
 
 impl Deref for Accept {
     type Target = LinkedHashSet<MediaType>;
@@ -36,7 +37,6 @@ impl Deref for Accept {
 }
 
 impl DerefMut for Accept {
-
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
@@ -57,7 +57,7 @@ impl TypedHeader for Accept {
     /// The Accept request-header field can be used to specify certain
     /// presentation description and parameter media types [RFC6838] that are
     /// acceptable for the response to the DESCRIBE request.
-    /// 
+    ///
     /// ```text
     /// Accept            =  "Accept" HCOLON
     ///                        [ accept-range *(COMMA accept-range) ]
@@ -88,11 +88,11 @@ impl TypedHeader for Accept {
     ///    token           =  1*(%x21 / %x23-27 / %x2A-2B / %x2D-2E / %x30-39
     ///                        /  %x41-5A / %x5E-7A / %x7C / %x7E) //any CHAR except CTLs or tspecials
     /// ```
-    /// 
+    ///
     /// All values seperated with commas will be converted into [`MediaType`] type.
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```
     /// use std::convert::TryFrom;
     ///
@@ -106,14 +106,16 @@ impl TypedHeader for Accept {
     /// let raw_header: Vec<HeaderValue> = vec![];
     /// assert_eq!(Accept::decode(&mut raw_header.iter()).unwrap(), None);
     ///
-    /// let typed_header = vec![MediaType::new(mime::STAR_STAR, None), MediaType::new(Mime::from_str("video/mp4").unwrap(), Some(QualityParam::new(0.5)))]
-    ///     .into_iter()
-    ///     .collect::<Accept>();
+    /// let typed_header = vec![
+    ///     MediaType::new(mime::STAR_STAR, None), 
+    ///     MediaType::new(Mime::from_str("video/mp4").unwrap(), 
+    ///     Some(QualityParam::new(0.5)))
+    /// ].into_iter().collect::<Accept>();
     /// let raw_header = vec![HeaderValue::try_from("*/*, video/mp4;q=0.5").unwrap()];
     /// assert_eq!(
     ///     Accept::decode(&mut raw_header.iter()).unwrap(),
     ///     Some(typed_header)
-    /// ); 
+    /// );
     /// ```
     fn decode<'header, Iter>(values: &mut Iter) -> Result<Option<Self>, Self::DecodeError>
     where
@@ -135,7 +137,7 @@ impl TypedHeader for Accept {
             Ok(None)
         }
     }
-    
+
     /// Converts the [`Accept`] type to raw header values.
     ///
     /// # Examples
@@ -150,10 +152,12 @@ impl TypedHeader for Accept {
     /// use rtsp::header::types::accept::QualityParam;
     /// use mime::*;
     /// use std::str::FromStr;
-    /// 
-    /// let typed_header = vec![MediaType::new(mime::STAR_STAR, None), MediaType::new(Mime::from_str("video/*").unwrap(), Some(QualityParam::new(0.5)))]
-    ///     .into_iter()
-    ///     .collect::<Accept>();
+    ///
+    /// let typed_header = vec![
+    ///     MediaType::new(mime::STAR_STAR, None), 
+    ///     MediaType::new(Mime::from_str("video/*").unwrap(), 
+    ///     Some(QualityParam::new(0.5)))
+    /// ].into_iter().collect::<Accept>();
     /// let expected_raw_headers = vec![
     ///     vec![HeaderValue::try_from("*/*, video/* ;q=0.5").unwrap()],
     ///     vec![HeaderValue::try_from("video/* ;q=0.5, */*").unwrap()],
@@ -165,54 +169,48 @@ impl TypedHeader for Accept {
     /// ```
     fn encode<Target>(&self, values: &mut Target)
     where
-        Target: Extend<HeaderValue>
+        Target: Extend<HeaderValue>,
     {
         // Unsafe Justification
         //
         // Mime types only allow for US-ASCII which is also valid UTF-8
         let value = self.iter().map(MediaType::to_string).join(", ");
-        values.extend(once(unsafe { HeaderValue::from_string_unchecked(value) }));    }
+        values.extend(once(unsafe { HeaderValue::from_string_unchecked(value) }));
+    }
 
-    fn header_name() -> &'static HeaderName
-    {
+    fn header_name() -> &'static HeaderName {
         &HeaderName::Accept
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct MediaType{
+pub struct MediaType {
     m_type: Mime,
-    quality: Option<QualityParam>
-
+    quality: Option<QualityParam>,
 }
 
-impl MediaType{
-
+impl MediaType {
     pub fn new(m_type: Mime, quality: Option<QualityParam>) -> Self {
-        MediaType{
-            m_type,
-            quality
-        }
+        MediaType { m_type, quality }
     }
 }
 
 impl fmt::Display for MediaType {
-
     fn fmt(&self, f: &mut Formatter) -> Result<(), Error> {
         let m_type = self.m_type.to_string();
         match &self.quality {
-            Some(quality) => write!(f, "{} ;{}", m_type, quality.to_string()),
-            None => write!(f, "{}", m_type)
+            Some(quality) => write!(f, "{} ;{}", m_type, quality),
+            None => write!(f, "{}", m_type),
         }
     }
 }
 
-impl<'accept> TryFrom<&'accept [u8]> for MediaType {
+impl<'media_type> TryFrom<&'media_type [u8]> for MediaType {
     type Error = AcceptError;
 
-    fn try_from(value: &'accept [u8]) -> Result<Self, Self::Error> {
-        let mut split = value.splitn(2,|&element| element == b';' as u8);
-        match split.next(){
+    fn try_from(value: &'media_type [u8]) -> Result<Self, Self::Error> {
+        let mut split = value.splitn(2, |&element| element == b';');
+        match split.next() {
             Some(mediatype) => {
                 if let Ok(raw_utf8) = str::from_utf8(mediatype) {
                     match raw_utf8.parse() {
@@ -221,32 +219,35 @@ impl<'accept> TryFrom<&'accept [u8]> for MediaType {
                             if let Some(quality) = split.next() {
                                 if let Ok(quality_param) = QualityParam::try_from(quality) {
                                     let quality = Some(quality_param);
-                                    return Ok(MediaType{m_type, quality})
+                                    return Ok(MediaType { m_type, quality });
                                 } else {
-                                    return Err(AcceptError("unable to parse quality parameter"))
+                                    return Err(AcceptError::InvalidSyntax);
                                 }
-                            }else{
-                                return Ok(MediaType{m_type, quality: None})
+                            } else {
+                                return Ok(MediaType {
+                                    m_type,
+                                    quality: None,
+                                });
                             }
-                        },
-                        Err(_) => Err(AcceptError("unable to parse mime"))
+                        }
+                        Err(_) => Err(AcceptError::InvalidSyntax),
                     }
-                } else{
-                    return Err(AcceptError("invalid utf8 format"))
+                } else {
+                    return Err(AcceptError::InvalidSyntax);
                 }
-            },
-            _ => Err(AcceptError("no media type"))
+            }
+            _ => Err(AcceptError::InvalidSyntax),
         }
     }
 }
 
-impl<'accept> TryFrom<&'accept str> for MediaType {
+impl<'media_type> TryFrom<&'media_type str> for MediaType {
     type Error = AcceptError;
 
-    fn try_from(value: &'accept str) -> Result<Self, Self::Error> {
+    fn try_from(value: &'media_type str) -> Result<Self, Self::Error> {
         let bytes = value.as_bytes();
         Self::try_from(bytes)
-    } 
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Hash, Eq)]
@@ -257,21 +258,20 @@ impl<'quality> TryFrom<&'quality [u8]> for QualityParam {
 
     fn try_from(value: &'quality [u8]) -> Result<Self, Self::Error> {
         if let Ok(stringify) = str::from_utf8(value) {
-            let mut val = stringify.splitn(2,"=");
+            let mut val = stringify.splitn(2, "=");
             match val.next() {
                 Some(_) => match val.next() {
                     Some(quality) => match quality.parse::<f32>() {
                         Ok(quality_param) => Ok(QualityParam::new(quality_param)),
-                        Err(_) => Err(AcceptError("unable to parse f32 from string"))
+                        Err(_) => Err(AcceptError::InvalidSyntax),
                     },
-                    None => Err(AcceptError("incorrect quality format"))
+                    None => Err(AcceptError::InvalidSyntax),
                 },
-                None => Err(AcceptError("incorrect quality format"))
+                None => Err(AcceptError::InvalidSyntax),
             }
-        }else{
-            Err(AcceptError("Not valid UTF8"))
+        } else {
+            Err(AcceptError::InvalidUtf8)
         }
-
     }
 }
 
@@ -285,15 +285,13 @@ impl<'quality> TryFrom<&'quality str> for QualityParam {
 }
 
 impl QualityParam {
-
     pub fn new(q_value: f32) -> Self {
         let q_value = q_value.clamp(0.0_f32, 1.0_f32);
         QualityParam(q_value.to_bits())
     }
 }
 
-impl fmt::Display for QualityParam{
-
+impl fmt::Display for QualityParam {
     fn fmt(&self, f: &mut Formatter) -> Result<(), Error> {
         let q_val: f32 = f32::from_bits(self.0);
         write!(f, "q={}", q_val.to_string())
