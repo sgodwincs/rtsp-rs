@@ -221,7 +221,10 @@ impl<'media_type> TryFrom<&'media_type [u8]> for MediaType {
                 let quality = Some(quality_param);
                 return Ok(MediaType { m_type, quality });
             }
-            None => Ok(MediaType {m_type, quality: None}),
+            None => Ok(MediaType {
+                m_type,
+                quality: None,
+            }),
         }
     }
 }
