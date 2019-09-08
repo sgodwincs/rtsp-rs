@@ -22,10 +22,9 @@ use std::string::ToString;
 pub struct Accept(LinkedHashSet<MediaType>);
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum AcceptError{
+pub enum AcceptError {
     InvalidUtf8,
     InvalidSyntax,
-
 }
 
 impl Deref for Accept {
@@ -107,8 +106,8 @@ impl TypedHeader for Accept {
     /// assert_eq!(Accept::decode(&mut raw_header.iter()).unwrap(), None);
     ///
     /// let typed_header = vec![
-    ///     MediaType::new(mime::STAR_STAR, None), 
-    ///     MediaType::new(Mime::from_str("video/mp4").unwrap(), 
+    ///     MediaType::new(mime::STAR_STAR, None),
+    ///     MediaType::new(Mime::from_str("video/mp4").unwrap(),
     ///     Some(QualityParam::new(0.5)))
     /// ].into_iter().collect::<Accept>();
     /// let raw_header = vec![HeaderValue::try_from("*/*, video/mp4;q=0.5").unwrap()];
@@ -154,8 +153,8 @@ impl TypedHeader for Accept {
     /// use std::str::FromStr;
     ///
     /// let typed_header = vec![
-    ///     MediaType::new(mime::STAR_STAR, None), 
-    ///     MediaType::new(Mime::from_str("video/*").unwrap(), 
+    ///     MediaType::new(mime::STAR_STAR, None),
+    ///     MediaType::new(Mime::from_str("video/*").unwrap(),
     ///     Some(QualityParam::new(0.5)))
     /// ].into_iter().collect::<Accept>();
     /// let expected_raw_headers = vec![
@@ -210,33 +209,19 @@ impl<'media_type> TryFrom<&'media_type [u8]> for MediaType {
 
     fn try_from(value: &'media_type [u8]) -> Result<Self, Self::Error> {
         let mut split = value.splitn(2, |&element| element == b';');
+        let mediatype = split.next().ok_or(AcceptError::InvalidSyntax)?;
+        let raw_utf8 = str::from_utf8(mediatype).map_err(|_| AcceptError::InvalidUtf8)?;
+        let mime = raw_utf8.parse().map_err(|_| AcceptError::InvalidSyntax)?;
+        let m_type = mime;
+
         match split.next() {
-            Some(mediatype) => {
-                if let Ok(raw_utf8) = str::from_utf8(mediatype) {
-                    match raw_utf8.parse() {
-                        Ok(mime) => {
-                            let m_type = mime;
-                            if let Some(quality) = split.next() {
-                                if let Ok(quality_param) = QualityParam::try_from(quality) {
-                                    let quality = Some(quality_param);
-                                    return Ok(MediaType { m_type, quality });
-                                } else {
-                                    return Err(AcceptError::InvalidSyntax);
-                                }
-                            } else {
-                                return Ok(MediaType {
-                                    m_type,
-                                    quality: None,
-                                });
-                            }
-                        }
-                        Err(_) => Err(AcceptError::InvalidSyntax),
-                    }
-                } else {
-                    return Err(AcceptError::InvalidSyntax);
-                }
+            Some(quality) => {
+                let quality_param =
+                    QualityParam::try_from(quality).map_err(|_| AcceptError::InvalidSyntax)?;
+                let quality = Some(quality_param);
+                return Ok(MediaType { m_type, quality });
             }
-            _ => Err(AcceptError::InvalidSyntax),
+            None => Ok(MediaType {m_type, quality: None}),
         }
     }
 }
@@ -257,21 +242,13 @@ impl<'quality> TryFrom<&'quality [u8]> for QualityParam {
     type Error = AcceptError;
 
     fn try_from(value: &'quality [u8]) -> Result<Self, Self::Error> {
-        if let Ok(stringify) = str::from_utf8(value) {
-            let mut val = stringify.splitn(2, "=");
-            match val.next() {
-                Some(_) => match val.next() {
-                    Some(quality) => match quality.parse::<f32>() {
-                        Ok(quality_param) => Ok(QualityParam::new(quality_param)),
-                        Err(_) => Err(AcceptError::InvalidSyntax),
-                    },
-                    None => Err(AcceptError::InvalidSyntax),
-                },
-                None => Err(AcceptError::InvalidSyntax),
-            }
-        } else {
-            Err(AcceptError::InvalidUtf8)
-        }
+        let stringify = str::from_utf8(value).map_err(|_| AcceptError::InvalidUtf8)?;
+        let mut val = stringify.rsplitn(2, "=");
+        let quality = val.next().ok_or(AcceptError::InvalidSyntax)?;
+        let quality_param = quality
+            .parse::<f32>()
+            .map_err(|_| AcceptError::InvalidSyntax)?;
+        return Ok(QualityParam::new(quality_param));
     }
 }
 
