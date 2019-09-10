@@ -36,6 +36,7 @@ linked_hash_set = "0.1.3"
 tower-service = "0.2.0"
 regex = "1.1.6"
 base64 = "0.10.1"
+mime = "0.3.13"
 
 [dependencies.rtp]
 git = "https://github.com/sgodwincs/rtp-rs"

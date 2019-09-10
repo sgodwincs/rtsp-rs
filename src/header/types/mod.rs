@@ -1,3 +1,4 @@
+pub mod accept;
 pub mod accept_ranges;
 pub mod content_length;
 pub mod cseq;
@@ -7,6 +8,7 @@ pub mod public;
 pub mod session;
 pub mod transport;
 
+pub use self::accept::Accept;
 pub use self::accept_ranges::AcceptRanges;
 pub use self::content_length::ContentLength;
 pub use self::cseq::CSeq;
