@@ -626,7 +626,7 @@ impl Decoder {
         }
 
         match Version::try_from(&buffer[0..8]) {
-            Ok(version) if version == Version::RTSP20 => {
+            Ok(version) if version == Version::Rtsp2_0 => {
                 self.builder.version(version);
                 self.state = DecodeState::StatusCode;
                 *buffer = &buffer[9..];

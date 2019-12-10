@@ -138,7 +138,7 @@ impl<TBody> Request<TBody> {
     /// let request = Request::from_parts(
     ///     Method::Setup,
     ///     URI::try_from("rtsp://example.com").unwrap(),
-    ///     Version::RTSP20,
+    ///     Version::Rtsp2_0,
     ///     HeaderMap::from_iter(vec![
     ///         (HeaderName::ContentLength, HeaderValue::try_from("0").unwrap())
     ///     ]),
@@ -146,7 +146,7 @@ impl<TBody> Request<TBody> {
     /// ).unwrap();
     /// assert_eq!(request.method(), &Method::Setup);
     /// assert_eq!(request.uri(), &URI::try_from("rtsp://example.com").unwrap());
-    /// assert_eq!(request.version(), Version::RTSP20);
+    /// assert_eq!(request.version(), Version::Rtsp2_0);
     /// assert_eq!(
     ///     request.headers().get(&HeaderName::ContentLength),
     ///     Some(&HeaderValue::try_from("0").unwrap())
@@ -410,7 +410,7 @@ impl<TBody> Request<TBody> {
     ///     .with_body("body")
     ///     .build()
     ///     .unwrap();
-    /// assert_eq!(request.version(), Version::RTSP20);
+    /// assert_eq!(request.version(), Version::Rtsp2_0);
     /// ```
     pub fn version(&self) -> Version {
         self.version
@@ -500,7 +500,7 @@ impl<TBody> Builder<TBody> {
         let uri = self.uri.ok_or(RequestError::MissingURI)?;
         let body = self.body.ok_or(RequestError::MissingBody)?;
 
-        if self.version != Version::RTSP20 {
+        if self.version != Version::Rtsp2_0 {
             return Err(RequestError::UnsupportedVersion);
         }
 
@@ -663,7 +663,7 @@ impl<TBody> Builder<TBody> {
     /// builder
     ///     .method(Method::Setup)
     ///     .uri(URI::try_from("rtsp://server.com").unwrap())
-    ///     .version(Version::RTSP20)
+    ///     .version(Version::Rtsp2_0)
     ///     .body(());
     /// let request = builder.build().unwrap();
     /// ```
@@ -834,7 +834,7 @@ impl<TBody> Builder<TBody> {
     /// let request = Request::<()>::builder()
     ///     .with_method(Method::Setup)
     ///     .with_uri(URI::asterisk())
-    ///     .with_version(Version::RTSP20)
+    ///     .with_version(Version::Rtsp2_0)
     ///     .with_body("")
     ///     .build()
     ///     .unwrap();

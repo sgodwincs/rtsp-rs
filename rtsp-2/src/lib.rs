@@ -16,4 +16,5 @@ pub mod server;
 pub mod session;
 pub mod status;
 pub mod uri;
-pub mod version;
+
+pub use rtsp_common::version;

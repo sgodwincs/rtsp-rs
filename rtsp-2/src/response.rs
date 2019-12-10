@@ -176,7 +176,7 @@ impl<TBody> Response<TBody> {
     /// use rtsp::version::Version;
     ///
     /// let response = Response::from_parts(
-    ///     Version::RTSP20,
+    ///     Version::Rtsp2_0,
     ///     StatusCode::OK,
     ///     StatusCode::OK.canonical_reason().unwrap(),
     ///     HeaderMap::from_iter(vec![
@@ -184,7 +184,7 @@ impl<TBody> Response<TBody> {
     ///     ]),
     ///     "",
     /// ).unwrap();
-    /// assert_eq!(response.version(), Version::RTSP20);
+    /// assert_eq!(response.version(), Version::Rtsp2_0);
     /// assert_eq!(response.status_code(), StatusCode::OK);
     /// assert_eq!(response.reason_phrase(), &StatusCode::OK.canonical_reason().unwrap());
     /// assert_eq!(
@@ -428,7 +428,7 @@ impl<TBody> Response<TBody> {
     ///     .with_body("body")
     ///     .build()
     ///     .unwrap();
-    /// assert_eq!(response.version(), Version::RTSP20);
+    /// assert_eq!(response.version(), Version::Rtsp2_0);
     /// ```
     pub fn version(&self) -> Version {
         self.version
@@ -510,7 +510,7 @@ impl<TBody> Builder<TBody> {
         };
         let body = self.body.ok_or(ResponseError::MissingBody)?;
 
-        if self.version != Version::RTSP20 {
+        if self.version != Version::Rtsp2_0 {
             return Err(ResponseError::UnsupportedVersion);
         }
 
@@ -658,7 +658,7 @@ impl<TBody> Builder<TBody> {
     ///
     /// let mut builder = Response::builder();
     /// builder
-    ///     .version(Version::RTSP20)
+    ///     .version(Version::Rtsp2_0)
     ///     .body(());
     /// let response = builder.build().unwrap();
     /// ```
@@ -806,7 +806,7 @@ impl<TBody> Builder<TBody> {
     /// use rtsp::version::Version;
     ///
     /// let response = Response::<()>::builder()
-    ///     .with_version(Version::RTSP20)
+    ///     .with_version(Version::Rtsp2_0)
     ///     .with_body("")
     ///     .build()
     ///     .unwrap();
