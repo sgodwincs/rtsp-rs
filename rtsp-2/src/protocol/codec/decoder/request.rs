@@ -59,7 +59,7 @@ use crate::protocol::codec::decoder::{
 };
 use crate::request::{Builder as RequestBuilder, Request};
 use crate::uri::request::{URIError, URI};
-use crate::version::{Version, VersionError};
+use crate::version::{DecodeError as VersionDecodeError, Version};
 
 /// The current state of the request parsing.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -661,7 +661,7 @@ impl Decoder {
         }
 
         if &buffer[8..10] != b"\r\n" {
-            return Error(DecodeError::Version(VersionError::Invalid));
+            return Error(DecodeError::Version(VersionDecodeError::Invalid));
         }
 
         match Version::try_from(&buffer[0..8]) {
@@ -827,7 +827,7 @@ pub enum DecodeError {
     UnsupportedVersion,
 
     /// There was an error decoding the version.
-    Version(VersionError),
+    Version(VersionDecodeError),
 }
 
 impl Display for DecodeError {
@@ -884,8 +884,8 @@ impl From<URIError> for DecodeError {
     }
 }
 
-impl From<VersionError> for DecodeError {
-    fn from(value: VersionError) -> Self {
+impl From<VersionDecodeError> for DecodeError {
+    fn from(value: VersionDecodeError) -> Self {
         DecodeError::Version(value)
     }
 }
@@ -898,7 +898,7 @@ mod test {
         ConfigBuilder, DecodeError, DecodeResult, Decoder,
     };
     use crate::uri::request::URIError;
-    use crate::version::VersionError;
+    use crate::version::VersionDecodeError;
 
     #[test]
     fn test_decoder_decode_body_invalid_content_length() {
@@ -1078,7 +1078,7 @@ mod test {
         assert_ne!(bytes_decoded, buffer.len());
         assert_eq!(
             result,
-            DecodeResult::Error(DecodeError::Version(VersionError::Invalid))
+            DecodeResult::Error(DecodeError::Version(VersionDecodeError::Invalid))
         );
     }
 
@@ -1091,7 +1091,7 @@ mod test {
         assert_ne!(bytes_decoded, buffer.len());
         assert_eq!(
             result,
-            DecodeResult::Error(DecodeError::Version(VersionError::Unknown))
+            DecodeResult::Error(DecodeError::Version(VersionDecodeError::Unknown))
         );
     }
 

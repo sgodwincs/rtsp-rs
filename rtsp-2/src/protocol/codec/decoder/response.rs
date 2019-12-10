@@ -50,7 +50,7 @@ use crate::header::value::{HeaderValue, HeaderValueError};
 use crate::reason::{ReasonPhrase, ReasonPhraseError};
 use crate::response::{Builder as ResponseBuilder, Response};
 use crate::status::{StatusCode, StatusCodeError};
-use crate::version::{Version, VersionError};
+use crate::version::{DecodeError as VersionDecodeError, Version};
 
 use crate::protocol::codec::decoder::{
     self, DecodeResult as GenericDecodeResult, BODY_DEFAULT_MAX_LENGTH, HEADER_DEFAULT_MAX_COUNT,
@@ -622,7 +622,7 @@ impl Decoder {
         }
 
         if buffer[8] != b' ' {
-            return Error(DecodeError::Version(VersionError::Invalid));
+            return Error(DecodeError::Version(VersionDecodeError::Invalid));
         }
 
         match Version::try_from(&buffer[0..8]) {
@@ -654,7 +654,7 @@ impl Decoder {
     ///
     /// use rtsp::header::name::HeaderName;
     /// use rtsp::protocol::codec::decoder::response::{DecodeError, Decoder, DecodeState};
-    /// use rtsp::version::VersionError;
+    /// use rtsp::version::VersionDecodeError;
     ///
     /// # fn main() {
     /// let buffer = "Bad Response!\r\nExtra garbage data";
@@ -663,7 +663,7 @@ impl Decoder {
     /// let (result, bytes_decoded) = decoder.decode(buffer);
     /// assert_eq!(
     ///     decoder.state(),
-    ///     DecodeState::Error(DecodeError::Version(VersionError::Invalid))
+    ///     DecodeState::Error(DecodeError::Version(VersionDecodeError::Invalid))
     /// );
     /// assert!(result.is_error());
     ///
@@ -775,7 +775,7 @@ pub enum DecodeError {
     UnsupportedVersion,
 
     /// There was an error decoding the version.
-    Version(VersionError),
+    Version(VersionDecodeError),
 }
 
 impl Error for DecodeError {}
@@ -831,8 +831,8 @@ impl From<StatusCodeError> for DecodeError {
     }
 }
 
-impl From<VersionError> for DecodeError {
-    fn from(value: VersionError) -> Self {
+impl From<VersionDecodeError> for DecodeError {
+    fn from(value: VersionDecodeError) -> Self {
         DecodeError::Version(value)
     }
 }
@@ -845,7 +845,7 @@ mod test {
     };
     use crate::reason::ReasonPhraseError;
     use crate::status::StatusCodeError;
-    use crate::version::VersionError;
+    use crate::version::VersionDecodeError;
 
     #[test]
     fn test_decoder_decode_body_invalid_content_length() {
@@ -993,7 +993,7 @@ mod test {
         assert_ne!(bytes_decoded, buffer.len());
         assert_eq!(
             result,
-            DecodeResult::Error(DecodeError::Version(VersionError::Invalid))
+            DecodeResult::Error(DecodeError::Version(VersionDecodeError::Invalid))
         );
     }
 
@@ -1006,7 +1006,7 @@ mod test {
         assert_ne!(bytes_decoded, buffer.len());
         assert_eq!(
             result,
-            DecodeResult::Error(DecodeError::Version(VersionError::Unknown))
+            DecodeResult::Error(DecodeError::Version(VersionDecodeError::Unknown))
         );
     }
 
