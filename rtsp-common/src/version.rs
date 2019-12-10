@@ -11,15 +11,15 @@ pub enum Version {
 
 impl Version {
     pub fn as_encoded(&self) -> &'static [u8] {
-        Self::as_str().as_bytes()
+        self.as_str().as_bytes()
     }
 
-    pub fn as_str(&self) -> &str {
+    pub fn as_str(&self) -> &'static str {
         use self::Version::*;
 
         match self {
-            Rtsp1_0 => b"RTSP/1.0",
-            Rtsp2_0 => b"RTSP/2.0",
+            Rtsp1_0 => "RTSP/1.0",
+            Rtsp2_0 => "RTSP/2.0",
         }
     }
 
