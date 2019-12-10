@@ -1,5 +1,5 @@
 [package]
 authors = ["Scott Godwin <sgodwincs@gmail.com>"]
 edition = "2018"
-name = "rtsp-core"
+name = "rtsp-common"
 version = "0.1.0"

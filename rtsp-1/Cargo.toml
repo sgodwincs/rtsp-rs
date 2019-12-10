@@ -5,4 +5,4 @@ name = "rtsp-1"
 version = "0.1.0"
 
 [dependencies]
-rtsp-core = { path = "../rtsp-core" }
+rtsp-common = { path = "../rtsp-common" }
