@@ -10,7 +10,7 @@ pub fn encode<TBody>(response: &Response<TBody>, buffer: &mut BytesMut)
 where
     TBody: AsRef<[u8]>,
 {
-    buffer.extend::<&[u8]>(response.version().as_ref());
+    buffer.extend::<&[u8]>(response.version().as_encoded());
     buffer.extend(b" ");
     buffer.extend(response.status_code().to_string().as_bytes());
     buffer.extend(b" ");

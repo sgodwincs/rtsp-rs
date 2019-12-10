@@ -14,7 +14,7 @@ where
     buffer.extend(b" ");
     buffer.extend(request.uri().to_string().as_bytes());
     buffer.extend(b" ");
-    buffer.extend::<&[u8]>(request.version().as_ref());
+    buffer.extend::<&[u8]>(request.version().as_encoded());
     buffer.extend(b"\r\n");
 
     let body_size = request.body().as_ref().len();
