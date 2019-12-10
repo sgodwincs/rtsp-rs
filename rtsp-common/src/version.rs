@@ -64,6 +64,12 @@ impl From<Version> for &'static [u8] {
     }
 }
 
+impl From<Version> for &'static str {
+    fn from(value: Version) -> Self {
+        value.as_str()
+    }
+}
+
 impl<'version> TryFrom<&'version [u8]> for Version {
     type Error = DecodeError;
 
