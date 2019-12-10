@@ -1,45 +1,6 @@
-[package]
-authors = ["Scott Godwin <sgodwincs@gmail.com>"]
-edition = "2018"
-name = "rtsp"
-version = "0.1.0"
-
-[[bench]]
-harness = false
-name = "decode"
-
-[[bench]]
-harness = false
-name = "encode"
-
-[[bench]]
-harness = false
-name = "uri"
-
-[dependencies]
-bytes = "0.4.12"
-chrono = "0.4.6"
-futures = "0.1.25"
-itertools = "0.8.0"
-lazy_static = "1.3.0"
-ordered-multimap = "0.2.2"
-rand = "0.6.5"
-tokio = "0.1.18"
-tokio-codec = "0.1.1"
-tokio-executor = "0.1.6"
-tokio-io = "0.1.12"
-tokio-tcp = "0.1.3"
-tokio-timer = "0.2.10"
-uriparse = "0.6.1"
-fnv = "1.0.6"
-linked_hash_set = "0.1.3"
-tower-service = "0.2.0"
-regex = "1.1.6"
-base64 = "0.10.1"
-
-[dependencies.rtp]
-git = "https://github.com/sgodwincs/rtp-rs"
-rev = "bc88ec0"
-
-[dev-dependencies]
-criterion = "0.2.5"
+[workspace]
+members = [
+    "rtsp-1",
+    "rtsp-2",
+    "rtsp-core",
+]

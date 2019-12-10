@@ -1,0 +1,8 @@
+[package]
+authors = ["Scott Godwin <sgodwincs@gmail.com>"]
+edition = "2018"
+name = "rtsp-1"
+version = "0.1.0"
+
+[dependencies]
+rtsp-core = { path = "../rtsp-core" }
