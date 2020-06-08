@@ -3,7 +3,6 @@ use std::convert::TryFrom;
 use std::f32;
 use std::fmt::{Error, Formatter};
 use std::hash::Hash;
-use std::hash::Hasher;
 use std::iter::{once, FromIterator};
 use std::ops::{Deref, DerefMut};
 use std::str;

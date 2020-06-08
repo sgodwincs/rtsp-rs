@@ -15,7 +15,6 @@ use tokio_timer::Delay;
 use crate::header::map::HeaderMapExtension;
 use crate::header::types::CSeq;
 use crate::protocol::codec::decoder::request::DecodeError as RequestDecodeError;
-use crate::protocol::codec::decoder::response::DecodeError as ResponseDecodeError;
 use crate::protocol::codec::{CodecEvent, DecodeError, Message, ProtocolError};
 use crate::protocol::connection::pending::{PendingRequestResponse, PendingRequestUpdate};
 use crate::protocol::connection::sender::SenderHandle;
