@@ -265,7 +265,15 @@ impl<'quality> TryFrom<&'quality str> for QualityParam {
 
 impl QualityParam {
     pub fn new(q_value: f32) -> Self {
-        let q_value = q_value.clamp(0.0_f32, 1.0_f32);
+        // clamp value
+        let q_value = if q_value < 0.0 {
+            0.0
+        } else if q_value > 1.0 {
+            1.0
+        } else {
+            q_value
+        };
+
         QualityParam(q_value.to_bits())
     }
 }

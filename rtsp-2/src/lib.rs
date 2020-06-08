@@ -1,4 +1,3 @@
-#![feature(clamp)]
 #![feature(int_error_matching)]
 
 mod syntax;
