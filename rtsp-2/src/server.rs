@@ -121,20 +121,13 @@ impl ConnectionService {
             }
             Err(_) => return Box::new(future::ok(BAD_REQUEST_RESPONSE.clone())),
         }
-
-        Box::new(future::ok(
-            Response::<()>::builder()
-                .with_body(BytesMut::new())
-                .build()
-                .unwrap(),
-        ))
     }
 }
 
 impl Service<Request<BytesMut>> for ConnectionService {
     type Response = Response<BytesMut>;
-    type Error = Box<Error + Send + 'static>;
-    type Future = Box<Future<Item = Self::Response, Error = Self::Error> + Send + 'static>;
+    type Error = Box<dyn Error + Send + 'static>;
+    type Future = Box<dyn Future<Item = Self::Response, Error = Self::Error> + Send + 'static>;
 
     fn call(&mut self, mut request: Request<BytesMut>) -> Self::Future {
         request.uri_mut().normalize();

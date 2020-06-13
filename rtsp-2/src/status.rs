@@ -175,11 +175,11 @@ impl StatusCode {
         use self::StatusCodeClass::*;
 
         match u16::from(self) {
-            100...199 => Informational,
-            200...299 => Success,
-            300...399 => Redirection,
-            400...499 => ClientError,
-            500...599 => ServerError,
+            100..=199 => Informational,
+            200..=299 => Success,
+            300..=399 => Redirection,
+            400..=499 => ClientError,
+            500..=599 => ServerError,
             _ => panic!("status code with invalid class"),
         }
     }
