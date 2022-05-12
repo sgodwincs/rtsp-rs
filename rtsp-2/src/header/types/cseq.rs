@@ -231,7 +231,7 @@ impl TryFrom<IntErrorKind> for CSeqError {
         match value {
             IntErrorKind::Empty => Ok(Empty),
             IntErrorKind::InvalidDigit => Ok(InvalidDigit),
-            IntErrorKind::Overflow => Ok(Overflow),
+            IntErrorKind::PosOverflow => Ok(Overflow),
             _ => Err(()),
         }
     }

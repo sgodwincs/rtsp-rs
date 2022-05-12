@@ -382,7 +382,7 @@ impl TryFrom<IntErrorKind> for TimeoutError {
         match value {
             IntErrorKind::Empty => Ok(Empty),
             IntErrorKind::InvalidDigit => Ok(InvalidDigit),
-            IntErrorKind::Overflow => Ok(Overflow),
+            IntErrorKind::PosOverflow => Ok(Overflow),
             _ => Err(()),
         }
     }
